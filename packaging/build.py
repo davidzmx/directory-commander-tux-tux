@@ -39,7 +39,7 @@ PORTABLE_TEXT = ("Este archivo activa el modo portable: la configuración se gua
                  "Si lo borras, el programa usará la configuración de tu usuario.\n")
 ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
 # Lo que Qt necesita del sistema y no viene en el paquete.
-DEB_DEPENDS = "libc6, libegl1, libgl1, libxkbcommon0, libxkbcommon-x11-0, libdbus-1-3, libfontconfig1, libglib2.0-0, libxcb-cursor0"
+DEB_DEPENDS = "libc6, libegl1, libgl1, libxkbcommon0, libxkbcommon-x11-0, libdbus-1-3, libfontconfig1, libglib2.0-0, libxcb-cursor0, libpulse0"
 
 
 def _architecture() -> str:

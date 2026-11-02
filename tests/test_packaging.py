@@ -1,6 +1,7 @@
 """Los paquetes: la versión portable, el .deb, el instalador y el cambio de nombre del programa."""
 from __future__ import annotations
 
+import ast
 import gzip
 import importlib.util
 import io
@@ -322,3 +323,31 @@ def test_the_link_to_the_styles_points_to_its_section(language, anchor):
     assert f"]({anchor})" in text
     title = next(line[3:] for line in text.splitlines() if line.startswith("## ") and ":" in line and ("Estilos" in line or "Styles" in line))
     assert "#" + title.lower().replace(":", "").replace(" ", "-") == anchor
+
+
+# ------------------------------------------------------------------ que arranque en cualquier sistema
+_WINDOWS_ONLY_MODULES = {"winreg", "msvcrt", "winsound", "_winapi"}
+_WINDOWS_ONLY_NAMES = {"WINFUNCTYPE", "windll", "oledll", "WinDLL", "OleDLL", "WinError", "HRESULT", "FormatError", "get_last_error", "set_last_error"}
+
+
+def _module_level_statements(tree):
+    """Lo que se ejecuta al importar, salvo lo que está dentro de un `if`: ahí se comprueba el sistema antes."""
+    for node in tree.body:
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            yield node
+        elif isinstance(node, ast.Try):
+            yield from (item for item in node.body if isinstance(item, (ast.Import, ast.ImportFrom)))
+
+
+@pytest.mark.parametrize("path", [os.path.join(root, name) for root, _folders, names in os.walk(os.path.join(ROOT, "directory_commander_tux_tux")) for name in names if name.endswith(".py")])
+def test_importing_does_not_need_windows(path):
+    """Un `from ctypes import WINFUNCTYPE` suelto impide arrancar en Linux, y en Windows no se nota."""
+    with open(path, encoding="utf-8") as source:
+        tree = ast.parse(source.read())
+    for node in _module_level_statements(tree):
+        if isinstance(node, ast.Import):
+            assert not {alias.name for alias in node.names} & _WINDOWS_ONLY_MODULES, path
+        else:
+            assert node.module not in _WINDOWS_ONLY_MODULES, path
+            if node.module == "ctypes":
+                assert not {alias.name for alias in node.names} & _WINDOWS_ONLY_NAMES, path

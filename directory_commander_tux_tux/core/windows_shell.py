@@ -9,7 +9,7 @@ from __future__ import annotations
 import ctypes
 import os
 import sys
-from ctypes import POINTER, WINFUNCTYPE, Structure, byref, c_char_p, c_int, c_uint, c_ulong, c_void_p, c_wchar_p, cast, sizeof
+from ctypes import POINTER, Structure, byref, c_char_p, c_int, c_uint, c_ulong, c_void_p, c_wchar_p, cast, sizeof
 from dataclasses import dataclass
 
 from .i18n import tr
@@ -69,7 +69,7 @@ def clean_items(items: list[ShellItem], own_verbs=OWN_VERBS, hidden_keys=()) -> 
 
 
 if AVAILABLE:
-    from ctypes import wintypes
+    from ctypes import WINFUNCTYPE, wintypes  # WINFUNCTYPE solo existe en Windows
 
     class _GUID(Structure):
         _fields_ = [("Data1", c_ulong), ("Data2", ctypes.c_ushort), ("Data3", ctypes.c_ushort), ("Data4", ctypes.c_ubyte * 8)]
