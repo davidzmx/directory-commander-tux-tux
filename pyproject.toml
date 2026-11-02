@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "directory-commander-tux-tux"
+version = "0.1.0"
+description = "Gestor de archivos de doble panel multiplataforma para Linux (KDE/GNOME) y Windows"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["file-manager", "dual-pane", "qt", "kde", "gnome"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: X11 Applications :: Qt",
+    "Environment :: Win32 (MS Windows)",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Desktop Environment :: File Managers",
+]
+# PySide6-Addons aporta Qt Multimedia, con el que el visor reproduce vídeo y audio.
+dependencies = ["PySide6-Essentials>=6.8,<7", "PySide6-Addons>=6.8,<7"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pyinstaller>=6"]
+
+[project.gui-scripts]
+directory-commander-tux-tux = "directory_commander_tux_tux.app:main"
+
+[tool.setuptools.packages.find]
+include = ["directory_commander_tux_tux*"]
+
+[tool.setuptools.package-data]
+directory_commander_tux_tux = ["resources/*", "languages/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+tmp_path_retention_count = 1
+tmp_path_retention_policy = "failed"

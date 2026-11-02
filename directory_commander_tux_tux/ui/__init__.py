@@ -1,0 +1,1 @@
+"""Interfaz Qt (PySide6)."""

@@ -1,0 +1,7 @@
+# Git normaliza el texto a LF. Los archivos que se usan en Linux deben tener LF siempre,
+# también en una copia hecha en Windows: un install.sh con CRLF no se ejecuta.
+* text=auto
+*.sh text eol=lf
+*.desktop text eol=lf
+*.png binary
+*.ico binary

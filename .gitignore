@@ -1,0 +1,25 @@
+# Entorno de Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Pruebas
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Paquetes generados
+build/
+dist/
+dist-nuevo/
+
+# Editores y sistema
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Archivos a medias de una operación interrumpida
+*.detuxpart

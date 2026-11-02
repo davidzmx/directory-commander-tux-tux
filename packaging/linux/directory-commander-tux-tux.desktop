@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Directory Commander Tux Tux
+GenericName=Gestor de archivos
+Comment=Gestor de archivos de doble panel
+Exec=directory-commander-tux-tux %F
+Icon=directory-commander-tux-tux
+Terminal=false
+Categories=Qt;System;FileTools;FileManager;
+MimeType=inode/directory;
+StartupWMClass=directory-commander-tux-tux

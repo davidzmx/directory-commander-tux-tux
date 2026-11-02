@@ -1,0 +1,605 @@
+"""Diálogos: renombrado en lote, colisiones y propiedades."""
+from __future__ import annotations
+
+import os
+
+from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtGui import QColor, QDesktopServices
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
+                               QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton,
+                               QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
+
+from ..core import bar_buttons, fsops, i18n, pane_colors, rename, shells, styles
+from ..core.config import config_dir
+from ..core.i18n import tr
+from ..core.listing import Entry, format_size, format_time
+from .background import run_bg
+from .bar_buttons_page import BarButtonsPage
+from . import theme
+from .color_button import ColorButton
+from .styles_page import StylesPage
+from .context_menu_pages import ContextMenuPages
+from .favorites_pages import FavoritesPage, RecentPage, FrequentFoldersPage, FrequentPointsPage
+from .preference_pages import PreferencePages
+from .sessions_page import SessionsPage
+from .system_pages import ComparePage, FileManagerPage, GitPage
+from .tab_settings_pages import TabSettingsPages
+
+
+class RenameDialog(QDialog):
+    """Vista previa en vivo: nada se toca en disco hasta aceptar, y aceptar exige un lote válido."""
+
+    def __init__(self, directory: str, entries: list[Entry], others: set[str], presets: dict, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(tr("Renombrar"))
+        self.resize(760, 520)
+        self.directory = directory
+        self.names = [e.name for e in entries]
+        self.others = others
+        self.presets = presets
+        self.new_names: list[str] = []
+
+        self.preset_box = QComboBox()
+        self.preset_box.addItem(tr("(sin preset)"))
+        self.preset_box.addItems(sorted(presets))
+        self.preset_box.currentTextChanged.connect(self._load_preset)
+        save_btn = QPushButton(tr("Guardar preset…"))
+        save_btn.clicked.connect(self._save_preset)
+        preset_row = QHBoxLayout()
+        preset_row.addWidget(self.preset_box, 1)
+        preset_row.addWidget(save_btn)
+
+        self.mode = QComboBox()
+        self.mode.addItem(tr("Buscar y reemplazar texto"), "simple")
+        self.mode.addItem(tr("Comodines (* y ?)"), "wildcard")
+        self.mode.addItem(tr("Expresión regular"), "regex")
+        self.pattern = QLineEdit()
+        self.replacement = QLineEdit()
+        self.replacement.setPlaceholderText(tr("Usa [#] para numerar; \\1 para grupos en regex"))
+        self.ignore_ext = QCheckBox(tr("No tocar la extensión"))
+        self.ignore_ext.setChecked(True)
+        self.case = QComboBox()
+        for label, value in ((tr("Sin cambios"), "none"), (tr("MAYÚSCULAS"), "upper"), (tr("minúsculas"), "lower"),
+                             (tr("Cada Palabra"), "title"), (tr("Primera letra"), "sentence")):
+            self.case.addItem(label, value)
+        self.seq_start = QSpinBox(minimum=0, maximum=10 ** 8, value=1)
+        self.seq_step = QSpinBox(minimum=1, maximum=10 ** 6, value=1)
+        self.seq_digits = QSpinBox(minimum=1, maximum=12, value=1)
+        seq_row = QHBoxLayout()
+        for label, widget in ((tr("Empezar en"), self.seq_start), (tr("Paso"), self.seq_step), (tr("Dígitos"), self.seq_digits)):
+            seq_row.addWidget(QLabel(label))
+            seq_row.addWidget(widget)
+        seq_row.addStretch(1)
+
+        form = QFormLayout()
+        form.addRow("Preset", preset_row)
+        form.addRow(tr("Modo"), self.mode)
+        form.addRow(tr("Buscar"), self.pattern)
+        form.addRow(tr("Reemplazar por"), self.replacement)
+        form.addRow(tr("Mayúsculas"), self.case)
+        form.addRow(tr("Numeración [#]"), seq_row)
+        form.addRow("", self.ignore_ext)
+
+        self.table = QTableWidget(len(self.names), 2)
+        self.table.setHorizontalHeaderLabels([tr("Nombre actual"), tr("Nombre nuevo")])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table.verticalHeader().hide()
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        for row, name in enumerate(self.names):
+            self.table.setItem(row, 0, QTableWidgetItem(name))
+            self.table.setItem(row, 1, QTableWidgetItem(name))
+        self.message = QLabel()
+        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addWidget(self.table, 1)
+        layout.addWidget(self.message)
+        layout.addWidget(self.buttons)
+
+        self.mode.currentIndexChanged.connect(self._update_preview)
+        self.pattern.textChanged.connect(self._update_preview)
+        self.replacement.textChanged.connect(self._update_preview)
+        self.ignore_ext.toggled.connect(self._update_preview)
+        self.case.currentIndexChanged.connect(self._update_preview)
+        for spin in (self.seq_start, self.seq_step, self.seq_digits):
+            spin.valueChanged.connect(self._update_preview)
+        if len(self.names) == 1:
+            stem = os.path.splitext(self.names[0])[0]
+            self.replacement.setText(stem)
+            self.pattern.setText(stem)
+        self._update_preview()
+
+    def spec(self) -> rename.RenameSpec:
+        return rename.RenameSpec(self.mode.currentData(), self.pattern.text(), self.replacement.text(),
+                                 self.ignore_ext.isChecked(), self.case.currentData(), self.seq_start.value(),
+                                 self.seq_step.value(), self.seq_digits.value())
+
+    def set_spec(self, spec: rename.RenameSpec) -> None:
+        self.mode.setCurrentIndex(self.mode.findData(spec.mode))
+        self.pattern.setText(spec.pattern)
+        self.replacement.setText(spec.replacement)
+        self.ignore_ext.setChecked(spec.ignore_ext)
+        self.case.setCurrentIndex(self.case.findData(spec.case))
+        self.seq_start.setValue(spec.seq_start)
+        self.seq_step.setValue(spec.seq_step)
+        self.seq_digits.setValue(spec.seq_digits)
+
+    def _update_preview(self) -> None:
+        ok_button = self.buttons.button(QDialogButtonBox.StandardButton.Ok)
+        try:
+            self.new_names = rename.compute_names(self.names, self.spec())
+        except ValueError as exc:
+            self.new_names = []
+            self.message.setText(f"⚠ {exc}")
+            ok_button.setEnabled(False)
+            return
+        problems = rename.find_problems(self.names, self.new_names, self.others)
+        for row, new in enumerate(self.new_names):
+            item = self.table.item(row, 1)
+            item.setText(new)
+            item.setForeground(QColor("#d04040") if row in problems else self.palette().text().color())
+            item.setToolTip(problems.get(row, ""))
+        changed = sum(1 for a, b in zip(self.names, self.new_names) if a != b)
+        if problems:
+            self.message.setText(tr("⚠ {count} con problemas: {value}", count=len(problems), value=next(iter(problems.values()))))
+        else:
+            self.message.setText(tr("Se renombrarán {changed} de {count} elementos", changed=changed, count=len(self.names)))
+        ok_button.setEnabled(not problems and changed > 0)
+
+    def _load_preset(self, name: str) -> None:
+        if name in self.presets:
+            self.set_spec(rename.RenameSpec.from_dict(self.presets[name]))
+
+    def _save_preset(self) -> None:
+        name, ok = QInputDialog.getText(self, tr("Guardar preset"), tr("Nombre:"))
+        if ok and name.strip():
+            name = name.strip()
+            if name not in self.presets:
+                self.preset_box.addItem(name)
+            self.presets[name] = self.spec().to_dict()
+            self.preset_box.setCurrentText(name)
+
+
+_ATTR_LABELS = {"r": tr("Solo lectura"), "h": tr("Oculto"), "s": tr("Sistema"), "a": tr("Listo para archivar"),
+                "ur": tr("Propietario: leer"), "uw": tr("Propietario: escribir"), "ux": tr("Propietario: ejecutar"),
+                "gr": tr("Grupo: leer"), "gw": tr("Grupo: escribir"), "gx": tr("Grupo: ejecutar"),
+                "or": tr("Otros: leer"), "ow": tr("Otros: escribir"), "ox": tr("Otros: ejecutar")}
+
+
+class SetAttrDialog(QDialog):
+    """Con varios elementos solo se aplican las casillas que cambie el usuario: una casilla
+    con estado mixto se queda intermedia y no toca esos atributos."""
+
+    def __init__(self, paths: list[str], parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(tr("Atributos"))
+        current = [fsops.get_attributes(p) for p in paths]
+        self.boxes: dict[str, QCheckBox] = {}
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(tr("{count} elemento(s)", count=len(paths))))
+        for key in current[0]:
+            box = QCheckBox(_ATTR_LABELS[key])
+            values = {c[key] for c in current}
+            if len(values) == 1:
+                box.setChecked(values.pop())
+            else:
+                box.setTristate(True)
+                box.setCheckState(Qt.CheckState.PartiallyChecked)
+            layout.addWidget(box)
+            self.boxes[key] = box
+        self._initial = {k: b.checkState() for k, b in self.boxes.items()}
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def changes(self) -> dict[str, bool]:
+        result = {}
+        for key, box in self.boxes.items():
+            state = box.checkState()
+            if state != self._initial[key] and state != Qt.CheckState.PartiallyChecked:
+                result[key] = state == Qt.CheckState.Checked
+        return result
+
+
+class PreferencesDialog(QDialog):
+    applied = Signal()  # se pulsó Aplicar: los cambios ya están en la configuración
+
+    def __init__(self, config, parent=None, sample_folder: str = "", sample_items: list[str] | None = None) -> None:
+        super().__init__(parent)
+        self.config = config
+        self.setWindowTitle(tr("Preferencias"))
+        self.resize(900, 640)
+        self.theme = QComboBox()
+        for label, value in ((tr("Oscuro"), "dark"), (tr("Claro"), "light"), (tr("Según el escritorio"), "auto")):
+            self.theme.addItem(label, value)
+        self.theme.setCurrentIndex(max(0, self.theme.findData(config.get("theme", "dark"))))
+        self.language_folder = getattr(config, "language_folder", "") or os.path.join(config_dir(), i18n.LANGUAGE_FOLDER)
+        self.language = QComboBox()
+        self.language.addItem(tr("Automático (idioma del sistema)"), i18n.AUTO)
+        for language in sorted(i18n.available_languages(self.language_folder).values(), key=lambda item: item["name"].casefold()):
+            self.language.addItem(language["name"], language["code"])
+        self.language.setCurrentIndex(max(0, self.language.findData(config.get("language", i18n.AUTO))))
+        self.language.setToolTip(tr("Se aplica al reiniciar el programa"))
+        languages_folder = QPushButton(tr("Carpeta de idiomas"))
+        languages_folder.setToolTip(tr("Los idiomas que dejes en esta carpeta aparecen en la lista la próxima vez que abras las preferencias"))
+        languages_folder.clicked.connect(self._open_language_folder)
+        new_language = QPushButton(tr("Crear traducción"))
+        new_language.setToolTip(tr("Crea en la carpeta de idiomas un archivo con todos los textos del programa, listo para traducirlos"))
+        new_language.clicked.connect(self._create_translation)
+        language_row = QHBoxLayout()
+        language_row.addWidget(self.language, 1)
+        language_row.addWidget(languages_folder)
+        language_row.addWidget(new_language)
+        self.dest_tint = QCheckBox(tr("Teñir el fondo del panel de destino"))
+        self.dest_tint.setChecked(config.get("dest_tint", True))
+        self.confirm = QCheckBox(tr("Confirmar antes de eliminar"))
+        self.confirm.setChecked(config.get("confirm_delete", True))
+        self.hover_info = QCheckBox(tr("Mostrar información al pasar el ratón por un archivo"))
+        self.hover_info.setChecked(config.get("hover_info", True))
+        self.level_colors = QCheckBox(tr("Mostrar en otro color los niveles de las carpetas desplegadas"))
+        self.level_colors.setChecked(config.get("tree_level_colors", True))
+        self.open_images = QComboBox()
+        for label, value in ((tr("Visor interno"), "viewer"), (tr("Aplicación predeterminada del sistema"), "system")):
+            self.open_images.addItem(label, value)
+        self.open_images.setCurrentIndex(max(0, self.open_images.findData(config.get("open_images", "viewer"))))
+        self.open_videos = QComboBox()
+        for label, value in ((tr("Visor interno"), "viewer"), (tr("Aplicación predeterminada del sistema"), "system")):
+            self.open_videos.addItem(label, value)
+        self.open_videos.setCurrentIndex(max(0, self.open_videos.findData(config.get("open_videos", "viewer"))))
+        self.open_archives = QComboBox()
+        for label, value in ((tr("Aplicación predeterminada del sistema"), "system"), (tr("Explorarlos aquí, como una carpeta"), "browse")):
+            self.open_archives.addItem(label, value)
+        self.open_archives.setCurrentIndex(max(0, self.open_archives.findData(config.get("open_archives", "system"))))
+        self.panel_order = QComboBox()
+        self.panel_order.addItem(tr("Visor arriba y metadatos abajo"), True)
+        self.panel_order.addItem(tr("Metadatos arriba y visor abajo"), False)
+        self.panel_order.setCurrentIndex(0 if config.get("viewer_above_metadata", True) else 1)
+        self.ffmpeg_dir = QLineEdit(config.get("ffmpeg_dir", ""))
+        self.ffmpeg_dir.setPlaceholderText(tr("Opcional: carpeta con ffmpeg, para ver un fotograma de los vídeos"))
+        browse = QPushButton(tr("Elegir…"))
+        browse.clicked.connect(self._choose_ffmpeg)
+        ffmpeg_row = QHBoxLayout()
+        ffmpeg_row.addWidget(self.ffmpeg_dir, 1)
+        ffmpeg_row.addWidget(browse)
+        form = QFormLayout()
+        form.addRow(tr("Idioma:"), language_row)
+        form.addRow(tr("Tema:"), self.theme)
+        form.addRow("", self.dest_tint)
+        form.addRow("", self.confirm)
+        form.addRow("", self.hover_info)
+        form.addRow("", self.level_colors)
+        form.addRow(tr("Abrir las imágenes con:"), self.open_images)
+        form.addRow(tr("Abrir los vídeos con:"), self.open_videos)
+        form.addRow(tr("Abrir los comprimidos con:"), self.open_archives)
+        self.unfold_archives = QCheckBox(tr("Desplegar los comprimidos en la lista, como las carpetas"))
+        self.unfold_archives.setChecked(bool(config.get("unfold_archives", True)))
+        form.addRow("", self.unfold_archives)
+        form.addRow(tr("Con el visor y los metadatos a la vez:"), self.panel_order)
+        self._custom_schemes = pane_colors.clean_customs(config.get("pane_color_customs"))
+        self.pane_scheme = QComboBox()
+        for key, (label, _colors) in pane_colors.BUILTIN_SCHEMES.items():
+            self.pane_scheme.addItem(tr(label), key)
+        for custom in self._custom_schemes:
+            self.pane_scheme.addItem(custom["name"], pane_colors.custom_key(custom["name"]))
+        self.pane_scheme.setCurrentIndex(max(0, self.pane_scheme.findData(config.get("pane_color_scheme", pane_colors.DEFAULT_SCHEME))))
+        new_scheme = QPushButton(tr("Nueva…"))
+        new_scheme.setToolTip(tr("Crea una combinación a partir de los colores que se ven"))
+        new_scheme.clicked.connect(self._new_pane_scheme)
+        self.delete_scheme = QPushButton(tr("Eliminar"))
+        self.delete_scheme.clicked.connect(self._delete_pane_scheme)
+        scheme_row = QHBoxLayout()
+        scheme_row.addWidget(self.pane_scheme, 1)
+        scheme_row.addWidget(new_scheme)
+        scheme_row.addWidget(self.delete_scheme)
+        form.addRow(tr("Colores de los paneles:"), scheme_row)
+        self.pane_colors = {role: ColorButton(title, "", "#000000") for role, title in (("source", tr("Panel activo")), ("dest", tr("Panel de destino")), ("other", tr("Otros paneles")))}
+        colors_row = QHBoxLayout()
+        for role, button in self.pane_colors.items():
+            colors_row.addWidget(QLabel(button.title + ":"))
+            colors_row.addWidget(button)
+            button.chosen.connect(lambda r=role: self._scheme_color_chosen(r))
+        colors_row.addStretch(1)
+        form.addRow("", colors_row)
+        self.path_pale_light = QCheckBox(tr("En el tema claro"))
+        self.path_pale_light.setChecked(bool(config.get("pane_path_pale_light", False)))
+        self.path_pale_dark = QCheckBox(tr("En el tema oscuro"))
+        self.path_pale_dark.setChecked(bool(config.get("pane_path_pale_dark", False)))
+        pale_row = QHBoxLayout()
+        pale_row.addWidget(self.path_pale_light)
+        pale_row.addWidget(self.path_pale_dark)
+        pale_row.addStretch(1)
+        form.addRow(tr("Ruta más tenue que la barra:"), pale_row)
+        self.path_folder_menus = QCheckBox(tr("Mostrar las subcarpetas al pulsar el › de la ruta"))
+        self.path_folder_menus.setChecked(bool(config.get("path_folder_menus", False)))
+        form.addRow("", self.path_folder_menus)
+        self.theme.currentIndexChanged.connect(self._show_pane_scheme)
+        self.pane_scheme.currentIndexChanged.connect(self._show_pane_scheme)
+        self._show_pane_scheme()
+        form.addRow("FFmpeg:", ffmpeg_row)
+        self.exiftool_dir = QLineEdit(config.get("exiftool_dir", ""))
+        self.exiftool_dir.setPlaceholderText(tr("Carpeta con exiftool, para el panel de metadatos. Vacío: se busca en el PATH"))
+        browse_exiftool = QPushButton(tr("Elegir…"))
+        browse_exiftool.clicked.connect(self._choose_exiftool)
+        exiftool_row = QHBoxLayout()
+        exiftool_row.addWidget(self.exiftool_dir, 1)
+        exiftool_row.addWidget(browse_exiftool)
+        form.addRow("ExifTool:", exiftool_row)
+        self.terminal_shell = QComboBox()
+        for shell in shells.available_shells():
+            self.terminal_shell.addItem(shell.label, shell.key)
+        self.terminal_shell.addItem(tr("Otro programa…"), shells.CUSTOM)
+        self.terminal_shell.setCurrentIndex(max(0, self.terminal_shell.findData(config.get("terminal_shell", ""))))
+        self.terminal_command = QLineEdit(config.get("terminal_command", ""))
+        self.terminal_command.setPlaceholderText(tr("Programa y sus argumentos"))
+        self.browse_terminal = QPushButton(tr("Elegir…"))
+        self.browse_terminal.clicked.connect(self._choose_terminal)
+        terminal_row = QHBoxLayout()
+        terminal_row.addWidget(self.terminal_shell)
+        terminal_row.addWidget(self.terminal_command, 1)
+        terminal_row.addWidget(self.browse_terminal)
+        form.addRow(tr("Terminal:"), terminal_row)
+        form.addRow("", QLabel(tr("Con esta se abren las terminales. Cada una se puede cambiar después con la lista de su barra de título.")))
+        self.general_terminal_full_width = QCheckBox(tr("Con los paneles en vertical, la terminal general ocupa todo el ancho de la ventana, también bajo el árbol de carpetas"))
+        self.general_terminal_full_width.setChecked(bool(config.get("general_terminal_full_width", False)))
+        form.addRow("", self.general_terminal_full_width)
+        self.find_place = QComboBox()
+        self.find_place.addItem(tr("En una ventana aparte"), "window")
+        self.find_place.addItem(tr("Abajo, en la ventana principal"), "bottom")
+        self.find_place.setCurrentIndex(max(0, self.find_place.findData(config.get("find_panel_place", "window"))))
+        form.addRow(tr("Panel de buscar:"), self.find_place)
+        self.terminal_shell.currentIndexChanged.connect(self._terminal_choice_changed)
+        self._terminal_choice_changed()
+        general = QWidget()
+        general_layout = QVBoxLayout(general)
+        general_layout.addLayout(form)
+        general_layout.addStretch(1)
+        self.tabs = TabSettingsPages(config.get("folder_tabs"))
+        self.pages = PreferencePages()
+        self.pages.addTab(general, tr("General"))
+        for title, page in self.tabs.pages:
+            self.pages.addTab(page, title, tr("Pestañas"))
+        self.menus = ContextMenuPages(config, sample_folder, sample_items)
+        self.shell_items = self.menus.shell_items
+        for title, page in self.menus.pages:
+            self.pages.addTab(page, title, tr("Menús"))
+        self.bar_buttons = BarButtonsPage(config)
+        self.pages.addTab(self.bar_buttons, tr("Barras de botones"), tr("Barras y estilos"))
+        self.styles_page = StylesPage(config)
+        self.pages.addTab(self.styles_page, tr("Estilos"), tr("Barras y estilos"))
+        self.favorites_page = FavoritesPage(config)
+        self.recent_page = RecentPage(config)
+        self.smart_page = FrequentFoldersPage(config)
+        self.points_page = FrequentPointsPage(config)
+        self.pages.addTab(self.favorites_page, tr("Lista de Favoritos"), tr("Rutas frecuentes"))
+        self.pages.addTab(self.recent_page, tr("Lista de Recientes"), tr("Rutas frecuentes"))
+        self.pages.addTab(self.smart_page, tr("Favoritos inteligentes"), tr("Rutas frecuentes"))
+        self.pages.addTab(self.points_page, tr("Puntaje"), tr("Rutas frecuentes"))
+        self.sessions_page = SessionsPage(config)
+        self.pages.addTab(self.sessions_page, tr("Sesiones"))
+        self.git_page = GitPage(config)
+        self.git_page.barRequested.connect(lambda: self.show_bars(bar_buttons.GIT))
+        self.pages.addTab(self.git_page, tr("Git"))
+        self.compare_page = ComparePage(config)
+        self.pages.addTab(self.compare_page, tr("Comparar archivos"))
+        self.file_manager_page = FileManagerPage(config)
+        self.pages.addTab(self.file_manager_page, tr("Administrador de archivos"))
+        self.pages.currentChanged.connect(self._page_changed)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Apply | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(tr("Aceptar"))
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(tr("Cancelar"))
+        self.apply_button = buttons.button(QDialogButtonBox.StandardButton.Apply)
+        self.apply_button.setText(tr("Aplicar"))
+        self.apply_button.clicked.connect(self.apply)
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.pages, 1)
+        layout.addWidget(buttons)
+
+    def apply(self) -> None:
+        """Aplica los cambios sin cerrar la ventana."""
+        self.apply_to(self.config)
+        self.applied.emit()
+
+    def show_bars(self, bar: str = "") -> None:
+        """Abre la página de las barras de botones, en esa barra si se indica."""
+        if bar == bar_buttons.STYLES:
+            self.show_styles()
+            return
+        self.pages.setCurrentWidget(self.bar_buttons)
+        self.bar_buttons.show_bar(bar)
+
+    def show_styles(self) -> None:
+        self.pages.setCurrentWidget(self.styles_page)
+
+    def show_tabs(self) -> None:
+        self.pages.setCurrentWidget(self.tabs.pages[0][1])
+
+    def show_favorites(self) -> None:
+        self.pages.setCurrentWidget(self.favorites_page)
+
+    def show_sessions(self) -> None:
+        self.pages.setCurrentWidget(self.sessions_page)
+
+    def _page_changed(self, _index: int) -> None:
+        if self.pages.currentWidget() is self.menus.shell_page:
+            self.menus.load_shell_options()
+
+    def _open_language_folder(self) -> None:
+        os.makedirs(self.language_folder, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(self.language_folder))
+
+    def _create_translation(self) -> None:
+        try:
+            path = i18n.write_template(self.language_folder)
+        except OSError as exc:
+            QMessageBox.warning(self, tr("Crear traducción"), str(exc))
+            return
+        QMessageBox.information(self, tr("Crear traducción"), tr(
+            "Se creó {name}.\nCambia su nombre y su código, escribe las traducciones y vuelve a abrir las preferencias. "
+            "Lo que dejes vacío se mostrará en español.", name=os.path.basename(path)))
+        QDesktopServices.openUrl(QUrl.fromLocalFile(self.language_folder))
+
+    def _choose_ffmpeg(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, tr("Carpeta que contiene ffmpeg"), self.ffmpeg_dir.text())
+        if folder:
+            self.ffmpeg_dir.setText(os.path.normpath(folder))
+
+    def _choose_exiftool(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, tr("Carpeta que contiene exiftool"), self.exiftool_dir.text())
+        if folder:
+            self.exiftool_dir.setText(os.path.normpath(folder))
+
+    def _show_pane_scheme(self) -> None:
+        """Los colores de la combinación con el tema elegido aquí. Las que trae el programa no se cambian: se crea otra a partir de ellas."""
+        base = theme.resolve(self.theme.currentData())
+        key = self.pane_scheme.currentData()
+        colors = pane_colors.scheme_colors(key, self._custom_schemes, base.name)
+        custom = key not in pane_colors.BUILTIN_SCHEMES
+        for role, button in self.pane_colors.items():
+            button.set_default(getattr(base, f"bar_{role}"))
+            button.set_value(colors.get(role, ""))
+            button.setEnabled(custom)
+        self.delete_scheme.setEnabled(custom)
+
+    def _scheme_color_chosen(self, role: str) -> None:
+        for custom in self._custom_schemes:
+            if pane_colors.custom_key(custom["name"]) == self.pane_scheme.currentData():
+                custom[role] = self.pane_colors[role].value
+
+    def _new_pane_scheme(self) -> None:
+        name, accepted = QInputDialog.getText(self, tr("Nueva combinación de colores"), tr("Nombre:"), text=tr("Mi combinación"))
+        name = name.strip()
+        if not accepted or not name:
+            return
+        taken = [custom["name"] for custom in self._custom_schemes]
+        name = styles.unique_name(name, taken)
+        self._custom_schemes.append({"name": name, **{role: button.value or button.default for role, button in self.pane_colors.items()}})
+        self.pane_scheme.addItem(name, pane_colors.custom_key(name))
+        self.pane_scheme.setCurrentIndex(self.pane_scheme.count() - 1)
+
+    def _delete_pane_scheme(self) -> None:
+        key = self.pane_scheme.currentData()
+        if key not in pane_colors.BUILTIN_SCHEMES:
+            self._custom_schemes = [custom for custom in self._custom_schemes if pane_colors.custom_key(custom["name"]) != key]
+            self.pane_scheme.removeItem(self.pane_scheme.currentIndex())
+            self.pane_scheme.setCurrentIndex(self.pane_scheme.findData(pane_colors.DEFAULT_SCHEME))
+
+    def _terminal_choice_changed(self) -> None:
+        custom = self.terminal_shell.currentData() == shells.CUSTOM
+        self.terminal_command.setVisible(custom)
+        self.browse_terminal.setVisible(custom)
+
+    def _choose_terminal(self) -> None:
+        path, _filter = QFileDialog.getOpenFileName(self, tr("Programa de la terminal"))
+        if path:
+            path = os.path.normpath(path)
+            self.terminal_command.setText(f'"{path}"' if " " in path else path)
+
+    def apply_to(self, config) -> None:
+        config["language"] = self.language.currentData()
+        config["theme"] = self.theme.currentData()
+        config["dest_tint"] = self.dest_tint.isChecked()
+        config["confirm_delete"] = self.confirm.isChecked()
+        config["hover_info"] = self.hover_info.isChecked()
+        config["open_images"] = self.open_images.currentData()
+        config["open_videos"] = self.open_videos.currentData()
+        config["open_archives"] = self.open_archives.currentData()
+        config["tree_level_colors"] = self.level_colors.isChecked()
+        config["viewer_above_metadata"] = bool(self.panel_order.currentData())
+        config["shell_menu_items"] = self.shell_items.isChecked()
+        config["context_menus"] = self.menus.values()
+        config["ffmpeg_dir"] = self.ffmpeg_dir.text().strip()
+        config["folder_tabs"] = self.tabs.values()
+        config["bar_buttons"] = self.bar_buttons.values()
+        config["bar_order"] = self.bar_buttons.order_values()
+        self.bar_buttons.apply_git_to(config)
+        self.styles_page.apply_to(config)  # detrás de las barras: un nombre cambiado debe cambiar también en ellas
+        config["exiftool_dir"] = self.exiftool_dir.text().strip()
+        command = self.terminal_command.text().strip()
+        # La primera es la predeterminada: sin guardarla, sigue siéndolo aunque esta cambie o se instale otra.
+        chosen = self.terminal_shell.currentData()
+        config["terminal_shell"] = "" if self.terminal_shell.currentIndex() == 0 or (chosen == shells.CUSTOM and not command) else chosen
+        config["terminal_command"] = command
+        config["general_terminal_full_width"] = self.general_terminal_full_width.isChecked()
+        config["pane_color_scheme"] = self.pane_scheme.currentData()
+        config["saved_sessions"] = self.sessions_page.values()
+        config["restore_session"] = self.sessions_page.restore.isChecked()
+        config["find_panel_place"] = self.find_place.currentData()
+        self.compare_page.apply_to(config)
+        self.git_page.apply_to(config)
+        self.file_manager_page.apply_to(config)
+        config["unfold_archives"] = self.unfold_archives.isChecked()
+        config["path_folder_menus"] = self.path_folder_menus.isChecked()
+        config["pane_path_pale_light"] = self.path_pale_light.isChecked()
+        config["pane_path_pale_dark"] = self.path_pale_dark.isChecked()
+        config["pane_color_customs"] = pane_colors.clean_customs(self._custom_schemes)
+        config["favorites"] = self.favorites_page.values()
+        config["favorites_autosort"] = self.favorites_page.auto_sort.isChecked()
+        self.recent_page.apply_to(config)
+        self.smart_page.apply_to(config, self.points_page.values())
+
+
+class PropertiesDialog(QDialog):
+    """El tamaño de una carpeta grande puede tardar: se calcula aparte y se cancela al cerrar."""
+
+    def __init__(self, entries: list[Entry], parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(tr("Propiedades"))
+        self.resize(460, 240)
+        form = QFormLayout()
+        if len(entries) == 1:
+            entry = entries[0]
+            form.addRow(tr("Nombre:"), self._value(entry.name))
+            form.addRow(tr("Ubicación:"), self._value(os.path.dirname(entry.path)))
+            form.addRow(tr("Tipo:"), self._value(entry.type_label))
+            form.addRow(tr("Modificado:"), self._value(format_time(entry.mtime)))
+            form.addRow(tr("Atributos:"), self._value(entry.attrs))
+            if entry.is_link:
+                try:
+                    form.addRow(tr("Destino del enlace:"), self._value(os.path.realpath(entry.path)))
+                except OSError:
+                    pass
+        else:
+            form.addRow(tr("Elementos:"), self._value(str(len(entries))))
+        self.size_label = self._value(tr("Calculando…"))
+        form.addRow(tr("Tamaño:"), self.size_label)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.reject)
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addStretch(1)
+        layout.addWidget(buttons)
+        self._closed = False
+        paths = [e.path for e in entries]
+
+        def measure(sink):
+            sizes = [fsops.tree_size(path, sink) for path in paths]
+            return sum(s[0] for s in sizes), sum(s[1] for s in sizes)
+
+        self._measure = run_bg(measure, self._measured, lambda _exc: self._measure_failed())
+
+    def _measured(self, value: tuple[int, int]) -> None:
+        if not self._closed:
+            size, count = value
+            self.size_label.setText(tr("{value} ({size:,} bytes) en {count:,} archivos", value=format_size(size), size=size, count=count))
+
+    def _measure_failed(self) -> None:
+        if not self._closed:
+            self.size_label.setText(tr("No se pudo calcular"))
+
+    def done(self, result: int) -> None:
+        self._closed = True
+        self._measure.cancel()
+        super().done(result)
+
+    @staticmethod
+    def _value(text: str) -> QLabel:
+        label = QLabel(text)
+        label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        label.setWordWrap(True)
+        return label
