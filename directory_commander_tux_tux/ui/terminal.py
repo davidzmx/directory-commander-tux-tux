@@ -131,6 +131,8 @@ class TerminalView(QAbstractScrollArea):
         self.setFrameShape(QAbstractScrollArea.Shape.NoFrame)
         self.setMinimumSize(120, 60)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        if sys.platform != "win32":
+            self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)  # si apareciese con el primer historial, la terminal se estrecharía y recortaría lo ya escrito
         self.viewport().setCursor(Qt.CursorShape.IBeamCursor)
         font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
         font.setFamilies([*_FONT_FAMILIES, font.family()])
@@ -260,17 +262,18 @@ class TerminalView(QAbstractScrollArea):
             self._follow_timer.start()
 
     def _data_arrived(self, generation: int, data: bytes) -> None:
-        """Desde el hilo de lectura. El de un intérprete ya sustituido no debe tocar nada: la ventana puede estar cerrándose."""
-        if generation != self._generation:
+        """Desde el hilo de lectura. El de un intérprete ya sustituido no debe tocar nada: la ventana puede estar cerrándose.
+        El nuevo puede escribir antes de que `_open_session` anote su número, y un intérprete rápido perdería así su indicador."""
+        if generation < self._generation:
             return
         self._credits.acquire(timeout=_PENDING_WAIT_SECONDS)
-        if generation == self._generation:
+        if generation >= self._generation:
             self._received.emit(generation, data)
         else:
             self._credits.release()
 
     def _exit_arrived(self, generation: int) -> None:
-        if generation == self._generation:
+        if generation >= self._generation:
             self._ended.emit(generation)
 
     def _feed(self, generation: int, data: bytes) -> None:

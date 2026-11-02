@@ -249,6 +249,14 @@ def test_ffprobe_output_is_parsed(tmp_path, monkeypatch):
     assert (info.title, info.artist) == ("Tema", "Banda")
 
 
+def test_a_file_without_tracks_is_not_media_for_ffprobe(tmp_path, monkeypatch):
+    path = tmp_path / "a.ogg"
+    path.write_bytes(b"OggS")
+    monkeypatch.setattr(media_info, "find_tool", lambda *a: "ffprobe")
+    monkeypatch.setattr(media_info, "_run_tool", lambda args: b'''{"streams": [], "format": {"nb_streams": 0}}''')
+    assert read_media_info(str(path)) is None
+
+
 def test_tool_failure_is_quiet(monkeypatch):
     def boom(*a, **k):
         raise subprocess.TimeoutExpired("ffmpeg", 1)

@@ -53,6 +53,7 @@ def window(tree, monkeypatch):
     settle(60)
     yield main
     main.jobs.cancel_all()
+    wait_until(lambda: not main.jobs.running)  # un trabajo aún sin terminar haría que cerrar preguntase y la prueba se quedase esperando
     if main.find_panel._call:
         main.find_panel._call.cancel()
         wait_until(lambda: not main.find_panel.is_running)

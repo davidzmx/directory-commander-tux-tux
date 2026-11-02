@@ -189,10 +189,17 @@ def test_text_found_after_the_first_block_and_across_two(tmp_path):
     assert names_of(run_search(spec(tmp_path, content={"text": "aguja"}))) == ["grande.txt"]
 
 
-@pytest.mark.parametrize("encoding, utf8, found", [("utf-16", False, True), ("utf-8-sig", False, True), ("utf-8", True, True)])
+@pytest.mark.parametrize("encoding, utf8, found", [pytest.param("utf-16", False, True, marks=pytest.mark.skipif(sys.platform != "win32", reason="en Linux busca grep, que no lee UTF-16")),
+                                                   ("utf-8-sig", False, True), ("utf-8", True, True)])
 def test_text_encodings(tmp_path, encoding, utf8, found):
     (tmp_path / "a.txt").write_bytes("camión azul".encode(encoding))
     assert bool(run_search(spec(tmp_path, content={"text": "camión", "utf8": utf8})).paths) is found
+
+
+def test_utf16_is_read_when_the_program_itself_reads_the_text(tmp_path):
+    """En Linux, «Ignorar acentos» es lo que hace que no busque grep."""
+    (tmp_path / "a.txt").write_bytes("camión azul".encode("utf-16"))
+    assert run_search(spec(tmp_path, content={"text": "camion", "diacritics": True})).paths
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="en Linux el texto se lee siempre como UTF-8")
@@ -311,7 +318,7 @@ def command_of(root="/datos", **changes):
 
 def test_command_for_a_plain_name():
     command = command_of(name={"text": "*mascot*"})
-    assert command.argv[:4] == ["find", "/datos", "-mindepth", "1"]
+    assert command.argv[:5] == ["find", "-H", "/datos", "-mindepth", "1"]
     assert "-iname" in command.argv and "*mascot*" in command.argv and command.argv[-1] == "-print0"
     assert not command.python_checks
 
@@ -398,7 +405,7 @@ def test_rules_become_an_expression():
 
 def test_description_can_be_pasted_in_a_terminal():
     text = describe_command(command_of(name={"text": "con espacio"}, exclude=["/proc/*"]))
-    assert text.startswith("find /datos") and "'*con espacio*'" in text and r"\(" in text and "-print0" in text
+    assert text.startswith("find -H /datos") and "'*con espacio*'" in text and r"\(" in text and "-print0" in text
     assert "#" not in text
     assert "\n# " in describe_command(command_of(archives=True))
 
@@ -448,3 +455,88 @@ def test_archives_without_tool_or_error_do_not_stop_the_search(tree):
     found = run_search(spec(tree, name={"text": "nota"}, archives=True))
     assert names_of(found) == ["nota.txt"] and str(tree / "roto.zip") in found.denied
     assert archive is not None
+
+
+# ---- lo que solo se ve con el `find` y el `grep` de Linux ----
+needs_linux = pytest.mark.skipif(sys.platform == "win32", reason="busca con find y grep solo en Linux")
+
+
+@needs_linux
+@pytest.mark.parametrize("content", [{"text": "aguja"}, {"text": "aguja", "diacritics": True}])
+def test_a_pipe_in_the_folder_does_not_hang_the_search_of_text(tmp_path, content):
+    (tmp_path / "con.txt").write_text("aguja", encoding="utf-8")
+    (tmp_path / "enlace.txt").symlink_to(tmp_path / "con.txt")
+    os.mkfifo(tmp_path / "tubo")
+    limit = time.monotonic() + 10
+    found = file_search.run_search(spec(tmp_path, content=content), lambda: time.monotonic() > limit)
+    assert not found.cancelled
+    assert sorted(os.path.basename(path) for path in found.paths) == ["con.txt", "enlace.txt"]
+
+
+@needs_linux
+def test_cancelling_is_noticed_while_find_writes_nothing_and_ends_what_it_runs(tmp_path, monkeypatch):
+    os.mkfifo(tmp_path / "tubo")
+    monkeypatch.setattr(file_search, "_grep_tests", lambda _query: ["-exec", "grep", "-q", "aguja", "--", "{}", ";"])  # sin la protección: se queda leyendo la tubería
+    limit = time.monotonic() + 0.3
+    spawned = []
+    real = subprocess.Popen
+
+    def remember(*arguments, **options):
+        spawned.append(real(*arguments, **options))
+        return spawned[-1]
+
+    monkeypatch.setattr(file_search.subprocess, "Popen", remember)
+    found = file_search.run_search(spec(tmp_path, content={"text": "aguja"}), lambda: time.monotonic() > limit)
+    assert found.cancelled and time.monotonic() - limit < 5
+    end = time.monotonic() + 5  # el sistema tarda un poco en recoger al grep, que se ha quedado sin padre
+    with pytest.raises(ProcessLookupError):
+        while time.monotonic() < end:
+            os.killpg(spawned[0].pid, 0)
+            time.sleep(0.05)
+
+
+@needs_linux
+def test_a_folder_that_is_a_link_is_searched(tmp_path):
+    (tmp_path / "real").mkdir()
+    (tmp_path / "real" / "nota.txt").write_text("x", encoding="utf-8")
+    (tmp_path / "enlace").symlink_to(tmp_path / "real", target_is_directory=True)
+    found = file_search.run_search(spec(tmp_path / "enlace", name=query("nota")))
+    assert [os.path.basename(path) for path in found.paths] == ["nota.txt"]
+
+
+@needs_linux
+@pytest.mark.parametrize("test", [{"op": "after", "first": "2000-01-01"}, {"op": "within", "amount": 1, "unit": "days"}])
+def test_the_creation_date_is_not_asked_of_find(tmp_path, test):
+    """`find -newerBt` termina con un error en cuanto se le pide, y no se encontraría nada."""
+    (tmp_path / "nota.txt").write_text("x", encoding="utf-8")
+    state = spec(tmp_path, date={**test, "field": "created"})
+    assert not any(word.startswith("-newerB") or word == "-Bmin" for word in build_command(state).argv)
+    assert [os.path.basename(path) for path in file_search.run_search(state).paths] == ["nota.txt"]
+
+
+@needs_linux
+@pytest.mark.skipif(not hasattr(os, "geteuid") or os.geteuid() == 0, reason="root puede leerlo todo")
+def test_a_folder_without_permission_is_reported(tmp_path):
+    closed = tmp_path / "cerrada"
+    closed.mkdir()
+    closed.chmod(0)
+    try:
+        found = file_search.run_search(spec(tmp_path, name=query("nada")))
+    finally:
+        closed.chmod(0o755)
+    assert found.denied == [str(closed)]
+
+
+def test_a_failure_of_find_is_not_an_empty_result():
+    found = file_search.Found()
+    with pytest.raises(OSError):
+        file_search._report_find_errors("find: predicado inválido `-x'\n".encode(), 1, found)
+
+
+@needs_linux
+def test_wildcards_in_the_text_need_no_escapes_that_grep_complains_about(tmp_path):
+    (tmp_path / "a.txt").write_text("hola - mundo (1) a.b+c\n", encoding="utf-8")
+    argv = build_command(spec(tmp_path, content={"text": "hola - m*(1) a.b+c", "wildcards": True})).argv
+    pattern = argv[argv.index("-e") + 1]
+    done = subprocess.run(["grep", "-E", "-e", pattern, str(tmp_path / "a.txt")], capture_output=True)
+    assert done.returncode == 0 and done.stderr == b""

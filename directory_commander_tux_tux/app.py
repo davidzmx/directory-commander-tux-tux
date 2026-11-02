@@ -12,6 +12,7 @@ from . import APP_ID, APP_NAME, __version__
 from .core import default_manager, i18n
 from .core.config import Config
 from .core.i18n import tr
+from .core.pty_session import restore_library_path
 
 
 def _choose_language(config: Config) -> None:
@@ -36,6 +37,7 @@ def _paths_for_the_explorer(paths: list[str], config: Config) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    restore_library_path()
     config = Config()
     _choose_language(config)  # antes de importar la interfaz, que calcula algunos textos al importarse
     parser = argparse.ArgumentParser(prog=APP_ID, description=tr("{APP_NAME}: gestor de archivos de doble panel", APP_NAME=APP_NAME))

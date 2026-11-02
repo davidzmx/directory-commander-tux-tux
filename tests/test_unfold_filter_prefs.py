@@ -495,13 +495,18 @@ def test_a_marked_row_shows_a_mark_and_keeps_its_box(window, mode):
 
     empty = box(2)
     assert ink(empty) > 15  # la casilla vacía se ve
+    view.setCurrentIndex(combo.model().index(2, 0))
+    settle()
+    empty_highlighted = box(2)  # sobre el color de resaltar se ve menos que sobre el fondo: hay que comparar con ella
+    view.setCurrentIndex(combo.model().index(0, 0))
+    settle()
     popup_click(combo, 2)
     combo.view().setCurrentIndex(combo.model().index(0, 0))
     settle()
     assert ink(box(2)) > ink(empty) + 5  # y la marcada se ve más, también con la fila sin resaltar
     combo.view().setCurrentIndex(combo.model().index(2, 0))
     settle()
-    assert ink(box(2)) > ink(empty) + 5  # y resaltada
+    assert ink(box(2)) > ink(empty_highlighted) + 5  # y resaltada
     popup_click(combo, 2)
     combo.hidePopup()
 

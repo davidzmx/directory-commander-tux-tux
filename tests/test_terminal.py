@@ -15,7 +15,7 @@ from PySide6.QtWidgets import QApplication
 from directory_commander_tux_tux.core import bar_buttons
 from directory_commander_tux_tux.core import settings_io, shells
 from directory_commander_tux_tux.core.config import DEFAULT_TOOLBAR, GENERAL_TERMINAL_COMMAND, TERMINAL_COMMAND, TERMINAL_TOGGLE_COMMAND, Config
-from directory_commander_tux_tux.core.pty_session import PtySession, shell_environment
+from directory_commander_tux_tux.core.pty_session import PtySession, restore_library_path, shell_environment
 from directory_commander_tux_tux.core.shells import CMD, CUSTOM, FISH, OTHER, POSIX, POWERSHELL, Shell, available_shells, cd_command, chosen_shell, custom_shell, default_shell, family_of, looks_like_prompt, prompt_folder
 from directory_commander_tux_tux.core.vt_screen import Screen, Style
 from directory_commander_tux_tux.ui.icons import themed
@@ -1566,7 +1566,8 @@ def test_changing_shell_keeps_the_folder_reached_with_cd(window, folders, monkey
     assert real_prompt_ready(terminal, target.family), terminal.screen_.display()
     assert same(terminal._current_folder, inside)
     terminal._send_text(("cd" if target.family == CMD else "pwd") + "\r")
-    assert wait_until(lambda: "con cd" in screen_text(terminal), 20), terminal.screen_.display()
+    # Sin los espacios: la ruta puede partirse en dos filas justo en uno de ellos.
+    assert wait_until(lambda: "concdñ" in screen_text(terminal).replace(" ", ""), 20), terminal.screen_.display()
     assert real_prompt_ready(terminal, target.family), terminal.screen_.display()
     window.groups[0].current.navigate(str(folders[1]))
     assert wait_until(lambda: terminal._wanted_folder is None and terminal._current_folder == str(folders[1]), 20), terminal.screen_.display()
@@ -1987,3 +1988,53 @@ def test_pane_button_can_be_hidden_from_preferences(window):
 def test_pane_button_is_listed_with_the_customizable_buttons():
     listed = {bar: buttons for bar, _title, buttons in bar_buttons.bars({})}
     assert ("terminalpane", "Terminal de este panel") in listed["pane"]
+
+
+def test_what_a_fast_shell_writes_before_being_registered_is_not_lost(qapp_offscreen):
+    """La sesión empieza a leer dentro de su constructor, antes de que la terminal anote su número: dash escribe su indicador en ese momento."""
+    class Quick(FakeSession):
+        def __init__(self, argv, cwd, cols, rows, on_data, on_exit, env=None) -> None:
+            super().__init__(argv, cwd, cols, rows, on_data, on_exit, env)
+            on_data(b"$ ")
+
+    view = TerminalView(lambda: os.getcwd())
+    view.session_factory = Quick
+    view._open_session(os.getcwd())
+    assert wait_until(lambda: view.screen_.before_cursor() == "$")
+    view.dispose()
+
+
+@pytest.mark.parametrize("platform, policy", [("linux", Qt.ScrollBarPolicy.ScrollBarAlwaysOn), ("win32", Qt.ScrollBarPolicy.ScrollBarAsNeeded)])
+def test_the_scroll_bar_is_only_fixed_on_linux(qapp_offscreen, monkeypatch, platform, policy):
+    monkeypatch.setattr(sys, "platform", platform)
+    view = TerminalView(lambda: os.getcwd())
+    assert view.verticalScrollBarPolicy() == policy
+    view.close()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="en Windows la barra aparece cuando hace falta")
+def test_the_first_history_does_not_narrow_the_terminal(qapp_offscreen, fake_sessions):
+    """Si la barra apareciese entonces, las líneas ya escritas perderían el final."""
+    view = TerminalView(lambda: os.getcwd())
+    view.resize(500, 200)
+    view.show()
+    assert wait_until(lambda: view.session is not None)
+    columns = view.screen_.cols
+    view.screen_.feed(b"x\r\n" * 100)
+    view._refresh()
+    QApplication.processEvents()
+    assert view.screen_.cols == columns
+    view.dispose()
+    view.close()
+
+
+def test_programs_started_by_the_packaged_program_do_not_get_its_libraries():
+    env = {"LD_LIBRARY_PATH": "/empaquetado", "A": "b"}
+    restore_library_path(env, True)
+    assert env == {"A": "b"}
+    env = {"LD_LIBRARY_PATH": "/empaquetado", "LD_LIBRARY_PATH_ORIG": "/original"}
+    restore_library_path(env, True)
+    assert env == {"LD_LIBRARY_PATH": "/original"}
+    env = {"LD_LIBRARY_PATH": "/del/usuario"}
+    restore_library_path(env, False)  # desde el código, o ya restaurada: es la del usuario y se queda
+    assert env == {"LD_LIBRARY_PATH": "/del/usuario"}

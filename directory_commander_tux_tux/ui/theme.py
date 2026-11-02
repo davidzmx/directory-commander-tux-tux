@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, replace
 
-from PySide6.QtGui import QColor, QGuiApplication, QPalette
+from PySide6.QtGui import QColor, QGuiApplication, QIcon, QPalette
 from PySide6.QtCore import Qt
 
 from ..core.pane_colors import ROLES, clean_colors
@@ -183,6 +184,32 @@ def request_color_scheme(setting: str) -> None:
     wanted = schemes.get(setting, Qt.ColorScheme.Unknown)  # con «según el escritorio», sin pedir nada
     if app is not None and app.styleHints().colorScheme() != wanted:
         app.styleHints().setColorScheme(wanted)
+
+
+def icon_theme_variant(name: str, dark: bool, installed) -> str:
+    """El tema de iconos con el brillo que pide el fondo: `breeze` y `breeze-dark`, `Papirus-Light` y `Papirus-Dark`. Si no hay otro, el mismo."""
+    stem = re.sub(r"[-_](dark|light)$", "", name, flags=re.IGNORECASE)
+    wanted = (f"{stem}-dark", f"{stem}-Dark") if dark else (stem, f"{stem}-light", f"{stem}-Light")
+    return next((option for option in (*wanted, name) if installed(option)), name)
+
+
+def _icon_theme_installed(name: str) -> bool:
+    return any(os.path.isfile(os.path.join(folder, name, "index.theme")) for folder in QIcon.themeSearchPaths())
+
+
+_desktop_icon_theme: str | None = None
+
+
+def match_icon_theme(dark: bool) -> None:
+    """Los temas de iconos de Linux dibujan los iconos pequeños de un solo color, pensado para el fondo del escritorio: con el tema oscuro de aquí
+    sobre un escritorio claro, las carpetas casi no se verían. En Windows no hay tema de iconos y no hace nada."""
+    global _desktop_icon_theme
+    if _desktop_icon_theme is None:
+        _desktop_icon_theme = QIcon.themeName()
+    if _desktop_icon_theme:
+        wanted = icon_theme_variant(_desktop_icon_theme, dark, _icon_theme_installed)
+        if wanted != QIcon.themeName():
+            QIcon.setThemeName(wanted)
 
 
 def set_current(theme: Theme) -> None:

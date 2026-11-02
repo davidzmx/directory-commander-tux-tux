@@ -17,14 +17,20 @@ _READ_SIZE = 16384
 _CLOSE_WAIT_SECONDS = 2
 
 
-def shell_environment(environ=os.environ, extra: dict[str, str] | None = None) -> dict[str, str]:
-    """El entorno del intérprete. El ejecutable empaquetado cambia la ruta de bibliotecas, que no debe llegar a otros programas."""
-    env = dict(environ)
-    original = env.pop("LD_LIBRARY_PATH_ORIG", None)
+def restore_library_path(environ=os.environ, frozen: bool = bool(getattr(sys, "frozen", False))) -> None:
+    """El ejecutable empaquetado arranca con su carpeta en la ruta de bibliotecas, y lleva las suyas de GTK o GLib: no debe llegar a los programas que lance,
+    como un comparador o la terminal. Se puede quitar una vez en marcha: el sistema solo la lee al arrancar cada proceso."""
+    original = environ.pop("LD_LIBRARY_PATH_ORIG", None)
     if original is not None:
-        env["LD_LIBRARY_PATH"] = original
-    elif getattr(sys, "frozen", False):
-        env.pop("LD_LIBRARY_PATH", None)
+        environ["LD_LIBRARY_PATH"] = original
+    elif frozen:
+        environ.pop("LD_LIBRARY_PATH", None)
+
+
+def shell_environment(environ=os.environ, extra: dict[str, str] | None = None) -> dict[str, str]:
+    """El entorno del intérprete."""
+    env = dict(environ)
+    restore_library_path(env, False)
     env["TERM"] = "xterm-256color"
     env["COLORTERM"] = "truecolor"
     env.update(extra or {})

@@ -1608,8 +1608,9 @@ def test_clicking_tree_item_navigates(window, tree):
     window.config["favorites"] = [{"label": "Sub", "path": str(left / "subcarpeta")}]
     window._rebuild_favorites_bar()
     item = window.tree.favorites_item.child(0)
-    rect = window.tree.visualItemRect(item)
-    QTest.mouseClick(window.tree.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, rect.center())
+    window.tree.scrollToItem(item)
+    rect = window.tree.visualItemRect(item)  # puede ser más ancha que el árbol, si las rutas de la prueba son largas: se pulsa en su principio
+    QTest.mouseClick(window.tree.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(rect.left() + 10, rect.center().y()))
     assert wait_until(lambda: window.source.path == os.path.normpath(str(left / "subcarpeta")))
 
 
@@ -2519,7 +2520,8 @@ def test_show_without_images(window):
     assert "imágenes" in window.statusBar().currentMessage()
 
 
-def test_metadata_panel(window, tree):
+def test_metadata_panel(window, tree, monkeypatch):
+    monkeypatch.setattr("directory_commander_tux_tux.ui.preview.find_exiftool", lambda *_arguments: None)  # con ExifTool instalado, los datos serían los suyos
     window.run_command("Set METAPANE=On")
     select(window.source, "a.txt")
     def rows():
@@ -6092,8 +6094,9 @@ def test_internal_viewer_without_a_submenu_of_the_system(window, video_folder, m
 def test_internal_viewer_when_other_programs_are_turned_off(window, video_folder, monkeypatch):
     window.config["open_videos"] = "system"
     window.config["shell_menu_items"] = False
+    monkeypatch.setattr("directory_commander_tux_tux.core.desktop_apps.apps_for", lambda *_arguments: [])  # en Linux saldrían los programas instalados
     captured = internal_choice_menu(window, "uno.mp4", None, monkeypatch)
-    assert captured["submenu"] == ["Visualizador interno", "Elegir otra aplicación…"]
+    assert captured["submenu"] == ["Visualizador interno", "Elegir otra aplicación…" if windows_shell.AVAILABLE else "Otro programa…"]
     window._viewers[0].close()
 
 
@@ -7131,3 +7134,17 @@ def test_menu_settings_travel_in_exported_configuration(window, tmp_path):
     window.config["context_menus"] = {}
     assert window.import_settings_file(str(path)) == []
     assert "Actualizar" not in texts_of(window.build_folder_menu(window.source))
+
+
+@pytest.mark.parametrize("name, dark, installed, expected", [
+    ("breeze", True, ("breeze", "breeze-dark"), "breeze-dark"),
+    ("breeze-dark", False, ("breeze", "breeze-dark"), "breeze"),
+    ("breeze", False, ("breeze", "breeze-dark"), "breeze"),
+    ("Papirus", True, ("Papirus", "Papirus-Dark", "Papirus-Light"), "Papirus-Dark"),
+    ("Papirus-Dark", False, ("Papirus", "Papirus-Dark", "Papirus-Light"), "Papirus"),
+    ("Yaru-Light", False, ("Yaru-Light", "Yaru-Dark"), "Yaru-Light"),
+    ("Adwaita", True, ("Adwaita",), "Adwaita"),
+])
+def test_the_icon_theme_follows_the_brightness_of_the_background(name, dark, installed, expected):
+    from directory_commander_tux_tux.ui.theme import icon_theme_variant
+    assert icon_theme_variant(name, dark, installed.__contains__) == expected

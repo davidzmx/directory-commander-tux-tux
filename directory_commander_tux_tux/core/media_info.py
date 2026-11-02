@@ -635,6 +635,8 @@ def _read_with_ffprobe(path: str, ffmpeg_dir: str) -> MediaInfo | None:
         data = json.loads(output)
     except ValueError:
         return None
+    if not data.get("streams"):
+        return None  # con un archivo dañado responde sin error, pero sin ninguna pista
     info = MediaInfo(kind="audio")
     fmt = data.get("format") or {}
     info.duration = _number(fmt.get("duration"))

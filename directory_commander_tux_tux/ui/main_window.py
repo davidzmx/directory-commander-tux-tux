@@ -765,6 +765,7 @@ class MainWindow(ExtraCommands, QMainWindow):
     def _apply_theme_globals(self) -> None:
         current, sheet = self._wanted_theme()
         theme.set_current(current)
+        theme.match_icon_theme(current.name == "dark")
         app = QApplication.instance()
         app.setPalette(theme.palette(current))
         if app.styleSheet() != sheet:  # aplicarla vuelve a pulir todos los widgets abiertos

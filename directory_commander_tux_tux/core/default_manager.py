@@ -5,6 +5,7 @@ En Linux se usa xdg-mime, que es lo que respetan Dolphin, Nautilus y los demás 
 """
 from __future__ import annotations
 
+import ntpath
 import os
 import shutil
 import subprocess
@@ -56,11 +57,11 @@ def clean_argument(path: str) -> str:
 
 
 def is_exception(path: str, exceptions: list[str]) -> bool:
-    """Esa carpeta, o una de dentro, está en la lista de las que sigue abriendo el Explorador."""
-    target = os.path.normcase(os.path.normpath(path))
+    """Esa carpeta, o una de dentro, está en la lista de las que sigue abriendo el Explorador. Solo existe en Windows: son siempre rutas de Windows."""
+    target = ntpath.normcase(ntpath.normpath(path))
     for item in exceptions:
-        folder = os.path.normcase(os.path.normpath(item))
-        if target == folder or target.startswith(folder.rstrip(os.sep) + os.sep):
+        folder = ntpath.normcase(ntpath.normpath(item))
+        if target == folder or target.startswith(folder.rstrip(ntpath.sep) + ntpath.sep):
             return True
     return False
 

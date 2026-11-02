@@ -8,8 +8,10 @@ from __future__ import annotations
 import fnmatch
 import os
 import re
+import select
 import shlex
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -33,6 +35,8 @@ _CHUNK = 1024 * 1024
 _OVERLAP = 4096
 _MAX_MEMBER_TEXT = 256 * 1024 * 1024
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+_POLL_SECONDS = 0.1
+_FIND_DENIED = re.compile(r"^find: [‘'`\"](.+)[’'`\"]: ")
 
 
 
@@ -129,6 +133,8 @@ def _content_matches(item: "Item", query: dict, matcher, is_cancelled) -> bool:
                 return False
             encoding, skip = _encoding(data[:4], query)
             return bool(matcher(data[skip:].decode(encoding, "replace")))
+        if not os.path.isfile(item.path):
+            return False  # abrir una tubería o un dispositivo se quedaría esperando para siempre
         with open(item.path, "rb") as handle:
             chunk = handle.read(_CHUNK)
             encoding, skip = _encoding(chunk[:4], query)
@@ -470,6 +476,11 @@ def _name_tests(query: dict) -> list[str] | None:
     return ["(", *tests, ")"] if len(words) > 1 else tests
 
 
+def _grep_wildcards(word: str) -> str:
+    """En `grep -E` una barra invertida delante de algo que no es especial da un aviso: solo se escapa lo que lo necesita."""
+    return re.sub(r"[\\.^$+()\[{|]", lambda match: "\\" + match.group(), word).replace("*", ".*").replace("?", ".")
+
+
 def _grep_tests(query: dict) -> list[str] | None:
     words = _words(query)
     if not words:
@@ -486,21 +497,24 @@ def _grep_tests(query: dict) -> list[str] | None:
         patterns = ["-e", "|".join(f"(?:{word})" for word in words)]
     elif query.get("wildcards"):
         options.append("-E")
-        patterns = [token for word in words for token in ("-e", re.escape(word).replace(r"\*", ".*").replace(r"\?", "."))]
+        patterns = [token for word in words for token in ("-e", _grep_wildcards(word))]
     else:
         options.append("-F")
         patterns = [token for word in words for token in ("-e", word)]
-    return ["!", "-type", "d", "-exec", "grep", *options, *patterns, "--", "{}", ";"]
+    # Solo archivos normales, o enlaces a ellos: grep se quedaría esperando para siempre al leer una tubería o un dispositivo.
+    return ["-xtype", "f", "-exec", "grep", *options, *patterns, "--", "{}", ";"]
 
 
 def _date_tests(test: dict) -> list[str] | None:
     op = test.get("op", "ignore")
     if op == "ignore":
         return []
-    letter = {"modified": "m", "created": "B", "accessed": "a"}.get(test.get("field"), "m")
+    if test.get("field") == "created":
+        return None  # `find` de GNU no sabe leer la fecha de creación: con -newerBt termina con un error, sin buscar nada
+    letter = {"modified": "m", "accessed": "a"}.get(test.get("field"), "m")
     if op == "within":
         minutes = max(0, int(test.get("amount", 0))) * PERIODS.get(test.get("unit"), PERIODS["days"])
-        return None if letter == "B" else [f"-{letter}min", f"-{minutes}"]
+        return [f"-{letter}min", f"-{minutes}"]
     first, second = _parse_date(test.get("first")), _parse_date(test.get("second"))
     low, high = min(first, second), max(first, second)
     option = f"-newer{letter}t"
@@ -573,6 +587,7 @@ def build_command(state: dict) -> Command:
     tests: list[str] = []
     if state.get("advanced"):
         joined: list[str] = []
+        count = 0
         for clause in state.get("clauses", ()):
             part = _clause_tests(clause)
             if part is None:
@@ -582,9 +597,13 @@ def build_command(state: dict) -> Command:
                 break
             if not part:
                 continue
+            # `find` da prioridad a Y sobre O, y las reglas se leen de izquierda a derecha: lo que ya hay va entre paréntesis.
+            if count > 1:
+                joined = ["(", *joined, ")"]
             if joined and clause.get("join", "and") == "or":
                 joined.append("-o")
             joined += ["(", *part, ")"]
+            count += 1
         tests = joined
     else:
         steps = ((_kind_tests(state["kind"]), ""), (_name_tests(state["name"]), tr("el nombre (expresión regular o sin diacríticos)")),
@@ -603,7 +622,8 @@ def build_command(state: dict) -> Command:
     depth = ["-mindepth", "1"] + ([] if state.get("subfolders", True) else ["-maxdepth", "1"])
     print_part = ["(", *tests, ")", "-print0"] if tests else ["-print0"]
     environment = {"LC_ALL": "C.UTF-8"} if state["content"].get("utf8") and state["content"].get("text") else {}
-    return Command(["find", *roots, *depth, *_exclude_tests(state), *print_part], checks, environment)
+    # -H: sin él, una carpeta que es un enlace simbólico no se recorre y no se encontraría nada dentro de ella.
+    return Command(["find", "-H", *roots, *depth, *_exclude_tests(state), *print_part], checks, environment)
 
 
 _BARE = {"(": r"\(", ")": r"\)", "!": r"\!", ";": r"\;"}
@@ -621,29 +641,58 @@ def describe_command(command: Command) -> str:
 
 def _run_command(state: dict, search: Search, collector: _Collector, is_cancelled) -> None:
     command = build_command(state)
-    process = subprocess.Popen(command.argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
-                               env={**os.environ, **command.environment})
+    # En su propio grupo: al cancelar hay que parar también el grep que esté leyendo un archivo.
+    process = subprocess.Popen(command.argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
+                               env={**os.environ, **command.environment}, start_new_session=True)
     only_checks = _residual_state(state, command)
     residual = prepare(only_checks, is_cancelled) if only_checks is not None else None
-    tail = b""
+    tail = errors = b""
+    streams = {process.stdout, process.stderr}
     try:
-        while chunk := process.stdout.read(65536):
+        while streams:
             if is_cancelled and is_cancelled():
-                process.kill()
                 return
-            parts = (tail + chunk).split(b"\0")
-            tail = parts.pop()
-            for raw in parts:
-                path = os.fsdecode(raw)
-                if residual is None:
-                    collector.add(path)
-                    continue
-                item = item_from_path(path)
-                if item is not None and residual.matches(item):
-                    collector.add(path)
+            # Con una espera limitada: `find` puede pasar mucho tiempo sin escribir nada, y cancelar debe notarse enseguida.
+            for stream in select.select(list(streams), [], [], _POLL_SECONDS)[0]:
+                chunk = os.read(stream.fileno(), 65536)
+                if not chunk:
+                    streams.discard(stream)
+                elif stream is process.stderr:
+                    errors += chunk
+                else:
+                    parts = (tail + chunk).split(b"\0")
+                    tail = parts.pop()
+                    for raw in parts:
+                        path = os.fsdecode(raw)
+                        if residual is None:
+                            collector.add(path)
+                            continue
+                        item = item_from_path(path)
+                        if item is not None and residual.matches(item):
+                            collector.add(path)
     finally:
+        if streams:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except OSError:
+                pass  # ya había terminado
         process.stdout.close()
+        process.stderr.close()
         process.wait()
+    _report_find_errors(errors, process.returncode, collector.found)
+
+
+def _report_find_errors(errors: bytes, status: int, found: Found) -> None:
+    """Lo que no pudo leer se anota. Si `find` falla por otra cosa y no da nada, es un error: decir «0 resultados» sería mentira."""
+    other = []
+    for line in os.fsdecode(errors).splitlines():
+        match = _FIND_DENIED.match(line)
+        if match:
+            found.denied.append(match.group(1))
+        elif line.strip():
+            other.append(line)
+    if other and status and not found.paths:
+        raise OSError(other[0])
 
 
 def _residual_state(state: dict, command: Command) -> dict | None:
