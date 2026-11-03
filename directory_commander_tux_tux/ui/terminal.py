@@ -238,7 +238,7 @@ class TerminalView(QAbstractScrollArea):
         if self._line_started or screen.alt or time.monotonic() - self._last_activity < _QUIET_SECONDS:
             return False
         # Sin hijos, el intérprete aún puede estar en un `pause` o un `set /p` de un .bat.
-        return looks_like_prompt(screen.before_cursor(), self._family) and self.session.shell_is_idle()
+        return looks_like_prompt(screen.prompt_text(), self._family) and self.session.shell_is_idle()
 
     @property
     def family(self) -> str:

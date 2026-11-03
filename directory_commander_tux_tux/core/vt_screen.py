@@ -103,12 +103,25 @@ class Screen:
         end = self.x + 1 if self._pending_wrap or self.x == self.cols - 1 else self.x
         return "".join(cell[0] for cell in self.lines[self.y][:end]).rstrip()
 
+    def _row_text(self, index: int) -> str:
+        return "".join(cell[0] for cell in self.line(index))
+
+    def _prompt_filled_the_row_above(self) -> bool:
+        """Un indicador que llena su fila deja el cursor al principio de la siguiente, y esa fila vacía parece que aún no hay indicador. PowerShell lo coloca
+        allí sin que conste como línea partida, y de su espacio final solo queda la última columna libre."""
+        index = self.cursor_index - 1
+        return self.x == 0 and index >= 0 and not self.before_cursor() and len(self._row_text(index).rstrip()) >= self.cols - 1
+
+    def prompt_text(self) -> str:
+        """Lo que hay detrás del cursor, para saber si la terminal espera una orden."""
+        return self._row_text(self.cursor_index - 1).rstrip() if self._prompt_filled_the_row_above() else self.before_cursor()
+
     def line_before_cursor(self) -> str:
         """Como `before_cursor`, con el principio de la línea si es tan larga que viene de filas anteriores."""
-        parts = [self.before_cursor()]
-        index = self.cursor_index - 1
+        parts = [self.prompt_text()]
+        index = self.cursor_index - (2 if self._prompt_filled_the_row_above() else 1)
         while index >= 0 and self.line(index).wrapped:
-            parts.insert(0, "".join(cell[0] for cell in self.line(index)))
+            parts.insert(0, self._row_text(index))
             index -= 1
         return "".join(parts)
 

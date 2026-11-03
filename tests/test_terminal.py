@@ -273,6 +273,50 @@ def test_cd_never_lets_a_folder_name_run_as_a_command(path, family, expected):
     assert cd_command(path, family) == expected
 
 
+def prompt_that_fills_the_row(screen, text):
+    """Como lo escribe PowerShell: el indicador y, con el cursor ya colocado por su cuenta, la fila siguiente."""
+    screen.feed_text(text)
+    screen.feed_text("\x1b[2;1H")
+
+
+def test_a_prompt_that_fills_its_row_is_still_a_prompt():
+    screen = Screen(10, 4)
+    prompt_that_fills_the_row(screen, "PS /carp> ")
+    assert screen.before_cursor() == "" and screen.prompt_text() == "PS /carp>"
+    assert screen.line_before_cursor() == "PS /carp>"
+
+
+def test_a_long_prompt_keeps_its_beginning_when_it_fills_the_last_row():
+    screen = Screen(10, 4)
+    screen.feed_text("PS /carpeta/muy> ")  # se parte en dos filas y la segunda no llena
+    assert screen.line_before_cursor() == "PS /carpeta/muy>"
+    screen = Screen(10, 4)
+    screen.feed_text("PS /carpeta/muy/larga>")
+    screen.feed_text("\x1b[3;1H")
+    assert screen.before_cursor() == ""
+
+
+def test_a_short_row_above_is_not_taken_for_the_prompt():
+    screen = Screen(10, 4)
+    screen.feed_text("corta\r\n")
+    assert screen.prompt_text() == "" and screen.line_before_cursor() == ""
+
+
+def test_output_that_is_not_at_the_start_of_the_row_is_read_as_usual():
+    screen = Screen(10, 4)
+    screen.feed_text("0123456789")
+    screen.feed_text("\x1b[2;1Hab")
+    assert screen.prompt_text() == "ab"
+
+
+def test_a_terminal_with_a_full_row_prompt_is_ready_for_a_command():
+    screen = Screen(10, 4)
+    prompt_that_fills_the_row(screen, "PS /carp> ")
+    assert looks_like_prompt(screen.prompt_text(), POWERSHELL, windows=False)
+    assert looks_like_prompt(screen.prompt_text(), POWERSHELL, windows=True)
+    assert not looks_like_prompt(screen.before_cursor(), POWERSHELL, windows=False)  # sin esto, se quedaría esperando para siempre
+
+
 def test_before_cursor_reads_the_prompt():
     screen = Screen(4, 2)
     screen.feed_text("C:\\>  \r\nab>")
@@ -1530,13 +1574,13 @@ def test_every_installed_shell_starts_in_the_folder_and_follows_the_pane(window,
     window.config["terminal_shell"] = shell.key
     press_general(window)
     terminal = window.terminals[GENERAL_TERMINAL]
-    assert wait_until(lambda: terminal.session is not None and looks_like_prompt(terminal.screen_.before_cursor(), shell.family), 45), terminal.screen_.display()
+    assert wait_until(lambda: terminal.session is not None and looks_like_prompt(terminal.screen_.prompt_text(), shell.family), 45), terminal.screen_.display()
     terminal._send_text(("cd" if shell.family == CMD else "pwd") + "\r")
     assert wait_until(lambda: "izquierda" in screen_text(terminal), 20), terminal.screen_.display()
-    assert wait_until(lambda: looks_like_prompt(terminal.screen_.before_cursor(), shell.family) and terminal.session.shell_is_idle(), 20), terminal.screen_.display()
+    assert wait_until(lambda: looks_like_prompt(terminal.screen_.prompt_text(), shell.family) and terminal.session.shell_is_idle(), 20), terminal.screen_.display()
     window.groups[0].current.navigate(str(folders[1]))
     assert wait_until(lambda: terminal._wanted_folder is None and terminal._current_folder == str(folders[1]), 20), terminal.screen_.display()
-    assert wait_until(lambda: looks_like_prompt(terminal.screen_.before_cursor(), shell.family) and terminal.session.shell_is_idle(), 20), terminal.screen_.display()
+    assert wait_until(lambda: looks_like_prompt(terminal.screen_.prompt_text(), shell.family) and terminal.session.shell_is_idle(), 20), terminal.screen_.display()
     terminal._send_text(("cd" if shell.family == CMD else "pwd") + "\r")
     assert wait_until(lambda: screen_text(terminal).count("derecha") >= 2, 20), terminal.screen_.display()
     terminal._send_text("exit\r")
@@ -1544,7 +1588,7 @@ def test_every_installed_shell_starts_in_the_folder_and_follows_the_pane(window,
 
 
 def real_prompt_ready(terminal, family, seconds=45) -> bool:
-    return wait_until(lambda: terminal.session is not None and looks_like_prompt(terminal.screen_.before_cursor(), family) and terminal.session.shell_is_idle(), seconds)
+    return wait_until(lambda: terminal.session is not None and looks_like_prompt(terminal.screen_.prompt_text(), family) and terminal.session.shell_is_idle(), seconds)
 
 
 @pytest.mark.parametrize("shell", REAL_SHELLS, ids=[shell.key for shell in REAL_SHELLS])
