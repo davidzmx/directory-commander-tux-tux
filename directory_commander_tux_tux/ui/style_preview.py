@@ -50,7 +50,7 @@ class StylePreview(QWidget):
 
     def _paint_region(self, painter: QPainter, region: styles.Region, rect: QRectF, colors) -> None:
         if region.kind == styles.PANE:
-            role = ("source", "dest", "other", "other")[region.index]
+            role = ("source", "dest")[region.index] if region.index < 2 else "other"
             painter.fillRect(rect, QColor(getattr(colors, f"list_{role}")))
             bar = QRectF(rect.x(), rect.y(), rect.width(), min(_BAR_HEIGHT, rect.height()))
             painter.fillRect(bar, QColor(getattr(colors, f"bar_{role}")))

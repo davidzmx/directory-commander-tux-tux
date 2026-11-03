@@ -54,6 +54,7 @@ class StylesPage(QWidget):
         self.meta = QCheckBox(tr("Metadatos"))
         self.view = _combo(_VIEWS)
         self.pane_terminals = tuple(QCheckBox(tr(label)) for label in _PANE_TERMINAL_LABELS)
+        self.pane_only = tuple(QCheckBox(tr("Solo la terminal, sin archivos")) for _label in _PANE_TERMINAL_LABELS)
         self.terminal_general = QCheckBox(tr("Terminal general"))
         self.position = _combo(_POSITIONS)
         form = QFormLayout()
@@ -65,8 +66,17 @@ class StylesPage(QWidget):
         form.addRow("", self.meta)
         terminals = QVBoxLayout()  # en una sola fila del formulario: así las de los paneles que no hay se ocultan sin dejar hueco
         terminals.setContentsMargins(0, 0, 0, 0)
-        for check in (*self.pane_terminals, self.terminal_general):
-            terminals.addWidget(check)
+        self.pane_rows: list[QWidget] = []
+        for check, only in zip(self.pane_terminals, self.pane_only):
+            row = QWidget()
+            line = QHBoxLayout(row)
+            line.setContentsMargins(0, 0, 0, 0)
+            line.addWidget(check)
+            line.addWidget(only)
+            line.addStretch(1)
+            terminals.addWidget(row)
+            self.pane_rows.append(row)
+        terminals.addWidget(self.terminal_general)
         form.addRow(tr("Terminales:"), terminals)
         form.addRow(tr("Posición de la terminal del panel:"), self.position)
         self.add_button = self._button(tr("Nuevo"), self.add)
@@ -107,7 +117,7 @@ class StylesPage(QWidget):
         self.name.textEdited.connect(self._edited)
         for box in (self.panes, self.tree, self.view, self.position):
             box.currentIndexChanged.connect(self._edited)
-        for check in (self.viewer, self.meta, *self.pane_terminals, self.terminal_general):
+        for check in (self.viewer, self.meta, *self.pane_terminals, *self.pane_only, self.terminal_general):
             check.toggled.connect(self._edited)
         current = next((row for row in range(self.names.count()) if self._style_at(row)["name"] == config.get("style")), 0)
         self.names.setCurrentRow(current)
@@ -160,6 +170,9 @@ class StylesPage(QWidget):
             wanted = styles.terminals_of(style) or set()
             for name, check in zip(styles.TERMINALS, (*self.pane_terminals, self.terminal_general)):
                 check.setChecked(name in wanted)
+            only = styles.terminal_panes_of(style) or set()
+            for name, check in zip(styles.PANE_TERMINALS, self.pane_only):
+                check.setChecked(name in only)
             self.position.setCurrentIndex(max(0, self.position.findData(styles.position_of(style) or "")))
             self.preview.set_style(style)
         self._loading = False
@@ -168,8 +181,12 @@ class StylesPage(QWidget):
     def _update_enabled(self) -> None:
         self.remove_button.setEnabled(self.names.count() > 1)
         count = styles.pane_count(self.panes.currentData())
-        for index, check in enumerate(self.pane_terminals):
-            check.setVisible(index < count)
+        for index, row in enumerate(self.pane_rows):
+            row.setVisible(index < count)
+        # Siempre debe quedar un panel con archivos: con uno solo, ni se ofrece.
+        full = sum(check.isChecked() for check in self.pane_only[:count]) >= count - 1
+        for check in self.pane_only:
+            check.setEnabled(count > 1 and (check.isChecked() or not full))
         self.position.setEnabled(any(check.isChecked() for check in self.pane_terminals[:count]))
 
     def _edited(self, *_args) -> None:
@@ -195,6 +212,9 @@ class StylesPage(QWidget):
                   if check.isChecked() and (name == styles.GENERAL or index < count)]
         if wanted or "terminals" in style:  # sin marcar ninguna y sin haberlas tenido, no cierra las que se abran a mano
             style["terminals"] = wanted
+        only = [name for index, (name, check) in enumerate(zip(styles.PANE_TERMINALS, self.pane_only)) if check.isChecked() and index < count]
+        if only or "terminal_panes" in style:
+            style["terminal_panes"] = only
         if self.position.currentData():
             style["terminal_position"] = self.position.currentData()
         else:

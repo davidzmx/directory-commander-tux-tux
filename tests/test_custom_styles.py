@@ -291,7 +291,7 @@ def test_page_shows_every_style_starting_with_the_current_one(window, page):
     assert page.names.currentItem().text() == "Vertical doble panel" and page.panes.currentData() == "Vertical" and page.tree.currentData() == "shared"
     select(page, "Vertical panel-terminal")
     assert page.panes.currentData() == "Off" and page.pane_terminals[0].isChecked() and page.position.currentData() == "right"
-    assert page.pane_terminals[1].isHidden() and page.position.isEnabled()
+    assert page.pane_rows[1].isHidden() and page.position.isEnabled()
     select(page, "Vertical doble árbol")
     assert page.tree.currentData() == "each" and not page.pane_terminals[0].isChecked() and not page.position.isEnabled()
     select(page, "Imágenes")
@@ -972,13 +972,13 @@ def test_page_offers_every_arrangement_and_its_terminals(window, page):
     assert {page.panes.itemData(row) for row in range(page.panes.count())} == set(styles.PANE_MODES)
     page.add()
     set_combo(page.panes, "Off")
-    assert [not check.isHidden() for check in page.pane_terminals] == [True] + [False] * 7
+    assert [not row.isHidden() for row in page.pane_rows] == [True] + [False] * 7
     set_combo(page.panes, "3-Top")
-    assert [not check.isHidden() for check in page.pane_terminals] == [True] * 3 + [False] * 5
+    assert [not row.isHidden() for row in page.pane_rows] == [True] * 3 + [False] * 5
     set_combo(page.panes, "8-Grid")
-    assert not any(check.isHidden() for check in page.pane_terminals)
+    assert not any(row.isHidden() for row in page.pane_rows)
     set_combo(page.panes, "4-Grid")
-    assert [not check.isHidden() for check in page.pane_terminals] == [True] * 4 + [False] * 4
+    assert [not row.isHidden() for row in page.pane_rows] == [True] * 4 + [False] * 4
     page.pane_terminals[3].setChecked(True)
     assert page.position.isEnabled()
     page.apply_to(window.config)
@@ -1003,3 +1003,47 @@ def test_closing_a_window_with_four_panes_ends_every_terminal(qapp_offscreen, tm
     assert len(sessions) == 5
     close_window(main)
     assert all(session.closed for session in sessions)
+
+
+# ------------------------------------------------------------------ paneles solo de terminal
+def test_page_marks_the_panes_that_show_only_their_terminal(window, page):
+    page.add()
+    set_combo(page.panes, "3-Vertical")
+    page.pane_only[1].setChecked(True)
+    style = page._style_at(page.names.currentRow())
+    assert style["terminal_panes"] == ["second"]
+    assert page.pane_only[2].isEnabled() and page.pane_only[1].isEnabled()
+    page.pane_only[2].setChecked(True)
+    assert not page.pane_only[0].isEnabled()  # siempre debe quedar un panel con archivos
+    assert style["terminal_panes"] == ["second", "third"]
+    set_combo(page.panes, "Vertical")
+    assert style["terminal_panes"] == ["second"]  # el tercero ya no está en la disposición
+    page.pane_only[1].setChecked(False)
+    assert style["terminal_panes"] == []
+    set_combo(page.panes, "Off")
+    assert not page.pane_only[0].isEnabled()
+
+
+def test_preview_draws_a_terminal_in_place_of_the_pane(qapp_offscreen):
+    regions = styles.preview_regions({"dual": "3-Vertical", "tree": False, "terminal_panes": ["second"]})
+    kinds = {region.index: region.kind for region in regions}
+    assert kinds == {0: styles.PANE, 1: styles.TERMINAL, 2: styles.PANE}
+    every = styles.preview_regions({"dual": "Vertical", "tree": False, "terminal_panes": ["first", "second"]})
+    assert [region.kind for region in every] == [styles.PANE, styles.TERMINAL]  # como en la ventana: el primero conserva sus archivos
+
+
+@pytest.mark.parametrize("mode", ["6-Grid", "8-Grid"])
+def test_preview_draws_every_pane_of_the_big_grids(window, page, mode):
+    page.add()
+    set_combo(page.panes, mode)
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+    from directory_commander_tux_tux.ui import theme
+    image = QImage(400, 300, QImage.Format.Format_ARGB32)
+    painter = QPainter(image)
+    try:
+        for region in page.preview.regions:  # Qt se traga los errores de paintEvent: así se ven. Antes fallaba a partir del quinto panel
+            page.preview._paint_region(painter, region, QRectF(region.x * 400, region.y * 300, region.width * 400, region.height * 300), theme.current())
+    finally:
+        painter.end()
+    assert len([region for region in page.preview.regions if region.kind == styles.PANE]) == styles.pane_count(mode)

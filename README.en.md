@@ -23,6 +23,8 @@ A **multi-pane file manager with built-in terminals and git**, for **Linux (KDE 
 - Each terminal follows its pane: when you change folder it types the `cd` for you, unless a program is running or you have started typing a command; in that case it waits until you finish. A button on its bar turns this on or off
 - Each one can use its own shell, without leaving the folder it's in. On Windows, PowerShell, `cmd`, Git Bash, Cygwin, MSYS2, WSL or another program; on Linux, `bash`, `zsh`, `fish` and any others you have installed. The default is chosen in Preferences → General
 - A pane's terminal opens with its button or `Ctrl+Shift+O`, and the general one with the toolbar button or `Ctrl+Shift+G`. Hiding them doesn't end what's running
+- A pane can show only its terminal, filling its whole space, from the button on its bar or the right-click menu. It is never the source or the destination, and its terminal follows nobody unless you ask it to, and then it goes with the active pane. Its bar has a button to see the files again, in the folder the terminal is in, and an X that closes the pane. At least one pane with files always remains
+- Dropping files on a terminal types their paths, quoted, without running anything
 - The «Vertical pane-terminal» and «Horizontal pane-terminal» styles put a terminal in place of the second pane. In Preferences you can also make the general terminal take the whole width of the window when panes are side by side
 
 ### Built-in git
@@ -183,7 +185,7 @@ Select SOURCETODEST=in|notin[,noext] [DESELECTNOMATCH]      Select DESTTOSOURCE=
 Set DUAL=Off|Vertical|Horizontal|Toggle  STYLE="Vertical doble panel"  CONTENTTYPE=images  DARKMODE=Toggle
 Set VIEW=Details|List|SmallIcons|LargeIcons|Tiles|Thumbnails|FilmStrip  VIEW=Cycle,List,Details
 Set SORTBY=name|size|type|modified|attr|sortlist  SORTREVERSE=On|Off  FRIENDLYDATES=off|today|normal
-Set FLATVIEW=Toggle  HIDDEN=Toggle  TREE=Toggle  PANETREE=Toggle  PANEFRAMES=Toggle  VIEWPANE=Toggle  METAPANE=Toggle  TERMINAL=Toggle  GENERALTERMINAL=Toggle  CMDLINE=Toggle  FILTER=Show
+Set FLATVIEW=Toggle  HIDDEN=Toggle  TREE=Toggle  PANETREE=Toggle  TERMINALPANE=On|Off  PANEFRAMES=Toggle  VIEWPANE=Toggle  METAPANE=Toggle  TERMINAL=Toggle  GENERALTERMINAL=Toggle  CMDLINE=Toggle  FILTER=Show
 Set NAVLOCK=Toggle  CHECKBOXMODE=Toggle  EXPANDABLEFOLDERS=Toggle  GRIDLINESH=Toggle  STATUSBAR=Toggle  STATE=Source|Dest
 Set DELRECYCLEBIN=Toggle  DELRECYCLECONFIRM=Toggle  UTILITY=Find|Sync|Dupe|Jobs|Log|Off[,Toggle]
 Set LOCKBARS=Toggle  HOVERINFO=Toggle

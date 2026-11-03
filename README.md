@@ -23,6 +23,8 @@ Gestor de archivos **multipanel, con terminales integradas y git**, para **Linux
 - Cada terminal sigue a su panel: al cambiar de carpeta escribe el `cd` por ti, salvo si hay un programa en marcha o has empezado a escribir una orden; en ese caso espera a que termines. Un botón de su barra activa o desactiva este seguimiento
 - Cada una puede usar su propio intérprete, sin salir de la carpeta en la que está. En Windows, PowerShell, `cmd`, Git Bash, Cygwin, MSYS2, WSL u otro programa; en Linux, `bash`, `zsh`, `fish` y los demás que tengas instalados. El predeterminado se elige en Preferencias → General
 - La de cada panel se abre con su botón o con `Ctrl+Shift+O`, y la general con el de la barra de herramientas o con `Ctrl+Shift+G`. Ocultarlas no termina lo que se esté ejecutando
+- Un panel puede mostrar solo su terminal, en todo su sitio, con el botón de su barra o el clic derecho. No es origen ni destino, y su terminal no sigue a nadie salvo que se lo pidas, y entonces va con el panel activo. Su barra tiene un botón para volver a ver los archivos, en la carpeta en la que esté la terminal, y una X que cierra el panel. Siempre queda al menos un panel con archivos
+- Al soltar archivos sobre una terminal se escriben sus rutas, entre comillas, sin ejecutar nada
 - Los estilos «Vertical panel-terminal» y «Horizontal panel-terminal» ponen una terminal en lugar del segundo panel. En Preferencias también se puede hacer que, con los paneles en vertical, la general ocupe todo el ancho de la ventana
 
 ### Git integrado
@@ -182,7 +184,7 @@ Select SOURCETODEST=in|notin[,noext] [DESELECTNOMATCH]      Select DESTTOSOURCE=
 Set DUAL=Off|Vertical|Horizontal|Toggle  STYLE="Vertical doble panel"  CONTENTTYPE=images  DARKMODE=Toggle
 Set VIEW=Details|List|SmallIcons|LargeIcons|Tiles|Thumbnails|FilmStrip  VIEW=Cycle,List,Details
 Set SORTBY=name|size|type|modified|attr|sortlist  SORTREVERSE=On|Off  FRIENDLYDATES=off|today|normal
-Set FLATVIEW=Toggle  HIDDEN=Toggle  TREE=Toggle  PANETREE=Toggle  PANEFRAMES=Toggle  VIEWPANE=Toggle  METAPANE=Toggle  TERMINAL=Toggle  GENERALTERMINAL=Toggle  CMDLINE=Toggle  FILTER=Show
+Set FLATVIEW=Toggle  HIDDEN=Toggle  TREE=Toggle  PANETREE=Toggle  TERMINALPANE=On|Off  PANEFRAMES=Toggle  VIEWPANE=Toggle  METAPANE=Toggle  TERMINAL=Toggle  GENERALTERMINAL=Toggle  CMDLINE=Toggle  FILTER=Show
 Set NAVLOCK=Toggle  CHECKBOXMODE=Toggle  EXPANDABLEFOLDERS=Toggle  GRIDLINESH=Toggle  STATUSBAR=Toggle  STATE=Source|Dest
 Set DELRECYCLEBIN=Toggle  DELRECYCLECONFIRM=Toggle  UTILITY=Find|Sync|Dupe|Jobs|Log|Off[,Toggle]
 Set LOCKBARS=Toggle  HOVERINFO=Toggle

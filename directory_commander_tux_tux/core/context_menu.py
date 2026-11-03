@@ -16,7 +16,7 @@ DEFAULT_LAYOUTS: dict[str, list[str]] = {
              N_("Nueva carpeta"), N_("Nuevo archivo de texto"), N_("Nuevo ZIP vacío"), SEPARATOR,
              N_("Ver"), N_("Ordenar por"), N_("Vista plana"), N_("Mostrar ocultos"), SEPARATOR,
              N_("Seleccionar todo"), N_("Actualizar"), N_("Calcular tamaños de carpetas"), SEPARATOR,
-             N_("Abrir en una pestaña nueva"), N_("Dividir panel - Horizontal"), N_("Dividir panel - Vertical"), N_("Cerrar este panel"), N_("Abrir terminal aquí"), N_("Añadir a favoritos"), N_("Copiar la ruta de esta carpeta"), SEPARATOR,
+             N_("Abrir en una pestaña nueva"), N_("Dividir panel - Horizontal"), N_("Dividir panel - Vertical"), N_("Cerrar este panel"), N_("Solo la terminal en este panel"), N_("Abrir terminal aquí"), N_("Añadir a favoritos"), N_("Copiar la ruta de esta carpeta"), SEPARATOR,
              SHELL_ITEMS, SEPARATOR,
              N_("Propiedades de esta carpeta")],
     FILE: [N_("Abrir"), OPEN_WITH, BROWSE_ARCHIVE, N_("Abrir en una pestaña nueva"), N_("Ver imágenes"), SEPARATOR,

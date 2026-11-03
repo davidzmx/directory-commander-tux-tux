@@ -11,6 +11,7 @@ from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSize, QTimer, Qt, Si
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QFontMetricsF, QKeySequence, QPainter
 from PySide6.QtWidgets import QAbstractScrollArea, QApplication, QComboBox, QMenu
 
+from ..core.git_tools import quote
 from ..core.i18n import tr
 from ..core.pty_session import PtySession
 from ..core.shells import DEFAULT_FAMILY, OTHER, POWERSHELL, Shell, can_clear_line_with_escape, cd_command, default_shell, looks_like_prompt, prompt_folder
@@ -134,6 +135,7 @@ class TerminalView(QAbstractScrollArea):
         if sys.platform != "win32":
             self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)  # si apareciese con el primer historial, la terminal se estrecharía y recortaría lo ya escrito
         self.viewport().setCursor(Qt.CursorShape.IBeamCursor)
+        self.setAcceptDrops(True)  # Qt lo pasa también a la zona de dentro, que es la que recibe el arrastre
         font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
         font.setFamilies([*_FONT_FAMILIES, font.family()])
         font.setPointSize(10)
@@ -218,11 +220,12 @@ class TerminalView(QAbstractScrollArea):
     def can_follow(self) -> bool:
         return self._family != OTHER
 
-    def set_following(self, following: bool) -> None:
-        """Al activarlo se vuelve a ir a la carpeta del panel, aunque parezca la misma: mientras tanto el usuario ha podido moverse con cd."""
+    def set_following(self, following: bool, here: str = "") -> None:
+        """Al activarlo se vuelve a ir a la carpeta del panel, aunque parezca la misma: mientras tanto el usuario ha podido moverse con cd.
+        `here`: es el panel el que se acaba de llevar a la carpeta de la terminal, y no hay que escribir nada."""
         self.following = following
         self._wanted_folder = None
-        self._current_folder = "" if following else self._current_folder
+        self._current_folder = here or ("" if following else self._current_folder)
         self._try_follow()
 
     def follow(self, path: str) -> None:
@@ -385,6 +388,33 @@ class TerminalView(QAbstractScrollArea):
 
     def contextMenuEvent(self, event) -> None:
         self.build_menu().exec(event.globalPos())
+
+    # ------------------------------------------------------------------ soltar archivos
+    def dropped_text(self, mime) -> str | None:
+        """Las rutas de lo que se suelta, escritas para este intérprete y sin ejecutar nada. None si no son archivos o alguna no se puede escribir sin riesgo."""
+        paths = [url.toLocalFile() for url in mime.urls() if url.isLocalFile()] if mime.hasUrls() else []
+        words = [quote(os.path.normpath(path), self._family) for path in paths]
+        return " ".join(words) + " " if self.session is not None and words and None not in words else None
+
+    def dragEnterEvent(self, event) -> None:
+        if self.dropped_text(event.mimeData()) is None:
+            event.ignore()
+        else:
+            event.setDropAction(Qt.DropAction.CopyAction)  # nunca mover: el que arrastra podría borrar el original
+            event.accept()
+
+    def dragMoveEvent(self, event) -> None:
+        self.dragEnterEvent(event)
+
+    def dropEvent(self, event) -> None:
+        text = self.dropped_text(event.mimeData())
+        if text is None:
+            event.ignore()
+            return
+        event.setDropAction(Qt.DropAction.CopyAction)
+        event.accept()
+        self._send_text(f"\x1b[200~{text}\x1b[201~" if self.screen_.bracketed_paste else text)
+        self.setFocus()
 
     # ------------------------------------------------------------------ ratón
     def _cell_at(self, position) -> tuple[int, int]:

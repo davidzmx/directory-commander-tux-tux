@@ -2098,3 +2098,243 @@ def test_programs_started_by_the_packaged_program_do_not_get_its_libraries():
     env = {"LD_LIBRARY_PATH": "/del/usuario"}
     restore_library_path(env, False)  # desde el código, o ya restaurada: es la del usuario y se queda
     assert env == {"LD_LIBRARY_PATH": "/del/usuario"}
+
+
+# ------------------------------------------------------------------ paneles solo de terminal
+def only_terminal(window, side: int) -> None:
+    """Con el botón de la barra del panel, como lo haría el usuario."""
+    window.groups[side].current._bar_tools()["terminalonly"].click()
+    settle()
+
+
+def test_a_pane_can_show_only_its_terminal(window, folders, fake_sessions):
+    only_terminal(window, 1)
+    assert window._terminal_only.keys() == {1}
+    assert window.groups[1].isHidden() and not window.terminal_panels[1].isHidden()
+    assert window.terminal_panels[1].height() >= window.pane_areas[1].height() - 2  # ocupa todo el sitio del panel
+    assert len(fake_sessions) == 1 and same(fake_sessions[0].cwd, folders[1])  # empieza en la carpeta que tenía
+    assert window.active_side == 0 and window.dest is None
+    assert window.focusWidget() is window.terminals[1]
+    assert window.terminal_files_buttons[1].isVisibleTo(window) and not window.terminal_files_buttons[0].isVisibleTo(window)
+    assert window.terminal_close_buttons[1].toolTip() == "Cerrar este panel"
+    assert not window.terminals[1].following and window.terminal_follow_buttons[1].toolTip() == "Seguir al panel activo"
+
+
+def test_clicking_a_terminal_only_pane_does_not_make_it_the_source(window):
+    only_terminal(window, 1)
+    window.terminals[1].focusInEvent(QFocusEvent(QEvent.Type.FocusIn))
+    window.on_tab_changed(window.groups[1])
+    assert window.active_side == 0 and window.source is window.groups[0].current
+
+
+def test_the_last_pane_with_files_cannot_show_only_its_terminal(window):
+    only_terminal(window, 1)
+    window.run_command("Set TERMINALPANE=On")
+    assert window._terminal_only.keys() == {1} and not window.groups[0].isHidden()
+    window.apply_style("Explorador")
+    assert window._file_panes() == [0]
+    assert window.groups[0].current._bar_tools()["terminalonly"].isHidden()  # con un panel ni se ofrece
+
+
+def test_with_more_panes_the_destination_skips_terminal_only_panes(window):
+    window.set_dual("3-Vertical")
+    for side in (2, 1, 0):
+        window._view_activated(window.groups[side].current)
+    window._view_activated(window.groups[1].current)
+    assert window._dest_side == 0
+    window._set_terminal_only(0, True)
+    assert window.active_side == 1 and window._dest_side == 2
+
+
+def test_the_source_becomes_the_destination_pane(window):
+    window.set_dual("3-Vertical")
+    window._view_activated(window.groups[2].current)
+    window._view_activated(window.groups[1].current)
+    window.run_command("Set TERMINALPANE=On")
+    assert window._terminal_only.keys() == {1} and window.active_side == 2 and window._dest_side == 0
+
+
+def test_its_terminal_follows_the_active_pane_only_when_asked(window, folders, tmp_path):
+    only_terminal(window, 1)
+    terminal, session = window.terminals[1], FakeSession.instances[-1]
+    terminal.screen_.feed_text("C:\\>")
+    terminal._last_activity = 0
+    other = tmp_path / "otra"
+    other.mkdir()
+    window.groups[0].current.navigate(str(other))
+    QTest.qWait(320)
+    assert session.sent == b""
+    window.terminal_follow_buttons[1].click()
+    assert wait_until(lambda: session.sent)
+    assert session.sent == cd_command(str(other), terminal.family).encode()
+
+
+def test_the_files_button_brings_back_the_pane_as_it_was(window, folders):
+    window.groups[1].current.activated.emit(window.groups[1].current)
+    window.run_command("Set PANETREE=On")
+    only_terminal(window, 1)
+    assert window.tree_panels[1].isHidden()
+    window.terminal_files_buttons[1].click()
+    settle()
+    assert window._terminal_only == {}
+    assert not window.groups[1].isHidden() and not window.tree_panels[1].isHidden() and not window.terminal_panels[1].isHidden()
+    assert window.groups[1].height() > 100  # la lista vuelve a tener su sitio junto a la terminal
+    assert window.terminals[1].following and window.terminal_close_buttons[1].toolTip() == "Ocultar"
+    assert not window.terminal_files_buttons[1].isVisibleTo(window)
+    assert window.active_side == 1
+
+
+def test_the_files_come_back_in_the_folder_the_terminal_went_to(window, folders, tmp_path):
+    only_terminal(window, 1)
+    terminal, session = window.terminals[1], FakeSession.instances[-1]
+    other = tmp_path / "otra"
+    other.mkdir()
+    session.directory = str(other)  # el usuario se movió con cd
+    terminal.screen_.feed_text(f"PS {other}> ")  # PowerShell no se lo dice al sistema: se lee de su indicador
+    terminal._last_activity = 0
+    window.terminal_files_buttons[1].click()
+    settle()
+    assert same(window.groups[1].current.path, other)
+    QTest.qWait(320)
+    assert session.sent == b""  # la terminal no vuelve atrás con cd
+    window.groups[1].current.navigate(str(folders[1]))
+    assert wait_until(lambda: session.sent)  # y desde ahí sigue a su panel, como antes
+    assert session.sent == cd_command(str(folders[1]), terminal.family).encode()
+
+
+def test_set_terminalpane_off_brings_back_every_pane(window):
+    window.set_dual("3-Vertical")
+    window._set_terminal_only(1, True)
+    window._set_terminal_only(2, True)
+    window.run_command("Set TERMINALPANE=Off")
+    assert window._terminal_only == {} and not any(group.isHidden() for group in window.groups[:3])
+    with pytest.raises(ValueError):
+        window._set_terminalpane("quizá")
+
+
+def test_its_x_closes_the_pane(window, fake_sessions):
+    window.set_dual("3-Vertical")
+    window._set_terminal_only(2, True)
+    settle()
+    window.terminal_close_buttons[2].click()
+    settle()
+    assert window.dual == "Vertical" and window._terminal_only == {}
+    assert fake_sessions[0].closed and window.terminal_panels[2].isHidden()
+    assert not window.groups[0].isHidden() and not window.groups[1].isHidden()
+
+
+def test_closing_a_files_pane_keeps_the_terminal_only_one(window):
+    window.set_dual("3-Vertical")
+    window._set_terminal_only(2, True)
+    window._view_activated(window.groups[0].current)
+    window.close_pane()
+    settle()
+    assert window.dual == "Vertical" and window._terminal_only.keys() == {1}
+    assert window.active_side == 0 and window.groups[1].isHidden() and not window.terminal_panels[1].isHidden()
+
+
+def test_when_only_terminal_panes_would_be_left_the_first_gets_its_files_back(window):
+    window._set_terminal_only(1, True)
+    window._view_activated(window.groups[1].current)  # no puede ser el activo
+    assert window.active_side == 0
+    window.close_pane()
+    settle()
+    assert window.dual == "Off" and window._terminal_only == {} and not window.groups[0].isHidden()
+    assert not window.terminal_panels[0].isHidden()  # su terminal sigue abierta, ahora junto a sus archivos
+
+
+def test_a_new_pane_never_starts_as_terminal_only(window):
+    window.set_dual("3-Vertical")
+    window._set_terminal_only(2, True)
+    window.set_dual("Vertical")
+    assert window._terminal_only.keys() == {2}  # fuera de la disposición, se conserva como estaba
+    window.split_pane("right")
+    settle()
+    assert window.dual != "Vertical" and window._terminal_only == {} and not window.groups[2].isHidden()
+
+
+def test_the_exit_of_its_shell_brings_back_the_files(window, fake_sessions):
+    only_terminal(window, 1)
+    fake_sessions[0].on_exit()
+    settle()
+    assert window._terminal_only == {} and not window.groups[1].isHidden() and window.terminal_panels[1].isHidden()
+
+
+def test_the_session_remembers_terminal_only_panes(window, fake_sessions):
+    window.set_dual("3-Vertical")
+    window._view_activated(window.groups[1].current)
+    window.run_command("Set PANETREE=On")
+    window._set_terminal_only(1, True)
+    window.terminal_follow_buttons[1].click()
+    snapshot = window._session_snapshot()
+    assert snapshot["terminal_only"] == [{"pane": 1, "follow": True, "tree": True}]
+    assert snapshot["layout"]["terminal_panes"] == ["second"]
+    window.run_command("Set TERMINALPANE=Off")
+    window._apply_session(snapshot, [], live=True)
+    settle()
+    assert window._terminal_only == {1: (True, True)} and window.groups[1].isHidden() and not window.terminal_panels[1].isHidden()
+    assert window.terminals[1].following and window.active_side != 1
+    window._apply_session({**snapshot, "terminal_only": []}, [], live=True)
+    assert window._terminal_only == {}
+
+
+def test_a_style_can_ask_for_terminal_only_panes(window):
+    window.config["styles"].append({"name": "Con terminal", "dual": "3-Vertical", "tree": False, "terminals": [], "terminal_panes": ["third"]})
+    window.apply_style("Con terminal")
+    settle()
+    assert window._terminal_only.keys() == {2} and not window.terminal_panels[2].isHidden() and window.groups[2].isHidden()
+    window.apply_style("Vertical doble panel")  # no dice nada: vuelven los archivos de los que puso así el estilo
+    assert window._terminal_only == {}
+    window._set_terminal_only(1, True)
+    window.apply_style("Vertical doble panel")
+    assert window._terminal_only.keys() == {1}  # el puesto a mano se queda
+    assert window.current_style_definition("Copia")["terminal_panes"] == ["second"]
+
+
+def test_a_style_cannot_leave_the_window_without_files(window):
+    window.config["styles"].append({"name": "Sin archivos", "dual": "Vertical", "tree": False, "terminal_panes": ["first", "second"]})
+    window.apply_style("Sin archivos")
+    assert window._terminal_only.keys() == {1} and window.active_side == 0
+
+
+def test_the_folder_menu_offers_it_only_with_another_pane_with_files(window):
+    def entry():
+        menu = window.build_folder_menu(window.source)
+        return next(action for action in menu.actions() if action.text() == "Solo la terminal en este panel")
+
+    assert entry().isEnabled()
+    window._set_terminal_only(1, True)
+    assert not entry().isEnabled()
+
+
+def test_dropped_files_are_written_in_the_terminal(window, folders, tmp_path):
+    from PySide6.QtCore import QMimeData, QUrl
+    terminal, session = open_terminal(window)
+    named = tmp_path / "con espacio.txt"
+    named.write_text("x")
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(named)), QUrl.fromLocalFile(str(folders[1]))])
+    expected = " ".join(shells_quote(path, terminal.family) for path in (named, folders[1])) + " "
+    assert terminal.dropped_text(mime) == expected
+    session.sent = b""
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QDragEnterEvent, QDropEvent
+    actions = Qt.DropAction.MoveAction | Qt.DropAction.CopyAction
+    enter = QDragEnterEvent(QPoint(5, 5), actions, mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.ShiftModifier)
+    assert terminal.viewport().acceptDrops()  # Qt da el arrastre a la zona de dentro: la terminal en sí no atiende esos eventos
+    QApplication.sendEvent(terminal.viewport(), enter)
+    assert enter.isAccepted() and enter.dropAction() == Qt.DropAction.CopyAction
+    event = QDropEvent(QPointF(5, 5), actions, mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.ShiftModifier)
+    QApplication.sendEvent(terminal.viewport(), event)
+    assert session.sent == expected.encode() and event.dropAction() == Qt.DropAction.CopyAction  # nunca mover, aunque se pida con Mayús
+    assert terminal.session is not None and not session.sent.endswith(b"\r")  # escribe, no ejecuta
+    text_only = QMimeData()
+    text_only.setText("rm -rf /")
+    assert terminal.dropped_text(text_only) is None
+    terminal.dispose()
+    assert terminal.dropped_text(mime) is None
+
+
+def shells_quote(path, family):
+    from directory_commander_tux_tux.core.git_tools import quote
+    return quote(os.path.normpath(str(path)), family)

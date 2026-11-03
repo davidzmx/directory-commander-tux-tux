@@ -1120,6 +1120,7 @@ class FileView(QWidget):
         bar.addWidget(self.git_label)
         bar.addWidget(self._tool("treepane", tr("Mostrar u ocultar el árbol de carpetas de este panel"), "Set PANETREE=Toggle"))
         bar.addWidget(self._tool("terminalpane", tr("Mostrar u ocultar la terminal de este panel"), "Set TERMINAL=Toggle"))
+        bar.addWidget(self._tool("terminalonly", tr("Mostrar solo la terminal en este panel"), "Set TERMINALPANE=On"))
         self.send_button = self._tool("sendright", tr("Mostrar esta carpeta en el otro visualizador de archivos"), "Go DEST")
         bar.addWidget(self.send_button)
         for icon, tip, command in (("swap", tr("Intercambiar paneles"), "Go SWAP"), ("close", tr("Cerrar este panel"), "Set PANE=Close")):
@@ -1487,8 +1488,8 @@ class FileView(QWidget):
         """Muestra los botones que caben junto a la ruta, para que la barra no fije el ancho mínimo del panel.
         Se ocultan primero los que tienen otro camino rápido; Subir es el último."""
         tools = self._bar_tools()
-        dual_only = (tools["close"], tools["swap"], self.send_button)
-        keys = ("copypath", "favorites", "home", "refresh", "menu-arrow", "close", "swap", "send", "gitbranch", "treepane", "terminalpane", "goforward", "goback", "goup")
+        dual_only = (tools["close"], tools["swap"], self.send_button, tools["terminalonly"])
+        keys = ("terminalonly", "copypath", "favorites", "home", "refresh", "menu-arrow", "close", "swap", "send", "gitbranch", "treepane", "terminalpane", "goforward", "goback", "goup")
         order = [tools[key] for key in keys]
         wanted = [tools[key] for key in keys if key not in self._removed_tools and (self._dual_tools_visible or tools[key] not in dual_only) and (key != "gitbranch" or self.git_branch)]
         layout = self.pane_bar.layout()

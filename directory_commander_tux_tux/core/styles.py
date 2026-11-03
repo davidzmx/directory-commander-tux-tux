@@ -260,8 +260,15 @@ def preview_regions(style: dict, full_width: bool = False, viewer_above: bool = 
             height *= 0.68
     position = position_of(style) or ("right" if stacked(mode) else "below")
     automatic = position_of(style) is None
-    for pane, (rel_x, rel_y, rel_width, rel_height) in sorted(layout_rects(mode).items()):
+    rects = sorted(layout_rects(mode).items())
+    only = terminal_panes_of(style) or set()
+    if all(PANE_TERMINALS[pane] in only for pane, _rect in rects):
+        only = only - {FIRST}  # como en la ventana: siempre queda un panel con archivos
+    for pane, (rel_x, rel_y, rel_width, rel_height) in rects:
         pane_x, pane_y, pane_width, pane_height = x + rel_x * width, y + rel_y * height, rel_width * width, rel_height * height
+        if PANE_TERMINALS[pane] in only:
+            regions.append(Region(TERMINAL, pane, pane_x, pane_y, pane_width, pane_height))
+            continue
         if double_tree and style.get("tree", True):
             part = pane_width * 0.3
             regions.append(Region(PANE_TREE, pane, pane_x, pane_y, part, pane_height))
@@ -283,6 +290,12 @@ def terminals_of(style: dict) -> set[str] | None:
     """Qué terminales pide un estilo. None si no dice nada: entonces no cierra las que se hayan abierto a mano."""
     wanted = style.get("terminals")
     return {name for name in wanted if name in TERMINALS} if isinstance(wanted, list) else None
+
+
+def terminal_panes_of(style: dict) -> set[str] | None:
+    """Los paneles que muestran solo su terminal. None si no dice nada: entonces no cambia los que se hayan puesto así a mano."""
+    wanted = style.get("terminal_panes")
+    return {name for name in wanted if name in PANE_TERMINALS} if isinstance(wanted, list) else None
 
 
 def position_of(style: dict) -> str | None:

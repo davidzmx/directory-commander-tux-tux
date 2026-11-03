@@ -100,6 +100,7 @@ MENU_ITEMS = [
     (N_("&Ver"), N_("Visor"), "viewerpane", "F3", "Set VIEWPANE=Toggle", False),
     (N_("&Ver"), N_("Metadatos"), "metapane", "Ctrl+Shift+M", "Set METAPANE=Toggle", False),
     (N_("&Ver"), N_("Terminal del panel"), "terminalpane", TOGGLE_SHORTCUT, "Set TERMINAL=Toggle", False),
+    (N_("&Ver"), N_("Solo la terminal en este panel"), "terminalonly", None, "Set TERMINALPANE=On", False),
     (N_("&Ver"), N_("Terminal general"), "terminalgeneral", GENERAL_TOGGLE_SHORTCUT, "Set GENERALTERMINAL=Toggle", False),
     (N_("&Ver"), N_("Línea de comandos"), "terminal", "Ctrl+Shift+P", "Set CMDLINE=Toggle", False),
     (N_("&Ver"), None, None, None, None, False),
@@ -670,6 +671,9 @@ class MainWindow(ExtraCommands, QMainWindow):
         self.double_tree = False
         self._terminal_position: str | None = None  # dónde pone el estilo la terminal de cada panel. Sin indicarlo, según los paneles
         self._style_terminals: set[int] = set()  # las que abrió el estilo: se cierran con él, y las abiertas a mano no
+        # Los paneles que solo muestran su terminal, con lo que tenían antes: si su terminal seguía al panel y si mostraban su árbol.
+        self._terminal_only: dict[int, tuple[bool, bool]] = {}
+        self._style_terminal_panes: set[int] = set()
         self._style_sizing: set[int] = set()
         self._applied_style = ""
         self._docks_viewer_above = True
@@ -910,6 +914,8 @@ class MainWindow(ExtraCommands, QMainWindow):
         self.terminals: list[TerminalView] = []
         self.terminal_panels: list[QWidget] = []
         self.terminal_follow_buttons: list[QToolButton] = []
+        self.terminal_files_buttons: list[QToolButton] = []
+        self.terminal_close_buttons: list[QToolButton] = []
         self.git_bars: list[GitBar] = []
         self._compare_timer = QTimer(self, singleShot=True, interval=COMPARE_STATE_DELAY_MS)
         self._compare_timer.timeout.connect(self._update_compare_state)
@@ -1016,7 +1022,12 @@ class MainWindow(ExtraCommands, QMainWindow):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        bar = self._title_bar(tr("Terminal general") if general else tr("Terminal"), [("close", tr("Ocultar"), lambda: self._show_terminal(number(), False))])
+        bar = self._title_bar(tr("Terminal general") if general else tr("Terminal"), [])
+        files = self._title_button("filespane", tr("Volver a mostrar los archivos de este panel"), lambda: self._set_terminal_only(number(), False))
+        files.hide()  # solo en un panel que muestra únicamente su terminal
+        close = self._title_button("close", tr("Ocultar"), lambda: self._terminal_close_clicked(number()))
+        bar.layout().addWidget(files)
+        bar.layout().addWidget(close)
         follow = self._title_button("shortcut", "", lambda: self._set_terminal_follow(number(), not terminal.following))
         follow.setCheckable(True)
         follow.setChecked(True)
@@ -1040,6 +1051,8 @@ class MainWindow(ExtraCommands, QMainWindow):
         self.terminals.append(terminal)
         self.terminal_panels.append(panel)
         self.terminal_follow_buttons.append(follow)
+        self.terminal_files_buttons.append(files)
+        self.terminal_close_buttons.append(close)
         self.terminal_shell_boxes.append(box)
         self._refresh_follow_button(index)
 
@@ -1147,11 +1160,95 @@ class MainWindow(ExtraCommands, QMainWindow):
                 terminal.setFocus()
         else:
             had_focus = terminal.hasFocus()
+            if index in self._terminal_only:
+                self._leave_terminal_only(index)  # sin su terminal quedaría vacío: vuelve a mostrar sus archivos
+                self._after_terminal_only_change()
             panel.hide()
             if index == GENERAL_TERMINAL:
                 self.general_dock.hide()
             if had_focus:
                 self._terminal_group(index).current.focus_list()
+
+    def _terminal_close_clicked(self, index: int) -> None:
+        """En un panel que solo muestra su terminal, la X cierra el panel, como la de su barra cuando muestra archivos."""
+        if index in self._terminal_only:
+            self.close_pane(index)
+        else:
+            self._show_terminal(index, False)
+
+    # ------------------------------------------------------------------ paneles solo de terminal
+    def _file_panes(self) -> list[int]:
+        return [side for side in range(styles.pane_count(self.dual)) if side not in self._terminal_only]
+
+    def _set_terminal_only(self, side: int, only: bool, focus: bool = True) -> bool:
+        """Un panel que muestra solo su terminal, en todo su sitio. Nunca es el origen ni el destino, y su terminal deja de seguirle:
+        si se le pide que siga, va con el panel activo. False si no puede ser, porque siempre debe quedar un panel con archivos."""
+        if only == (side in self._terminal_only):
+            return True
+        if only:
+            if side >= styles.pane_count(self.dual) or not [pane for pane in self._file_panes() if pane != side]:
+                self.statusBar().showMessage(tr("Siempre debe quedar al menos un panel con archivos"), 5000)
+                return False
+            self._enter_terminal_only(side)
+            if side == self.active_side:
+                self._view_activated(self.groups[self._dest_side].current)  # el destino pasa a ser el origen: ya no cuenta este panel
+            self._show_terminal(side, True, focus)
+        else:
+            self._leave_terminal_only(side)
+            if focus:
+                self.groups[side].current.focus_list()
+        self._after_terminal_only_change()
+        return True
+
+    def _enter_terminal_only(self, side: int, before: tuple[bool, bool] | None = None) -> None:
+        terminal = self.terminals[side]
+        self._terminal_only[side] = before or (terminal.following, not self.tree_panels[side].isHidden())
+        if before is None:
+            terminal.set_following(False)
+        self.groups[side].hide()
+        self.tree_panels[side].hide()
+        self._refresh_terminal_only_buttons(side)
+
+    def _leave_terminal_only(self, side: int) -> None:
+        """Lo que se hizo en la terminal manda: la lista vuelve en la carpeta a la que se llegó con cd, y no al revés."""
+        following, tree = self._terminal_only.pop(side)
+        self._style_terminal_panes.discard(side)
+        self.groups[side].setVisible(side < styles.pane_count(self.dual))
+        terminal, view = self.terminals[side], self.groups[side].current
+        here = terminal.current_path() if terminal.session is not None else ""
+        here = os.path.normpath(here) if here and os.path.isdir(here) else ""  # como la guarda el panel: así no se vuelve a escribir cd
+        if here and os.path.normcase(here) != os.path.normcase(view.path):
+            view.navigate(here)  # la terminal aún no sigue a su panel: no se entera
+        terminal.set_following(following, here)
+        if tree:
+            self._show_pane_tree(side, True)
+        if not self.terminal_panels[side].isHidden():
+            self._size_terminal(side)  # vuelve a su sitio junto a los archivos
+        self._refresh_terminal_only_buttons(side)
+
+    def _after_terminal_only_change(self) -> None:
+        self._update_roles()
+        self._sync_terminals()
+        self._sync_tree()
+        self._update_preview()
+
+    def _refresh_terminal_only_buttons(self, index: int) -> None:
+        only = index in self._terminal_only
+        self.terminal_files_buttons[index].setVisible(only)
+        self.terminal_close_buttons[index].setToolTip(tr("Cerrar este panel") if only else tr("Ocultar"))
+        self._refresh_follow_button(index)
+
+    def _set_terminalpane(self, value: str) -> None:
+        """On, el panel activo pasa a mostrar solo su terminal. Off, todos los que lo hacen vuelven a mostrar sus archivos."""
+        value = value.lower()
+        if value in ("on", "yes", "toggle"):
+            self._set_terminal_only(self.active_side, True)
+        elif value in ("off", "no"):
+            for side in sorted(self._terminal_only):
+                self._leave_terminal_only(side)
+            self._after_terminal_only_change()
+        else:
+            raise ValueError(tr("Valor no válido para TERMINALPANE: {value}", value=value))
 
     def _terminal_place(self, index: int) -> object:
         return "dock" if index == GENERAL_TERMINAL and self._general_docked else self.terminal_areas[index].orientation()
@@ -1216,7 +1313,7 @@ class MainWindow(ExtraCommands, QMainWindow):
         button.setChecked(terminal.following and terminal.can_follow)
         if not terminal.can_follow:
             button.setToolTip(tr("Esta terminal no puede seguir al panel"))
-        elif index == GENERAL_TERMINAL:
+        elif index == GENERAL_TERMINAL or index in self._terminal_only:
             button.setToolTip(tr("Seguir al panel activo"))
         else:
             button.setToolTip(tr("Seguir a este panel"))
@@ -1796,7 +1893,7 @@ class MainWindow(ExtraCommands, QMainWindow):
         names = styles.terminals_of(style)
         wanted = {index for index, name in enumerate(styles.TERMINALS) if names is not None and name in names and self._terminal_can_show(index)}
         closing = self._style_terminals if names is None else set(range(len(self.terminals)))
-        for index in closing - wanted:
+        for index in closing - wanted - set(self._terminal_only):  # de esas se encarga `_apply_style_terminal_panes`
             self._show_terminal(index, False)
         self._style_terminals = wanted
         for index in sorted(wanted):
@@ -1805,6 +1902,25 @@ class MainWindow(ExtraCommands, QMainWindow):
             self._show_terminal(index, True, focus=False)
         if self._style_sizing:
             QTimer.singleShot(0, self._size_style_terminals)  # los paneles aún no tienen su nuevo tamaño
+        self._apply_style_terminal_panes(style)
+
+    def _apply_style_terminal_panes(self, style: dict) -> None:
+        """Los paneles que el estilo quiere solo con su terminal. Si no dice nada, solo vuelven a mostrar sus archivos los que puso así el estilo anterior."""
+        names = styles.terminal_panes_of(style)
+        count = styles.pane_count(self.dual)
+        wanted = {index for index, name in enumerate(styles.PANE_TERMINALS) if names is not None and name in names and index < count}
+        if len(wanted) == count:
+            wanted.discard(0)  # siempre queda un panel con archivos
+        leaving = self._style_terminal_panes if names is None else set(self._terminal_only)
+        for side in sorted(leaving - wanted):
+            if side in self._terminal_only:
+                self._leave_terminal_only(side)
+                if styles.terminals_of(style) is not None and side not in self._style_terminals:
+                    self._show_terminal(side, False)  # como las demás terminales: el estilo dice cuáles se ven
+        self._after_terminal_only_change()
+        for side in sorted(wanted):
+            self._set_terminal_only(side, True, focus=False)  # si no queda otro con archivos, se queda con los suyos
+        self._style_terminal_panes = wanted & set(self._terminal_only)
 
     def _terminal_can_show(self, index: int) -> bool:
         return index == GENERAL_TERMINAL or index < styles.pane_count(self.dual)
@@ -1822,9 +1938,9 @@ class MainWindow(ExtraCommands, QMainWindow):
     def _show_pane_trees(self, visible: bool) -> None:
         count = styles.pane_count(self.dual)
         for index, panel in enumerate(self.tree_panels):
-            if visible and index < count:
+            if visible and index < count and index not in self._terminal_only:
                 self._show_pane_tree(index, True)
-            elif not visible or index >= count:
+            elif not visible or index >= count or index in self._terminal_only:
                 panel.hide()  # el de un panel que no se ve: tendrá su ancho cuando se muestre
 
     def _show_pane_tree(self, index: int, visible: bool) -> None:
@@ -1860,10 +1976,14 @@ class MainWindow(ExtraCommands, QMainWindow):
         definition = {"name": name, "dual": self.dual, "tree": tree, "double_tree": self.double_tree,
                       "viewer": not self.viewer_dock.isHidden(), "meta": not self.meta_dock.isHidden(),
                       "view": self.source.view_mode,
-                      "terminals": [name for name, panel in zip(styles.TERMINALS, self.terminal_panels) if not panel.isHidden()]}
+                      "terminals": [name for name, panel in zip(styles.TERMINALS, self.terminal_panels) if not panel.isHidden()],
+                      "terminal_panes": self._terminal_pane_names()}
         if self._terminal_position:
             definition["terminal_position"] = self._terminal_position
         return definition
+
+    def _terminal_pane_names(self) -> list[str]:
+        return [styles.PANE_TERMINALS[side] for side in sorted(self._terminal_only) if side < styles.pane_count(self.dual)]
 
     def _save_current_style(self) -> None:
         name = self._ask_text(tr("Guardar estilo"), tr("Nombre del estilo:"), self.config.get("style", ""))
@@ -1920,9 +2040,9 @@ class MainWindow(ExtraCommands, QMainWindow):
 
     @property
     def _dest_side(self) -> int | None:
-        """Con más de dos paneles, el destino es el último que estuvo activo."""
+        """Con más de dos paneles, el destino es el último que estuvo activo. Uno que solo muestra su terminal no puede serlo."""
         count = styles.pane_count(self.dual)
-        return next((side for side in self._pane_history if side != self.active_side and side < count), None)
+        return next((side for side in self._pane_history if side != self.active_side and side < count and side not in self._terminal_only), None)
 
     @property
     def dest(self) -> FileView | None:
@@ -1966,7 +2086,7 @@ class MainWindow(ExtraCommands, QMainWindow):
     def _view_activated(self, view: FileView) -> None:
         self._compare_timer.start()
         side = next((index for index, group in enumerate(self.groups) if view in group.views()), self.active_side)
-        if side != self.active_side and self.dual != "Off":
+        if side != self.active_side and self.dual != "Off" and side not in self._terminal_only:
             self.active_side = side
             self._update_roles()
             self._sync_tree()
@@ -1977,7 +2097,7 @@ class MainWindow(ExtraCommands, QMainWindow):
         if group.current is None or not hasattr(self, "location"):
             return
         side = self.groups.index(group)
-        if side < styles.pane_count(self.dual):  # un panel que no se ve no pasa a ser el activo porque se le añada una pestaña
+        if side < styles.pane_count(self.dual) and side not in self._terminal_only:  # un panel que no se ve no pasa a ser el activo porque se le añada una pestaña
             self.active_side = side
         self._update_roles()
         self._sync_tree()
@@ -2085,8 +2205,10 @@ class MainWindow(ExtraCommands, QMainWindow):
             self.pane_trees[side].sync_to(group.current.path)
 
     def _sync_terminals(self) -> None:
-        """Cada terminal sigue a su panel, y la general al activo. Un comprimido o «Este equipo» no son carpetas: se queda en la última."""
-        for terminal, group in zip(self.terminals, (*self.groups, self.groups[self.active_side])):
+        """Cada terminal sigue a su panel, y la general y las de los paneles que solo la muestran, al activo. Un comprimido o «Este equipo» no son carpetas: se queda en la última."""
+        active = self.groups[self.active_side]
+        for index, terminal in enumerate(self.terminals):
+            group = active if index == GENERAL_TERMINAL or index in self._terminal_only else self.groups[index]
             if group.current is not None and os.path.isdir(group.current.path):
                 terminal.follow(group.current.path)
 
@@ -2694,12 +2816,14 @@ class MainWindow(ExtraCommands, QMainWindow):
         count = styles.pane_count(mode)
         self.dual = mode
         self._arrange_panes(mode)
-        active = self.active_side if self.active_side < count else 0
+        if not self._file_panes():
+            self._leave_terminal_only(0)  # con menos paneles, solo quedaban de terminal
+        active = self.active_side if self.active_side in self._file_panes() else self._file_panes()[0]
         history = list(self._pane_history)  # abrirle su primera pestaña a un panel no cuenta como haberlo usado
         for side, group in enumerate(self.groups):
             if side < count and group.count() == 0:
                 group.add_tab(self.groups[0].current.path if self.groups[0].current else platform_utils.home_dir())
-            group.setVisible(side < count)
+            group.setVisible(side < count and side not in self._terminal_only)
             self.sides[side].setVisible(side < count)
         self._pane_history = history
         self.active_side = active
@@ -2790,9 +2914,10 @@ class MainWindow(ExtraCommands, QMainWindow):
             raise ValueError(tr("Valor no válido para PANE: {value}", value=value))
         self.close_pane()
 
-    def close_pane(self) -> None:
-        """Cierra el panel activo con sus pestañas y su terminal. Su sitio pasa al de al lado, y el activo vuelve a ser el que lo fue antes."""
-        side, count = self.active_side, styles.pane_count(self.dual)
+    def close_pane(self, side: int | None = None) -> None:
+        """Cierra un panel, el activo si no se dice otro, con sus pestañas y su terminal. Su sitio pasa al de al lado, y el activo vuelve a ser el que lo fue antes."""
+        side = self.active_side if side is None else side
+        count = styles.pane_count(self.dual)
         terminal = self.terminals[side]
         if count < 2:
             self.statusBar().showMessage(tr("Siempre debe quedar al menos un panel"), 5000)
@@ -2803,6 +2928,10 @@ class MainWindow(ExtraCommands, QMainWindow):
         extents = {index: (self.sides[index].width(), self.sides[index].height()) for index in range(count)}
         mode, sizes = styles.close_in_layout(self.dual, side, extents)
         history = [pane for pane in self._pane_history if pane != side]
+        if side in self._terminal_only:
+            self._terminal_only.pop(side)
+            self._style_terminal_panes.discard(side)
+            self._refresh_terminal_only_buttons(side)  # el número queda libre: si se vuelve a usar, será un panel de archivos
         self._show_terminal(side, False)
         terminal.dispose()
         terminal.following = True
@@ -2816,7 +2945,8 @@ class MainWindow(ExtraCommands, QMainWindow):
         last = styles.MAX_PANES - 1
         renumbered = [pane - 1 if pane > side else pane for pane in history]
         self._pane_history = [*renumbered, last]
-        self._active_side = next(pane for pane in renumbered if pane < count - 1)
+        # Si solo quedan paneles de terminal, `set_dual` le devuelve los archivos al primero.
+        self._active_side = next((pane for pane in renumbered if pane < count - 1 and pane not in self._terminal_only), 0)
         self._pane_shape = None  # los paneles han cambiado de número: hay que volver a colocarlos aunque la forma sea la misma
         self._pane_extents = sizes
         active, order = self._active_side, list(self._pane_history)
@@ -2833,7 +2963,7 @@ class MainWindow(ExtraCommands, QMainWindow):
         """Todo lo de ese panel pasa al último número, libre, y los siguientes bajan uno: siempre están seguidos."""
         last = styles.MAX_PANES - 1
         for items in (self.groups, self.sides, self.pane_areas, self.pane_trees, self.tree_panels, self.terminals, self.terminal_panels,
-                      self.terminal_follow_buttons, self.terminal_shell_boxes, self.terminal_areas, self.git_bars):
+                      self.terminal_follow_buttons, self.terminal_files_buttons, self.terminal_close_buttons, self.terminal_shell_boxes, self.terminal_areas, self.git_bars):
             items.insert(last, items.pop(side))
 
         def moved(pane: int) -> int:
@@ -2844,6 +2974,8 @@ class MainWindow(ExtraCommands, QMainWindow):
         self._pane_tree_paths = {moved(pane): value for pane, value in self._pane_tree_paths.items()}
         self._style_terminals = {moved(pane) for pane in self._style_terminals}
         self._style_sizing = {moved(pane) for pane in self._style_sizing}
+        self._terminal_only = {moved(pane): value for pane, value in self._terminal_only.items()}
+        self._style_terminal_panes = {moved(pane) for pane in self._style_terminal_panes}
 
     def _set_split(self, value: str) -> None:
         where = {"horizontal": "below", "vertical": "right"}.get(value.lower())
@@ -2864,6 +2996,8 @@ class MainWindow(ExtraCommands, QMainWindow):
         extents[side] = extents[new] = (width / 2, height) if where == "right" else (width, height / 2)
         path = self.source.path
         group = self.groups[new]
+        if new in self._terminal_only:
+            self._leave_terminal_only(new)  # lo fue con otra disposición: el panel nuevo muestra la carpeta
         if group.count() == 0:
             group.add_tab(path)
         elif group.current.path != path:
@@ -3699,6 +3833,7 @@ class MainWindow(ExtraCommands, QMainWindow):
         add(tr("Dividir panel - Horizontal"), "Set SPLIT=Horizontal", can_split, "dualhorizontal")
         add(tr("Dividir panel - Vertical"), "Set SPLIT=Vertical", can_split, "dualdisplay")
         add(tr("Cerrar este panel"), "Set PANE=Close", self.dual != "Off", "close")
+        add(tr("Solo la terminal en este panel"), "Set TERMINALPANE=On", len(self._file_panes()) > 1, "terminalonly")
         add(tr("Abrir terminal aquí"), "CLI DOSPROMPT", not in_archive, "terminal")
         add(tr("Añadir a favoritos"), "Favorites ADDDIALOG", icon="favoritesadd")
         menu.addAction(tr("Copiar la ruta de esta carpeta"), lambda: QApplication.clipboard().setText(view.path))
@@ -3862,11 +3997,28 @@ class MainWindow(ExtraCommands, QMainWindow):
                 elif isinstance(saved.get("height"), int):  # el estado de la ventana no sirve: se guardó sin la terminal dentro
                     QTimer.singleShot(0, lambda height=saved["height"]: self.resizeDocks([self.general_dock], [height], Qt.Orientation.Vertical))
                 self._terminals_sized[index] = self._terminal_place(index)
+        if isinstance(session.get("terminal_only"), list):  # las sesiones de antes no lo dicen: se quedan los que ponga el estilo
+            self._restore_terminal_only(session["terminal_only"])
         if live:
             self._restore_tab_choices(session)
         self._orient_terminals()
         self.source.focus_list()
         self._sync_tree()
+
+    def _restore_terminal_only(self, saved: list) -> None:
+        wanted = {entry["pane"]: (entry.get("follow") is not False, bool(entry.get("tree"))) for entry in saved
+                  if isinstance(entry, dict) and isinstance(entry.get("pane"), int) and 0 <= entry["pane"] < styles.pane_count(self.dual)}
+        for side in sorted(set(self._terminal_only) - set(wanted)):
+            self._leave_terminal_only(side)
+        for side, before in sorted(wanted.items()):
+            if side in self._terminal_only:
+                self._terminal_only[side] = before
+            elif not self.terminal_panels[side].isHidden() and [pane for pane in self._file_panes() if pane != side]:
+                self._enter_terminal_only(side, before)  # su terminal ya sigue o no según lo guardado
+        self._style_terminal_panes &= set(self._terminal_only)
+        if self.active_side in self._terminal_only:
+            self.active_side = self._file_panes()[0]
+        self._after_terminal_only_change()
 
     def _restore_tab_choices(self, session: dict) -> None:
         """Lo que solo guarda una sesión con nombre: en cada panel, la pestaña elegida y cómo se ve cada una, y qué panel estaba activo."""
@@ -3881,7 +4033,7 @@ class MainWindow(ExtraCommands, QMainWindow):
             if isinstance(wanted, int) and 0 <= wanted < group.count():
                 group.setCurrentIndex(wanted)
         side = session.get("active_side")
-        if isinstance(side, int) and 0 <= side < styles.pane_count(self.dual):
+        if isinstance(side, int) and side in self._file_panes():
             self.active_side = side
             self._update_roles()
 
@@ -3906,7 +4058,8 @@ class MainWindow(ExtraCommands, QMainWindow):
         current = self._style_named(self.config.get("style", "")) or {}
         layout = {"dual": self.dual, "tree": not self.tree_dock.isHidden() or (self.double_tree and any(not panel.isHidden() for panel in self.tree_panels)), "double_tree": self.double_tree,
                   "viewer": not self.viewer_dock.isHidden(), "meta": not self.meta_dock.isHidden(),
-                  "terminals": [name for index, name in enumerate(styles.TERMINALS) if not self.terminal_panels[index].isHidden()]}
+                  "terminals": [name for index, name in enumerate(styles.TERMINALS) if not self.terminal_panels[index].isHidden()],
+                  "terminal_panes": self._terminal_pane_names()}
         if current.get("viewer_area") in ("top", "bottom"):
             layout["viewer_area"] = current["viewer_area"]
         if self._terminal_position:
@@ -3931,6 +4084,7 @@ class MainWindow(ExtraCommands, QMainWindow):
             "pane_trees": [{"sizes": bytes(side.saveState().toHex()).decode(), "visible": not panel.isHidden()}
                            for side, panel in zip(self.sides, self.tree_panels)],
             "pane_terminals": [self._terminal_session(index) for index in range(GENERAL_TERMINAL)],
+            "terminal_only": [{"pane": side, "follow": following, "tree": tree} for side, (following, tree) in sorted(self._terminal_only.items())],
             "general_terminal": self._terminal_session(GENERAL_TERMINAL),
         }
 
