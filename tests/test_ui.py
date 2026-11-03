@@ -2762,6 +2762,10 @@ def test_long_folder_name_is_shortened_only_in_the_title():
 @pytest.fixture
 def media_window(window, tmp_path):
     pytest.importorskip("PySide6.QtMultimedia")
+    from PySide6.QtMultimedia import QMediaDevices
+    if sys.platform == "win32" and not QMediaDevices.audioOutputs():
+        # Así está el Windows de GitHub Actions: allí el reproductor de Qt se queda parado varios minutos al cerrarlo, y la ejecución no termina.
+        pytest.skip("Windows sin salida de audio")
     window.config["viewer_muted"] = True  # las pruebas no deben sonar
     window.run_command("Set VIEWPANE=On")
     yield window
