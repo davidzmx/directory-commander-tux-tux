@@ -39,6 +39,7 @@ from .icons import app_icon, themed
 from .image_viewer import ImageViewer
 from .model import IMAGE_EXTENSIONS, folder_icon
 from .preview import MetadataPanel, PreviewPane
+from .pane_frame import FramedSplitter
 from .terminal import GENERAL_TOGGLE_SHORTCUT, TOGGLE_SHORTCUT, ShellBox, TerminalView
 from .compare_view import CompareWindow, compare_files
 from .find_panel import FindPanel, FindWindow
@@ -675,7 +676,7 @@ class MainWindow(ExtraCommands, QMainWindow):
         self._docks_to_balance = False
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         # Cada lado es su panel con su terminal y, con los estilos de doble árbol, su propio árbol a la izquierda.
-        self.sides = [QSplitter(Qt.Orientation.Horizontal) for _group in self.groups]
+        self.sides = [FramedSplitter(Qt.Orientation.Horizontal) for _group in self.groups]
         self.pane_areas = [QSplitter(Qt.Orientation.Vertical) for _group in self.groups]
         for side, area, group in zip(self.sides, self.pane_areas, self.groups):
             area.addWidget(group)
@@ -1960,6 +1961,7 @@ class MainWindow(ExtraCommands, QMainWindow):
             self.setWindowTitle(f"{location_label(self.source.path)} — {APP_NAME}")
             self.location.set_path(self.source.path)
             self.content_box.set_checked_keys(self.source.model.content_types)
+        self._apply_pane_frames()
 
     def _view_activated(self, view: FileView) -> None:
         self._compare_timer.start()
@@ -2709,6 +2711,24 @@ class MainWindow(ExtraCommands, QMainWindow):
         self._update_roles()
         self.apply_tab_settings()
 
+    def _apply_pane_frames(self) -> None:
+        """Cada panel, con su terminal y su árbol, dentro de un marco de su color: el del lugar que ocupa. El del activo, más grueso,
+        y los demás, atenuados. Todos dejan el mismo sitio: cambiar de panel activo no mueve nada."""
+        config = self.config
+        shown = config.get("pane_frames_on", True) is not False and pane_colors.frames_shown(config.get("pane_frames"), config.get("pane_frames_after"), styles.pane_count(self.dual))
+        width = pane_colors.frame_width(config.get("pane_frame_width"))
+        active_width = pane_colors.frame_width(config.get("pane_frame_active_width"), pane_colors.DEFAULT_ACTIVE_FRAME_WIDTH)
+        dim = pane_colors.frame_dim(config.get("pane_frame_dim")) if config.get("pane_frame_dim_on") is True else 0
+        alpha = round(255 * (100 - dim) / 100)
+        for index, (side, color) in enumerate(zip(self.sides, pane_colors.frame_colors(config.get("pane_frame_colors")))):
+            active = index == self.active_side
+            side.set_frame(color if shown else None, max(width, active_width), active_width if active else width, 255 if active else alpha)
+
+    def _set_paneframes(self, value: str) -> None:
+        value = value.lower()
+        self.config["pane_frames_on"] = self.config.get("pane_frames_on", True) is False if value == "toggle" else value in ("on", "yes")
+        self._apply_pane_frames()
+
     def _arrange_panes(self, mode: str) -> None:
         """Una simple fila o columna, como siempre, o partes dentro de otras. Cambiar de una a otra mueve los paneles, sin cerrar nada de lo que tengan dentro."""
         tree = styles.layout_tree(mode)
@@ -3218,6 +3238,7 @@ class MainWindow(ExtraCommands, QMainWindow):
 
     def _preferences_changed(self) -> None:
         self.apply_theme()
+        self._apply_pane_frames()
         self._apply_path_options()
         self._refresh_session_box()
         for bar in self.git_bars:

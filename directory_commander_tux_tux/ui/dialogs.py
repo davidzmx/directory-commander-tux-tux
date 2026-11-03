@@ -313,6 +313,53 @@ class PreferencesDialog(QDialog):
         pale_row.addWidget(self.path_pale_dark)
         pale_row.addStretch(1)
         form.addRow(tr("Ruta más tenue que la barra:"), pale_row)
+        self.frames_on = QCheckBox(tr("Mostrar"))
+        self.frames_on.setChecked(config.get("pane_frames_on", True) is not False)
+        self.frames_on.setToolTip(tr("Un borde de color alrededor de cada panel, su terminal y su árbol, para ver qué va con qué. "
+                                     "También se muestra y oculta con su botón de la barra de herramientas"))
+        self.frame_mode = QComboBox()
+        self.frame_mode.addItem(tr("Con más de"), "more_than")
+        self.frame_mode.addItem(tr("Siempre"), "always")
+        self.frame_mode.setCurrentIndex(max(0, self.frame_mode.findData(config.get("pane_frames", pane_colors.DEFAULT_FRAME_MODE))))
+        self.frames_after = QSpinBox()
+        self.frames_after.setRange(pane_colors.MIN_FRAMES_AFTER, pane_colors.MAX_FRAMES_AFTER)
+        self.frames_after.setValue(pane_colors.frames_after(config.get("pane_frames_after")))
+        self.frames_after_label = QLabel(tr("paneles"))
+        frame_row = QHBoxLayout()
+        for widget in (self.frames_on, self.frame_mode, self.frames_after, self.frames_after_label):
+            frame_row.addWidget(widget)
+        frame_row.addStretch(1)
+        form.addRow(tr("Marco de color de cada panel:"), frame_row)
+        self.frame_width = self._frame_spin(1, pane_colors.MAX_FRAME_WIDTH, " px", pane_colors.frame_width(config.get("pane_frame_width")))
+        self.frame_active_width = self._frame_spin(1, pane_colors.MAX_FRAME_WIDTH, " px",
+                                                   pane_colors.frame_width(config.get("pane_frame_active_width"), pane_colors.DEFAULT_ACTIVE_FRAME_WIDTH))
+        self.frame_dim = self._frame_spin(0, pane_colors.MAX_FRAME_DIM, " %", pane_colors.frame_dim(config.get("pane_frame_dim")))
+        self.frame_dim.setToolTip(tr("Cuánto se atenúan los marcos de los paneles que no son el activo"))
+        self.frame_dim_on = QCheckBox(tr("Atenuar los demás"))
+        self.frame_dim_on.setChecked(config.get("pane_frame_dim_on") is True)
+        sizes_row = QHBoxLayout()
+        for label, widget in ((tr("Grosor:"), self.frame_width), (tr("Del panel activo:"), self.frame_active_width)):
+            sizes_row.addWidget(QLabel(label))
+            sizes_row.addWidget(widget)
+        sizes_row.addWidget(self.frame_dim_on)
+        sizes_row.addWidget(self.frame_dim)
+        sizes_row.addStretch(1)
+        form.addRow("", sizes_row)
+        chosen = pane_colors.clean_frame_colors(config.get("pane_frame_colors"))
+        self.frame_colors = [ColorButton(tr("Panel {number}", number=index + 1), chosen[index], default) for index, default in enumerate(pane_colors.FRAME_COLORS)]
+        self.reset_frame_colors = QPushButton(tr("Restablecer"))
+        self.reset_frame_colors.setToolTip(tr("Vuelve a los colores por defecto"))
+        self.reset_frame_colors.clicked.connect(lambda: [button.set_value("") for button in self.frame_colors])
+        frame_colors_row = QHBoxLayout()
+        for button in self.frame_colors:
+            frame_colors_row.addWidget(button)
+        frame_colors_row.addWidget(self.reset_frame_colors)
+        frame_colors_row.addStretch(1)
+        form.addRow("", frame_colors_row)
+        self.frame_mode.currentIndexChanged.connect(self._show_frame_options)
+        self.frames_on.toggled.connect(self._show_frame_options)
+        self.frame_dim_on.toggled.connect(self._show_frame_options)
+        self._show_frame_options()
         self.path_folder_menus = QCheckBox(tr("Mostrar las subcarpetas al pulsar el › de la ruta"))
         self.path_folder_menus.setChecked(bool(config.get("path_folder_menus", False)))
         form.addRow("", self.path_folder_menus)
@@ -466,6 +513,23 @@ class PreferencesDialog(QDialog):
             button.setEnabled(custom)
         self.delete_scheme.setEnabled(custom)
 
+    @staticmethod
+    def _frame_spin(low: int, high: int, suffix: str, value: int) -> QSpinBox:
+        spin = QSpinBox()
+        spin.setRange(low, high)
+        spin.setSuffix(suffix)
+        spin.setValue(value)
+        return spin
+
+    def _show_frame_options(self) -> None:
+        shown = self.frames_on.isChecked()
+        for widget in (self.frame_mode, self.frame_width, self.frame_active_width, self.frame_dim_on, *self.frame_colors, self.reset_frame_colors):
+            widget.setEnabled(shown)
+        self.frame_dim.setEnabled(shown and self.frame_dim_on.isChecked())
+        counted = shown and self.frame_mode.currentData() == "more_than"
+        self.frames_after.setEnabled(counted)
+        self.frames_after_label.setEnabled(counted)
+
     def _scheme_color_chosen(self, role: str) -> None:
         for custom in self._custom_schemes:
             if pane_colors.custom_key(custom["name"]) == self.pane_scheme.currentData():
@@ -538,6 +602,15 @@ class PreferencesDialog(QDialog):
         config["pane_path_pale_light"] = self.path_pale_light.isChecked()
         config["pane_path_pale_dark"] = self.path_pale_dark.isChecked()
         config["pane_color_customs"] = pane_colors.clean_customs(self._custom_schemes)
+        config["pane_frames_on"] = self.frames_on.isChecked()
+        config["pane_frames"] = self.frame_mode.currentData()
+        config["pane_frames_after"] = self.frames_after.value()
+        config["pane_frame_width"] = self.frame_width.value()
+        config["pane_frame_active_width"] = self.frame_active_width.value()
+        config["pane_frame_dim_on"] = self.frame_dim_on.isChecked()
+        config["pane_frame_dim"] = self.frame_dim.value()
+        colors = [button.value for button in self.frame_colors]
+        config["pane_frame_colors"] = colors if any(colors) else []
         config["favorites"] = self.favorites_page.values()
         config["favorites_autosort"] = self.favorites_page.auto_sort.isChecked()
         self.recent_page.apply_to(config)

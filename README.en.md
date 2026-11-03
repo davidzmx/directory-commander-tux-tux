@@ -12,6 +12,7 @@ A **multi-pane file manager with built-in terminals and git**, for **Linux (KDE 
 
 - From one to eight panes, side by side, one above the other or in a grid, each with its own tabs
 - Each pane can show or hide its own folder tree from the button on its bar, just like its terminal
+- With more than two panes, each one goes with its terminal and its tree inside a frame of its own color, thicker for the active pane and, if you like, the others dimmed. It is shown and hidden with its toolbar button; from how many panes, the thickness, the dimming and the colors are chosen in Preferences
 - Right-clicking an empty area splits a pane, with a new one below or to the right in the same folder, and closes it when it's no longer needed
 - Styles to change the layout with one click, which you can edit or create yourself: see [Styles](#styles-one-layout-for-each-task)
 - Named sessions that save panes, tabs and terminals. They are loaded, saved and started at the top right, and managed in Preferences → Sessions
@@ -182,7 +183,7 @@ Select SOURCETODEST=in|notin[,noext] [DESELECTNOMATCH]      Select DESTTOSOURCE=
 Set DUAL=Off|Vertical|Horizontal|Toggle  STYLE="Vertical doble panel"  CONTENTTYPE=images  DARKMODE=Toggle
 Set VIEW=Details|List|SmallIcons|LargeIcons|Tiles|Thumbnails|FilmStrip  VIEW=Cycle,List,Details
 Set SORTBY=name|size|type|modified|attr|sortlist  SORTREVERSE=On|Off  FRIENDLYDATES=off|today|normal
-Set FLATVIEW=Toggle  HIDDEN=Toggle  TREE=Toggle  PANETREE=Toggle  VIEWPANE=Toggle  METAPANE=Toggle  TERMINAL=Toggle  GENERALTERMINAL=Toggle  CMDLINE=Toggle  FILTER=Show
+Set FLATVIEW=Toggle  HIDDEN=Toggle  TREE=Toggle  PANETREE=Toggle  PANEFRAMES=Toggle  VIEWPANE=Toggle  METAPANE=Toggle  TERMINAL=Toggle  GENERALTERMINAL=Toggle  CMDLINE=Toggle  FILTER=Show
 Set NAVLOCK=Toggle  CHECKBOXMODE=Toggle  EXPANDABLEFOLDERS=Toggle  GRIDLINESH=Toggle  STATUSBAR=Toggle  STATE=Source|Dest
 Set DELRECYCLEBIN=Toggle  DELRECYCLECONFIRM=Toggle  UTILITY=Find|Sync|Dupe|Jobs|Log|Off[,Toggle]
 Set LOCKBARS=Toggle  HOVERINFO=Toggle

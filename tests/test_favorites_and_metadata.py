@@ -186,7 +186,7 @@ def test_upgrade_puts_the_metadata_button_before_the_viewer_button(tmp_path):
     toolbar = [{"label": "Visor", "commands": ["Set VIEWPANE=Toggle"]}, {"label": "Otro", "commands": ["Go UP"]}]
     (tmp_path / "config.json").write_text(json.dumps({"config_version": 5, "toolbar": toolbar}), encoding="utf-8")
     labels = [item["commands"][0] for item in Config(str(tmp_path))["toolbar"]]
-    assert labels == [METADATA_TOGGLE_COMMAND, "Set VIEWPANE=Toggle", "Go UP", "Set GENERALTERMINAL=Toggle", "Compare FILES"]
+    assert labels == [METADATA_TOGGLE_COMMAND, "Set VIEWPANE=Toggle", "Go UP", "Set GENERALTERMINAL=Toggle", "Set PANEFRAMES=Toggle", "Compare FILES"]
 
 
 def test_settings_validate_recents_and_smart_favorites_on_import(tmp_path):

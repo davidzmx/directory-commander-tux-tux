@@ -118,9 +118,9 @@ def test_theme_button_from_following_the_desktop(window, monkeypatch):
     assert window.config["theme"] == "dark"
 
 
-@pytest.mark.parametrize("stored,expected_extra", [([{"label": "Mío", "commands": ["Go UP"], "children": []}], 5), ([{"label": "x", "commands": [THEME_TOGGLE_COMMAND]}], 3)])
+@pytest.mark.parametrize("stored,expected_extra", [([{"label": "Mío", "commands": ["Go UP"], "children": []}], 6), ([{"label": "x", "commands": [THEME_TOGGLE_COMMAND]}], 4)])
 def test_old_configuration_gets_the_theme_button(tmp_path, stored, expected_extra):
-    # Los botones de metadatos, de la terminal y de comparar también se añaden a las barras anteriores a la v6.
+    # Los botones de metadatos, de la terminal, de comparar y de los marcos también se añaden a las barras anteriores a la v6.
     (tmp_path / "config.json").write_text(json.dumps({"config_version": 3, "toolbar": stored}), encoding="utf-8")
     config = Config(str(tmp_path))
     assert config["config_version"] == CONFIG_VERSION and len(config["toolbar"]) == len(stored) + expected_extra

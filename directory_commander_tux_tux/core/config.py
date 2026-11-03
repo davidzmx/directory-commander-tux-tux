@@ -11,7 +11,7 @@ from . import favorites
 from .i18n import AUTO, LANGUAGE_FOLDER, N_, tr
 from .pane_colors import DEFAULT_SCHEME, adopt_old_colors
 
-CONFIG_VERSION = 17
+CONFIG_VERSION = 18
 PORTABLE_MARKER = "portable.txt"
 VISIT_POINTS = 3
 
@@ -68,6 +68,7 @@ TERMINAL_TOGGLE_COMMAND = "Set TERMINAL=Toggle"
 GENERAL_TERMINAL_COMMAND = "Set GENERALTERMINAL=Toggle"
 OLD_TERMINAL_BUTTON = "Panel de terminal"
 COMPARE_COMMAND = "Compare FILES"
+FRAMES_TOGGLE_COMMAND = "Set PANEFRAMES=Toggle"
 DEFAULT_TOOLBAR = [
     _btn(N_("Atrás"), "goback", "Go BACK", N_("Atrás (Alt+←)")),
     _btn(N_("Adelante"), "goforward", "Go FORWARD", N_("Adelante (Alt+→)")),
@@ -143,6 +144,7 @@ DEFAULT_TOOLBAR = [
     _btn(N_("Comparar archivos"), "compare", COMPARE_COMMAND, N_("Comparar los dos archivos seleccionados")),
     _btn(N_("Terminal"), "terminal", TERMINAL_COMMAND, N_("Abrir una terminal aquí (Ctrl+Alt+T)")),
     _btn(N_("Terminal general"), "terminalgeneral", GENERAL_TERMINAL_COMMAND, N_("Mostrar u ocultar la terminal general (Ctrl+Mayús+G)")),
+    _btn(N_("Marcos de los paneles"), "paneframes", FRAMES_TOGGLE_COMMAND, N_("Mostrar u ocultar el marco de color de cada panel")),
     _sep(),
     _btn(N_("Cambiar tema"), "themetoggle", THEME_TOGGLE_COMMAND, N_("Cambiar entre el tema claro y el oscuro")),
 ]
@@ -222,6 +224,14 @@ DEFAULTS: dict = {
     "pane_path_pale_light": False,  # la ruta de la barra de cada panel, más tenue que el resto de la barra
     "pane_path_pale_dark": False,
     "pane_color_customs": [],
+    "pane_frames_on": True,  # el marco de color de cada panel, con su terminal y su árbol
+    "pane_frames": "more_than",  # con más de `pane_frames_after` paneles, o always
+    "pane_frames_after": 2,
+    "pane_frame_width": 3,
+    "pane_frame_active_width": 5,
+    "pane_frame_dim_on": False,  # atenuar los de los paneles que no son el activo
+    "pane_frame_dim": 50,  # cuánto, en %
+    "pane_frame_colors": [],  # uno por panel; vacío, el de serie
     "recent": [],
     "recent_list": {},
     "history_size": 10,
@@ -371,6 +381,25 @@ def _add_compare_button(stored: dict) -> None:
     toolbar.insert(len(toolbar) if after is None else after + 1, button)
 
 
+def _add_frames_button(stored: dict) -> None:
+    """Junto al de la terminal general, o al final si la barra no lo tiene."""
+    toolbar = stored.get("toolbar")
+    if not isinstance(toolbar, list) or any(_runs(item, FRAMES_TOGGLE_COMMAND) for item in toolbar):
+        return
+    button = next(json.loads(json.dumps(item)) for item in DEFAULT_TOOLBAR if _runs(item, FRAMES_TOGGLE_COMMAND))
+    after = next((position for position, item in enumerate(toolbar) if _runs(item, GENERAL_TERMINAL_COMMAND)), None)
+    toolbar.insert(len(toolbar) if after is None else after + 1, button)
+
+
+def _adopt_old_frame_modes(stored: dict) -> None:
+    """La primera forma de elegirlos tenía «nunca» y un número fijo, dos."""
+    mode = stored.get("pane_frames")
+    if mode == "never":
+        stored["pane_frames"], stored["pane_frames_on"] = "more_than", False
+    elif mode == "more_than_two":
+        stored["pane_frames"] = "more_than"
+
+
 def _add_general_terminal_button(stored: dict) -> None:
     """En la v8 el botón junto a «Abrir terminal» actuaba sobre el panel activo, y ahora cada panel tiene el suyo: pasa a ser el de la terminal
     general y conserva su sitio. Sin él, va junto al de abrir una terminal o al final si la barra no lo tiene. Un botón creado por el usuario sigue siendo suyo."""
@@ -468,6 +497,9 @@ class Config:
             adopt_old_colors(stored)
         if version < 14:
             _add_compare_button(stored)
+        if version < 18:
+            _add_frames_button(stored)
+            _adopt_old_frame_modes(stored)
         if version < 17:
             stored.pop("find_window_geometry", None)  # era de otra forma de colocar el panel, con otras medidas
         if version < 15:

@@ -742,13 +742,14 @@ def test_space_goes_to_the_neighbour_and_the_others_do_not_change(window):
     settle()
     window.splitter.setSizes([300, 300, 900])
     settle()
-    third_width = window.groups[2].width()
-    first_width, second_width = window.groups[0].width(), window.groups[1].width()
+    # Los lados enteros: con tres hay marcos y con dos no, y el panel de dentro gana lo que ocupaba el suyo.
+    third_width = window.sides[2].width()
+    first_width, second_width = window.sides[0].width(), window.sides[1].width()
     activate(window, 1)
     window.close_pane()
     settle()
-    assert abs(window.groups[1].width() - third_width) < 20
-    assert abs(window.groups[0].width() - (first_width + second_width)) < 20
+    assert abs(window.sides[1].width() - third_width) < 20
+    assert abs(window.sides[0].width() - (first_width + second_width)) < 20
 
 
 class Session:
@@ -1149,3 +1150,151 @@ def test_right_button_drop_on_any_pane_asks_what_to_do(window, four_folders, mon
     view._dropped([str(item)], None, True, True)
     QTest.qWait(30)
     assert view.current_view.drop_handler is not None
+
+
+# ------------------------------------------------------------------ el marco de color de cada panel
+def frame(window, index):
+    side = window.sides[index]
+    return side.frame_color, side.frame_line, side.frame_alpha, side.contentsMargins().left()
+
+
+def test_frame_values_keep_the_default_where_nothing_valid_was_chosen():
+    assert pane_colors.clean_frame_colors(["#AABBCC", "rojo", None]) == ["#aabbcc"] + [""] * 7
+    assert pane_colors.frame_colors(["", "#000000"])[:3] == [pane_colors.FRAME_COLORS[0], "#000000", pane_colors.FRAME_COLORS[2]]
+    assert pane_colors.frame_width(99) == pane_colors.MAX_FRAME_WIDTH and pane_colors.frame_width(True) == pane_colors.DEFAULT_FRAME_WIDTH
+    assert pane_colors.frame_dim(-5) == 0 and pane_colors.frame_dim(100) == pane_colors.MAX_FRAME_DIM
+    assert pane_colors.frames_after(1) == 2 and pane_colors.frames_after(9) == 7 and pane_colors.frames_after("x") == 2
+    assert [pane_colors.frames_shown("more_than", 2, count) for count in (2, 3)] == [False, True]
+    assert [pane_colors.frames_shown("more_than", 4, count) for count in (4, 5)] == [False, True]
+    assert pane_colors.frames_shown("always", 7, 1) and pane_colors.frames_shown("otro", 2, 3)
+
+
+def test_with_more_than_two_panes_each_one_gets_a_frame_of_its_color(window):
+    assert all(side.frame_color is None and side.contentsMargins().left() == 0 for side in window.sides)
+    window.split_pane("right")
+    settle()
+    room = max(pane_colors.DEFAULT_FRAME_WIDTH, pane_colors.DEFAULT_ACTIVE_FRAME_WIDTH)
+    assert [side.frame_color for side in window.sides[:3]] == list(pane_colors.FRAME_COLORS[:3])
+    assert all(side.contentsMargins().left() == room for side in window.sides[:3])
+    side = window.sides[2]
+    inside = window.groups[2].mapTo(side, QPoint(0, 0))
+    assert inside.x() >= room and inside.y() >= room  # lo de dentro deja sitio al marco
+    image = side.grab().toImage()
+    assert image.pixelColor(1, side.height() // 2) == QColor(pane_colors.FRAME_COLORS[2])  # el nuevo es el activo: sin atenuar
+    window.close_pane()
+    settle()
+    assert all(side.frame_color is None for side in window.sides)
+
+
+def test_a_pane_divided_later_also_gets_its_frame(window):
+    """Al colocarse en su sitio, Qt le volvía a aplicar los estilos y le quitaba el sitio del marco."""
+    window.groups[1].current.activated.emit(window.groups[1].current)
+    window.split_pane("below")
+    settle()
+    window.groups[0].current.activated.emit(window.groups[0].current)
+    window.split_pane("below")
+    settle()
+    assert window.dual == "h(v(0,3),v(1,2))"
+    room = max(pane_colors.DEFAULT_FRAME_WIDTH, pane_colors.DEFAULT_ACTIVE_FRAME_WIDTH)
+    for index in range(4):
+        side = window.sides[index]
+        assert side.frame_color == pane_colors.FRAME_COLORS[index] and side.contentsMargins().left() == room, index
+        assert window.groups[index].mapTo(side, QPoint(0, 0)).x() >= room, index
+    image = window.sides[3].grab().toImage()
+    assert image.pixelColor(1, window.sides[3].height() // 2) == QColor(pane_colors.FRAME_COLORS[3])
+
+
+def test_the_active_frame_stands_out_and_the_others_are_dimmed_only_if_chosen(window):
+    window.run_command("Set DUAL=4-Grid")
+    settle()
+    assert frame(window, 0)[1:3] == (pane_colors.DEFAULT_ACTIVE_FRAME_WIDTH, 255)
+    assert frame(window, 1)[1:3] == (pane_colors.DEFAULT_FRAME_WIDTH, 255)  # sin atenuar, si no se pide
+    window.config["pane_frame_dim_on"] = True
+    window._preferences_changed()
+    alpha = round(255 * (100 - pane_colors.DEFAULT_FRAME_DIM) / 100)
+    assert frame(window, 1)[1:3] == (pane_colors.DEFAULT_FRAME_WIDTH, alpha) and frame(window, 0)[2] == 255
+    margins = [frame(window, index)[3] for index in range(4)]
+    window.groups[2].current.activated.emit(window.groups[2].current)
+    assert frame(window, 2)[1:3] == (pane_colors.DEFAULT_ACTIVE_FRAME_WIDTH, 255) and frame(window, 0)[1:3] == (pane_colors.DEFAULT_FRAME_WIDTH, alpha)
+    assert [frame(window, index)[3] for index in range(4)] == margins  # cambiar de activo no mueve nada
+
+
+def test_frames_follow_the_preferences(window):
+    window.config["pane_frames"] = "always"
+    window.config["pane_frame_width"] = 6
+    window.config["pane_frame_active_width"] = 2
+    window.config["pane_frame_dim_on"] = True
+    window.config["pane_frame_dim"] = 0
+    window.config["pane_frame_colors"] = ["", "#123456"]
+    window._preferences_changed()
+    assert frame(window, 1) == ("#123456", 6, 255, 6) and frame(window, 0) == (pane_colors.FRAME_COLORS[0], 2, 255, 6)
+    window.config["pane_frames"] = "more_than"
+    window.config["pane_frames_after"] = 4
+    window.run_command("Set DUAL=4-Grid")
+    assert all(side.frame_color is None for side in window.sides)
+    window.split_pane("right")
+    assert all(window.sides[index].frame_color for index in range(5))
+
+
+def test_the_toolbar_button_shows_and_hides_the_frames(window):
+    window.run_command("Set DUAL=3-Vertical")
+    assert window.sides[0].frame_color
+    window.run_command("Set PANEFRAMES=Toggle")
+    assert window.config["pane_frames_on"] is False and all(side.frame_color is None and side.contentsMargins().left() == 0 for side in window.sides)
+    window.run_command("Set PANEFRAMES=Toggle")
+    assert window.config["pane_frames_on"] is True and window.sides[0].frame_color
+    assert any(item.get("commands") == ["Set PANEFRAMES=Toggle"] for item in window.config["toolbar"])
+
+
+def test_preferences_page_saves_the_frame_options(window):
+    dialog = PreferencesDialog(window.config)
+    assert dialog.frames_on.isChecked() and dialog.frame_mode.currentData() == "more_than" and dialog.frames_after.value() == 2
+    assert dialog.frame_width.value() == pane_colors.DEFAULT_FRAME_WIDTH and dialog.frame_active_width.value() == pane_colors.DEFAULT_ACTIVE_FRAME_WIDTH
+    dialog.frame_mode.setCurrentIndex(dialog.frame_mode.findData("always"))
+    assert not dialog.frames_after.isEnabled()
+    dialog.frames_on.setChecked(False)
+    assert not dialog.frame_width.isEnabled() and not dialog.frame_colors[0].isEnabled() and not dialog.frame_mode.isEnabled()
+    dialog.frames_on.setChecked(True)
+    dialog.frame_mode.setCurrentIndex(dialog.frame_mode.findData("more_than"))
+    dialog.frames_after.setValue(3)
+    dialog.frame_width.setValue(5)
+    dialog.frame_active_width.setValue(8)
+    assert not dialog.frame_dim_on.isChecked() and not dialog.frame_dim.isEnabled()
+    dialog.frame_dim_on.setChecked(True)
+    assert dialog.frame_dim.isEnabled()
+    dialog.frame_dim.setValue(70)
+    dialog.frame_colors[3].set_value("#abcdef")
+    dialog.apply_to(window.config)
+    assert [window.config[key] for key in ("pane_frames_on", "pane_frames", "pane_frames_after", "pane_frame_width", "pane_frame_active_width", "pane_frame_dim_on",
+                                           "pane_frame_dim")] == [True, "more_than", 3, 5, 8, True, 70]
+    assert window.config["pane_frame_colors"] == ["", "", "", "#abcdef", "", "", "", ""]
+    dialog.reset_frame_colors.click()
+    dialog.apply_to(window.config)
+    assert window.config["pane_frame_colors"] == []
+
+
+def test_frame_settings_can_be_imported_and_wrong_values_are_dropped(tmp_path):
+    path = tmp_path / "ajustes.json"
+    path.write_text(json.dumps({"format": settings_io.SETTINGS_FORMAT, "settings": {
+        "pane_frames": "always", "pane_frame_width": 50, "pane_frame_colors": ["#FFFFFF", 3], "pane_frames_after": 1, "pane_frame_dim": 300,
+        "pane_frames_on": False}}), encoding="utf-8")
+    values, _skipped = settings_io.read_settings(str(path))
+    assert values["pane_frames"] == "always" and values["pane_frame_width"] == pane_colors.MAX_FRAME_WIDTH and values["pane_frames_on"] is False
+    assert values["pane_frame_colors"] == ["#ffffff"] + [""] * 7 and values["pane_frames_after"] == 2 and values["pane_frame_dim"] == pane_colors.MAX_FRAME_DIM
+    path.write_text(json.dumps({"format": settings_io.SETTINGS_FORMAT, "settings": {"pane_frames": "a veces"}}), encoding="utf-8")
+    values, _skipped = settings_io.read_settings(str(path))
+    assert "pane_frames" not in values
+
+
+@pytest.mark.parametrize("old, mode, on", [("never", "more_than", False), ("more_than_two", "more_than", True), ("always", "always", True)])
+def test_the_first_way_of_choosing_frames_is_kept(tmp_path, old, mode, on):
+    (tmp_path / "config.json").write_text(json.dumps({"config_version": 17, "pane_frames": old}), encoding="utf-8")
+    config = Config(str(tmp_path))
+    assert config["pane_frames"] == mode and config["pane_frames_on"] is on
+
+
+def test_an_old_toolbar_gets_the_frames_button_next_to_the_general_terminal(tmp_path):
+    toolbar = [{"label": "Otro", "commands": ["Go UP"]}, {"label": "Terminal general", "commands": ["Set GENERALTERMINAL=Toggle"]}, {"label": "Último", "commands": ["Go BACK"]}]
+    (tmp_path / "config.json").write_text(json.dumps({"config_version": 17, "toolbar": toolbar}), encoding="utf-8")
+    config = Config(str(tmp_path))
+    assert [item["commands"][0] for item in config["toolbar"]] == ["Go UP", "Set GENERALTERMINAL=Toggle", "Set PANEFRAMES=Toggle", "Go BACK"]

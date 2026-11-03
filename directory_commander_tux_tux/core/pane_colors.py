@@ -17,6 +17,17 @@ BUILTIN_SCHEMES: dict[str, tuple[str, dict[str, dict[str, str]]]] = {
                                                "light": {"source": "#6a3fc0", "dest": "#00858a"}}),
 }
 OLD_CUSTOM_NAME = "Personalizada"
+# El marco de color que agrupa cada panel con su terminal y su árbol. Colores vivos, que se distinguen entre sí con los dos temas.
+FRAME_MODES = ("more_than", "always")  # con más de cierto número de paneles, o siempre. Se encienden y apagan aparte
+DEFAULT_FRAME_MODE = "more_than"
+DEFAULT_FRAMES_AFTER = 2
+MIN_FRAMES_AFTER, MAX_FRAMES_AFTER = 2, 7  # con uno solo no haría falta, y con ocho ya no hay más
+DEFAULT_FRAME_WIDTH = 3
+DEFAULT_ACTIVE_FRAME_WIDTH = 5
+MAX_FRAME_WIDTH = 8
+DEFAULT_FRAME_DIM = 50  # cuánto se atenúan, en %, los marcos de los paneles que no son el activo
+MAX_FRAME_DIM = 90
+FRAME_COLORS = ("#3b82f6", "#f59e0b", "#22c55e", "#ef4444", "#a855f7", "#06b6d4", "#ec4899", "#84cc16")
 
 
 def clean_colors(raw) -> dict[str, str]:
@@ -35,6 +46,38 @@ def clean_customs(raw) -> list[dict[str, str]]:
             seen.add(name.strip().casefold())
             result.append({"name": name.strip(), **clean_colors(item)})
     return result
+
+
+def clean_frame_colors(raw) -> list[str]:
+    """Uno por panel. Vacío, o lo que no sea un color, es el de serie."""
+    source = raw if isinstance(raw, list) else []
+    return [source[index].lower() if index < len(source) and isinstance(source[index], str) and re.fullmatch(r"#[0-9a-fA-F]{6}", source[index]) else ""
+            for index in range(len(FRAME_COLORS))]
+
+
+def frame_colors(raw) -> list[str]:
+    return [chosen or default for chosen, default in zip(clean_frame_colors(raw), FRAME_COLORS)]
+
+
+def _number(raw, low: int, high: int, default: int) -> int:
+    return max(low, min(high, raw)) if isinstance(raw, int) and not isinstance(raw, bool) else default
+
+
+def frame_width(raw, default: int = DEFAULT_FRAME_WIDTH) -> int:
+    return _number(raw, 1, MAX_FRAME_WIDTH, default)
+
+
+def frame_dim(raw) -> int:
+    return _number(raw, 0, MAX_FRAME_DIM, DEFAULT_FRAME_DIM)
+
+
+def frames_after(raw) -> int:
+    return _number(raw, MIN_FRAMES_AFTER, MAX_FRAMES_AFTER, DEFAULT_FRAMES_AFTER)
+
+
+def frames_shown(mode, after, pane_count: int) -> bool:
+    mode = mode if mode in FRAME_MODES else DEFAULT_FRAME_MODE
+    return mode == "always" or pane_count > frames_after(after)
 
 
 def custom_key(name: str) -> str:

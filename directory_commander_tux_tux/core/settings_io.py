@@ -24,9 +24,9 @@ SETTINGS_TYPES: dict[str, type] = {
     "friendly_dates": str, "show_favorites_bar": bool, "lock_bars": bool, "full_row_select": bool, "hover_info": bool,
     "viewer_autoplay": bool, "viewer_repeat": bool, "video_window_repeat": bool, "bar_buttons": dict, "bar_order": dict, "viewer_muted": bool, "viewer_volume": int, "viewer_above_metadata": bool, "folder_tabs": dict, "open_images": str, "open_archives": str, "open_videos": str, "tree_level_colors": bool, "shell_menu_items": bool, "context_menus": dict,
     "show_hidden": bool, "favorites": list, "favorites_autosort": bool, "recent_list": dict, "history_size": int, "smart_favorites": dict, "rename_presets": dict, "toolbar": list, "styles": list, "style": str,
-    "layouts": dict, "tabgroups": dict, "general_terminal_full_width": bool, "pane_color_scheme": str, "pane_color_customs": list, "pane_path_pale_light": bool, "pane_path_pale_dark": bool, "unfold_archives": bool, "path_folder_menus": bool, "find_templates": dict, "saved_sessions": list, "restore_session": bool, "find_panel_place": str, "find_window_columns": int, "git_enabled": bool, "git_show_branch": bool, "git_show_user": bool, "git_pane_branch": bool, "git_run_commands": bool,
+    "layouts": dict, "tabgroups": dict, "general_terminal_full_width": bool, "pane_color_scheme": str, "pane_color_customs": list, "pane_path_pale_light": bool, "pane_path_pale_dark": bool, "pane_frames_on": bool, "pane_frames": str, "pane_frames_after": int, "pane_frame_width": int, "pane_frame_active_width": int, "pane_frame_dim_on": bool, "pane_frame_dim": int, "pane_frame_colors": list, "unfold_archives": bool, "path_folder_menus": bool, "find_templates": dict, "saved_sessions": list, "restore_session": bool, "find_panel_place": str, "find_window_columns": int, "git_enabled": bool, "git_show_branch": bool, "git_show_user": bool, "git_pane_branch": bool, "git_run_commands": bool,
 }
-_ALLOWED_VALUES = {"find_panel_place": {"bottom", "window"}, "find_window_columns": {1, 2}, "theme": {"dark", "light", "auto"}, "friendly_dates": {"off", "today", "normal"},
+_ALLOWED_VALUES = {"find_panel_place": {"bottom", "window"}, "pane_frames": set(pane_colors.FRAME_MODES), "find_window_columns": {1, 2}, "theme": {"dark", "light", "auto"}, "friendly_dates": {"off", "today", "normal"},
                    "open_images": {"viewer", "system"}, "open_archives": {"system", "browse"},
                    "open_videos": {"viewer", "system"}}
 
@@ -106,6 +106,14 @@ def _sanitize(key: str, value):
         return max(1, min(frequent.MAX_HISTORY_LIMIT, value))
     if key == "pane_color_customs":
         return pane_colors.clean_customs(value)
+    if key in ("pane_frame_width", "pane_frame_active_width"):
+        return pane_colors.frame_width(value)
+    if key == "pane_frame_dim":
+        return pane_colors.frame_dim(value)
+    if key == "pane_frames_after":
+        return pane_colors.frames_after(value)
+    if key == "pane_frame_colors":
+        return pane_colors.clean_frame_colors(value)
     if key == "styles":
         return [item for item in value if isinstance(item, dict) and isinstance(item.get("name"), str)] or None
     return value

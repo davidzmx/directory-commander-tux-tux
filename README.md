@@ -12,6 +12,7 @@ Gestor de archivos **multipanel, con terminales integradas y git**, para **Linux
 
 - De uno a ocho paneles, uno junto al otro, uno encima del otro o en cuadrícula, cada uno con sus pestañas
 - Cada panel puede mostrar u ocultar su propio árbol de carpetas, con el botón de su barra, igual que su terminal
+- Con más de dos paneles, cada uno va con su terminal y su árbol dentro de un marco de su color, más grueso el del panel activo, y si quieres, los demás atenuados. Se muestra y oculta con su botón de la barra de herramientas; a partir de cuántos paneles, el grosor, la atenuación y los colores se eligen en Preferencias
 - El clic derecho en una zona vacía divide un panel, con otro debajo o a la derecha en la misma carpeta, y lo cierra cuando ya no hace falta
 - Estilos para cambiar de disposición con un clic, que puedes editar o crear tú: mira [Estilos](#estilos-una-disposición-para-cada-tarea)
 - Sesiones con nombre que guardan paneles, pestañas y terminales. Arriba a la derecha se cargan, se guardan y se empieza una nueva; se administran en Preferencias → Sesiones
@@ -181,7 +182,7 @@ Select SOURCETODEST=in|notin[,noext] [DESELECTNOMATCH]      Select DESTTOSOURCE=
 Set DUAL=Off|Vertical|Horizontal|Toggle  STYLE="Vertical doble panel"  CONTENTTYPE=images  DARKMODE=Toggle
 Set VIEW=Details|List|SmallIcons|LargeIcons|Tiles|Thumbnails|FilmStrip  VIEW=Cycle,List,Details
 Set SORTBY=name|size|type|modified|attr|sortlist  SORTREVERSE=On|Off  FRIENDLYDATES=off|today|normal
-Set FLATVIEW=Toggle  HIDDEN=Toggle  TREE=Toggle  PANETREE=Toggle  VIEWPANE=Toggle  METAPANE=Toggle  TERMINAL=Toggle  GENERALTERMINAL=Toggle  CMDLINE=Toggle  FILTER=Show
+Set FLATVIEW=Toggle  HIDDEN=Toggle  TREE=Toggle  PANETREE=Toggle  PANEFRAMES=Toggle  VIEWPANE=Toggle  METAPANE=Toggle  TERMINAL=Toggle  GENERALTERMINAL=Toggle  CMDLINE=Toggle  FILTER=Show
 Set NAVLOCK=Toggle  CHECKBOXMODE=Toggle  EXPANDABLEFOLDERS=Toggle  GRIDLINESH=Toggle  STATUSBAR=Toggle  STATE=Source|Dest
 Set DELRECYCLEBIN=Toggle  DELRECYCLECONFIRM=Toggle  UTILITY=Find|Sync|Dupe|Jobs|Log|Off[,Toggle]
 Set LOCKBARS=Toggle  HOVERINFO=Toggle
