@@ -1,16 +1,21 @@
 """Estilos de doble árbol, nombres de los estilos y orden del visor y los metadatos."""
+import ctypes
 import json
 import os
+import stat
+import sys
 import time
 
 import pytest
 from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QIcon
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from directory_commander_tux_tux.core import settings_io
 from directory_commander_tux_tux.core.config import DEFAULT_STYLES, METADATA_TOGGLE_COMMAND, VIEWER_TOGGLE_COMMAND, Config
 from directory_commander_tux_tux.ui.dialogs import PreferencesDialog
+from directory_commander_tux_tux.ui.folder_tree import LOADED_ROLE, FolderTree
 from directory_commander_tux_tux.ui.main_window import MainWindow
 
 
@@ -30,7 +35,9 @@ def folders(tmp_path):
 @pytest.fixture
 def window(qapp_offscreen, tmp_path, monkeypatch, folders):
     monkeypatch.setenv("DIRECTORY_COMMANDER_TUX_TUX_CONFIG", str(tmp_path / "cfg"))
-    main = MainWindow(Config(), [str(folder) for folder in folders])
+    config = Config()
+    config["show_hidden"] = True  # en un Windows normal, el directorio temporal cuelga de AppData, que está oculto: el árbol se quedaría antes de llegar
+    main = MainWindow(config, [str(folder) for folder in folders])
     main.resize(1500, 800)
     main.show()
     QApplication.processEvents()
@@ -54,9 +61,42 @@ def same(a, b) -> bool:
     return os.path.normcase(os.path.normpath(str(a))) == os.path.normcase(os.path.normpath(str(b)))
 
 
+def hidden_folder(parent):
+    folder = parent / ".oculta"
+    folder.mkdir()
+    if sys.platform == "win32":
+        ctypes.windll.kernel32.SetFileAttributesW(str(folder), stat.FILE_ATTRIBUTE_HIDDEN)
+    return folder
+
+
+@pytest.fixture
+def lone_tree(qapp_offscreen, tmp_path):
+    tree = FolderTree()
+    yield tree, tree._node(tree, "raíz", str(tmp_path), QIcon())
+    tree.dispose()
+
+
+def test_showing_hidden_folders_makes_the_way_to_one_wait_for_the_new_list(lone_tree, tmp_path):
+    tree, item = lone_tree
+    hidden = hidden_folder(tmp_path)
+    tree._load(item)
+    assert wait_until(lambda: item.data(0, LOADED_ROLE)) and item.childCount() == 0
+    tree.set_show_hidden(True)
+    tree._descend(item, [str(hidden)], tree._sync_token)  # sin esperar: la lista que hay aún no la tiene
+    assert wait_until(lambda: same(tree.current_path() or ".", hidden)), tree.current_path()
+
+
+def test_a_list_read_before_showing_hidden_folders_is_not_used(lone_tree, tmp_path):
+    tree, item = lone_tree
+    hidden_folder(tmp_path)
+    tree._load(item)
+    tree.set_show_hidden(True)  # la lectura ya estaba en marcha, con la opción de antes
+    assert wait_until(lambda: item.data(0, LOADED_ROLE)) and item.childCount() == 1
+
+
 def item_for(tree, path):
     """El elemento de la carpeta, una vez que el árbol ha llegado a ella."""
-    assert wait_until(lambda: same(tree.current_path() or ".", path), 15)
+    assert wait_until(lambda: same(tree.current_path() or ".", path), 15), (tree.current_path(), str(path))
     return tree.currentItem()
 
 

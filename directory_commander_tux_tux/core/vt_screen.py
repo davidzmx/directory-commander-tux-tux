@@ -107,10 +107,10 @@ class Screen:
         return "".join(cell[0] for cell in self.line(index))
 
     def _prompt_filled_the_row_above(self) -> bool:
-        """Un indicador que llena su fila deja el cursor al principio de la siguiente, y esa fila vacía parece que aún no hay indicador. PowerShell lo coloca
-        allí sin que conste como línea partida, y de su espacio final solo queda la última columna libre."""
+        """Un indicador que llena su fila deja el cursor en la siguiente, con su espacio final o sin nada, y esa fila en blanco parece que aún no hay indicador.
+        Puede constar como línea partida o no: la consola de Windows coloca ella misma el cursor."""
         index = self.cursor_index - 1
-        return self.x == 0 and index >= 0 and not self.before_cursor() and len(self._row_text(index).rstrip()) >= self.cols - 1
+        return index >= 0 and not self.before_cursor() and (self.line(index).wrapped or len(self._row_text(index).rstrip()) >= self.cols - 1)
 
     def prompt_text(self) -> str:
         """Lo que hay detrás del cursor, para saber si la terminal espera una orden."""

@@ -16,6 +16,9 @@ CTRL = Qt.KeyboardModifier.ControlModifier
 SHIFT = Qt.KeyboardModifier.ShiftModifier
 
 
+SELECTION_WAIT_MS = SELECT_EVERY_MS * 5  # holgada: en un equipo lento, o con otros temporizadores delante, el suyo puede llegar tarde
+
+
 def settle(ms: int = 40) -> None:
     loop = QEventLoop()
     QTimer.singleShot(ms, loop.quit)
@@ -64,7 +67,7 @@ def press(view, position, keys=NO_KEYS):
 
 def drag(view, position, keys=NO_KEYS):
     send(view, QEvent.Type.MouseMove, position, NO_BUTTON, LEFT, keys)
-    settle(SELECT_EVERY_MS + 15)  # la selección va un poco por detrás del rectángulo, a propósito
+    settle(SELECTION_WAIT_MS)  # la selección va un poco por detrás del rectángulo, a propósito
 
 
 def release(view, position, keys=NO_KEYS):
@@ -121,7 +124,7 @@ def test_rectangle_follows_at_once_and_selection_does_not_slow_it_down(window, v
     band = band_of(view)
     assert band.geometry().adjusted(-1, -1, 1, 1).contains(target)  # sin esperar nada
     assert selected_rows(view) == []
-    settle(SELECT_EVERY_MS + 15)
+    settle(SELECTION_WAIT_MS)
     assert selected_rows(view) == [1, 2, 3, 4]
 
 

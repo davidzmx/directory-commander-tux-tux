@@ -2549,7 +2549,7 @@ def test_tree_follows_source_at_startup(window, tree):
     window.run_command("Set HIDDEN=On")  # en Windows, el directorio temporal cuelga de AppData, que está oculto
     window.source.navigate(str(left / "subcarpeta"))
     target = os.path.normcase(os.path.normpath(str(left / "subcarpeta")))
-    assert wait_until(lambda: os.path.normcase(os.path.normpath(window.tree.current_path() or ".")) == target, 15)
+    assert wait_until(lambda: os.path.normcase(os.path.normpath(window.tree.current_path() or ".")) == target, 15), (window.tree.current_path(), target)
 
 
 def test_breadcrumb_handles_root_and_repeated_names(app):

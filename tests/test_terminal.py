@@ -286,6 +286,15 @@ def test_a_prompt_that_fills_its_row_is_still_a_prompt():
     assert screen.line_before_cursor() == "PS /carp>"
 
 
+def test_the_final_space_of_a_prompt_that_fills_its_row_goes_to_the_next():
+    screen = Screen(10, 4)
+    screen.feed_text("PS /carpe> ")
+    assert (screen.x, screen.y) == (1, 1) and screen.before_cursor() == ""
+    assert screen.prompt_text() == "PS /carpe>" and screen.line_before_cursor() == "PS /carpe>"
+    assert looks_like_prompt(screen.prompt_text(), POWERSHELL, windows=False)
+    assert looks_like_prompt(screen.prompt_text(), POWERSHELL, windows=True)
+
+
 def test_a_long_prompt_keeps_its_beginning_when_it_fills_the_last_row():
     screen = Screen(10, 4)
     screen.feed_text("PS /carpeta/muy> ")  # se parte en dos filas y la segunda no llena
@@ -1555,7 +1564,7 @@ def test_real_shell_in_the_window_from_button_to_exit(window, folders, monkeypat
     monkeypatch.setattr(TerminalView, "session_factory", PtySession)
     press_pane_button(window, 0)
     terminal = window.terminals[0]
-    assert wait_until(lambda: terminal.session is not None and any(terminal.screen_.display()))
+    assert wait_until(lambda: terminal.session is not None and any(terminal.screen_.display()), 60)  # el primer intérprete de un equipo recién arrancado tarda
     terminal._send_text("echo escrito_en_la_terminal\r")
     assert wait_until(lambda: "".join(terminal.screen_.display()).count("escrito_en_la_terminal") >= 2)
     terminal.grab()
@@ -1587,6 +1596,13 @@ def test_every_installed_shell_starts_in_the_folder_and_follows_the_pane(window,
     assert wait_until(lambda: window.terminal_panels[GENERAL_TERMINAL].isHidden(), 20), terminal.screen_.display()
 
 
+def terminal_state(terminal) -> dict:
+    """Lo que hace falta para entender, desde el registro, por qué no se la da por lista."""
+    screen = terminal.screen_
+    return {"pantalla": screen.display(), "cursor": (screen.x, screen.y), "tamaño": (screen.cols, screen.rows), "antes del cursor": screen.before_cursor(), "indicador": screen.prompt_text(),
+            "libre": terminal.session.shell_is_idle() if terminal.session is not None else None}
+
+
 def real_prompt_ready(terminal, family, seconds=45) -> bool:
     return wait_until(lambda: terminal.session is not None and looks_like_prompt(terminal.screen_.prompt_text(), family) and terminal.session.shell_is_idle(), seconds)
 
@@ -1600,7 +1616,7 @@ def test_changing_shell_keeps_the_folder_reached_with_cd(window, folders, monkey
     window.config["terminal_shell"] = shell.key
     press_pane_button(window, 0)
     terminal = window.terminals[0]
-    assert real_prompt_ready(terminal, shell.family), terminal.screen_.display()
+    assert real_prompt_ready(terminal, shell.family), terminal_state(terminal)
     terminal._send_text('cd "con cd ñ"\r')
     assert wait_until(lambda: same(terminal.current_path(), inside), 20), (terminal.screen_.display(), terminal.current_path())
     target = next(other for other in REAL_SHELLS if other.key != shell.key)

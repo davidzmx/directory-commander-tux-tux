@@ -195,6 +195,7 @@ class FolderTree(QTreeWidget):
             loaded.append(self.home_item)
         for item in loaded:
             if item.data(0, PATH_ROLE) != COMPUTER_PATH:
+                item.setData(0, LOADED_ROLE, False)  # lo que despliegue hasta una carpeta oculta debe esperar a la lista nueva
                 self._load(item)
 
     # ---------------------------------------------------------------- carga
@@ -205,6 +206,9 @@ class FolderTree(QTreeWidget):
 
         def finished(rows) -> None:
             self._calls.discard(call)
+            if show_hidden != self.show_hidden and not self._disposed and shiboken6.isValid(item):
+                self._load(item)  # se leyó con la opción de antes; lo que espera sigue esperando
+                return
             self._loaded(item, rows)
 
         def failed(_exc) -> None:
