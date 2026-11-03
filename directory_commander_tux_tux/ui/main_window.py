@@ -95,6 +95,7 @@ MENU_ITEMS = [
     (N_("&Ver"), N_("Doble panel horizontal"), "dualhorizontal", None, "Set DUAL=Horizontal", False),
     (N_("&Ver"), None, None, None, None, False),
     (N_("&Ver"), N_("Árbol de carpetas"), "tree", "Ctrl+Shift+T", "Set TREE=Toggle", False),
+    (N_("&Ver"), N_("Árbol del panel"), "treepane", None, "Set PANETREE=Toggle", False),
     (N_("&Ver"), N_("Visor"), "viewerpane", "F3", "Set VIEWPANE=Toggle", False),
     (N_("&Ver"), N_("Metadatos"), "metapane", "Ctrl+Shift+M", "Set METAPANE=Toggle", False),
     (N_("&Ver"), N_("Terminal del panel"), "terminalpane", TOGGLE_SHORTCUT, "Set TERMINAL=Toggle", False),
@@ -688,7 +689,8 @@ class MainWindow(ExtraCommands, QMainWindow):
         self.splitter.setHandleWidth(3)
         for side in self.sides[2:]:
             side.hide()
-        self._pane_nests = [QSplitter(), QSplitter()]  # las partes de una disposición que no es una simple fila
+        # Las partes de una disposición que no es una simple fila: con n paneles, como mucho n - 2, porque la de fuera es la propia ventana.
+        self._pane_nests = [QSplitter() for _nest in range(styles.MAX_PANES - 2)]
         for nest in self._pane_nests:
             nest.setChildrenCollapsible(False)
             nest.setHandleWidth(3)
@@ -1818,12 +1820,22 @@ class MainWindow(ExtraCommands, QMainWindow):
 
     def _show_pane_trees(self, visible: bool) -> None:
         count = styles.pane_count(self.dual)
-        for index, (side, panel) in enumerate(zip(self.sides, self.tree_panels)):
-            if visible and index < count and panel.isHidden():
-                panel.show()
-                side.setSizes([PANE_TREE_WIDTH, max(PANE_TREE_WIDTH, side.width() - PANE_TREE_WIDTH)])
+        for index, panel in enumerate(self.tree_panels):
+            if visible and index < count:
+                self._show_pane_tree(index, True)
             elif not visible or index >= count:
                 panel.hide()  # el de un panel que no se ve: tendrá su ancho cuando se muestre
+
+    def _show_pane_tree(self, index: int, visible: bool) -> None:
+        """El árbol propio de un panel, a su izquierda. Con un árbol general a la vez, este sigue al panel activo y el propio a su panel."""
+        side, panel = self.sides[index], self.tree_panels[index]
+        if not visible:
+            panel.hide()
+        elif panel.isHidden():
+            panel.show()
+            side.setSizes([PANE_TREE_WIDTH, max(PANE_TREE_WIDTH, side.width() - PANE_TREE_WIDTH)])
+            self._pane_tree_paths.pop(index, None)  # mientras estaba oculto no seguía a su panel
+            self._sync_pane_trees()
 
     def _arrange_side_docks(self) -> None:
         """Visor y metadatos, uno encima del otro en el orden elegido. Si el usuario movió uno a otro sitio, se respeta."""
@@ -2654,8 +2666,8 @@ class MainWindow(ExtraCommands, QMainWindow):
     def apply_tab_settings(self) -> None:
         settings = self.folder_tab_settings()
         positions = tab_settings.tab_positions(settings["position"], settings["dual_position"], self.dual)
-        for group, position in zip(self.groups, (*positions, settings["position"], settings["position"])):
-            group.apply_settings(settings, TAB_POSITIONS[position])
+        for side, group in enumerate(self.groups):  # juntos y separados son cosa de los dos primeros: los demás, la posición elegida
+            group.apply_settings(settings, TAB_POSITIONS[positions[side] if side < len(positions) else settings["position"]])
 
     def update_tab_bars(self) -> None:
         """Muestra u oculta la barra de pestañas de cada panel según la opción elegida."""
@@ -2884,6 +2896,11 @@ class MainWindow(ExtraCommands, QMainWindow):
         else:
             self._toggle(self.tree_dock, value)
         self._sync_tree()
+
+    def _set_panetree(self, value: str) -> None:
+        value = value.lower()
+        side = self.active_side
+        self._show_pane_tree(side, self.tree_panels[side].isHidden() if value == "toggle" else value in ("on", "yes"))
 
     def _set_viewpane(self, value: str) -> None:
         self._toggle(self.viewer_dock, value)
@@ -3794,10 +3811,11 @@ class MainWindow(ExtraCommands, QMainWindow):
             self._panes_to_balance = False
         for nest, saved in zip(self._pane_nests, session.get("pane_nests") or ()):
             nest.restoreState(QByteArray.fromHex(str(saved).encode()))
-        for side, panel, saved in zip(self.sides, self.tree_panels, session.get("pane_trees") or ()):
-            if isinstance(saved, dict) and self.double_tree:
+        count = styles.pane_count(self.dual)
+        for index, (side, panel, saved) in enumerate(zip(self.sides, self.tree_panels, session.get("pane_trees") or ())):
+            if isinstance(saved, dict):  # también sin un árbol por panel: cada uno puede mostrar el suyo
                 side.restoreState(QByteArray.fromHex(str(saved.get("sizes", "")).encode()))
-                panel.setVisible(bool(saved.get("visible", True)))
+                panel.setVisible(bool(saved.get("visible", self.double_tree)) and index < count)
         panes = session.get("pane_terminals")
         stored = {**dict(enumerate(panes[:GENERAL_TERMINAL] if isinstance(panes, list) else ())), GENERAL_TERMINAL: session.get("general_terminal")}
         for index, saved in stored.items():

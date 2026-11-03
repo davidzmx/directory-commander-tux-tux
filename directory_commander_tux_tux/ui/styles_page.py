@@ -15,7 +15,10 @@ ENTRY_ROLE = Qt.ItemDataRole.UserRole
 _PANES = (("Off", N_("Un panel")), ("Vertical", N_("Dos, uno junto al otro")), ("Horizontal", N_("Dos, uno encima del otro")),
           ("3-Vertical", N_("Tres, uno junto al otro")), ("3-Horizontal", N_("Tres, uno encima del otro")),
           ("3-Left", N_("Tres: uno a la izquierda y dos a la derecha")), ("3-Top", N_("Tres: dos arriba y uno abajo")),
-          ("4-Vertical", N_("Cuatro, uno junto al otro")), ("4-Horizontal", N_("Cuatro, uno encima del otro")), ("4-Grid", N_("Cuatro, en cuadrícula")))
+          ("4-Vertical", N_("Cuatro, uno junto al otro")), ("4-Horizontal", N_("Cuatro, uno encima del otro")), ("4-Grid", N_("Cuatro, en cuadrícula")),
+          ("6-Grid", N_("Seis, en cuadrícula de tres por dos")), ("8-Grid", N_("Ocho, en cuadrícula de cuatro por dos")))
+_PANE_TERMINAL_LABELS = (N_("Terminal del primer panel"), N_("Terminal del segundo panel"), N_("Terminal del tercer panel"), N_("Terminal del cuarto panel"),
+                         N_("Terminal del quinto panel"), N_("Terminal del sexto panel"), N_("Terminal del séptimo panel"), N_("Terminal del octavo panel"))
 _TREES = (("none", N_("Sin árbol")), ("shared", N_("Un árbol")), ("each", N_("Un árbol por panel")))
 _VIEWS = (("list", N_("Lista")), ("details", N_("Detalles")), ("smallicons", N_("Iconos pequeños")), ("largeicons", N_("Iconos grandes")),
           ("tiles", N_("Mosaico")), ("thumbnails", N_("Miniaturas")), ("filmstrip", N_("Tira de fotogramas")))
@@ -50,13 +53,9 @@ class StylesPage(QWidget):
         self.viewer = QCheckBox(tr("Visor"))
         self.meta = QCheckBox(tr("Metadatos"))
         self.view = _combo(_VIEWS)
-        self.terminal_first = QCheckBox(tr("Terminal del primer panel"))
-        self.terminal_second = QCheckBox(tr("Terminal del segundo panel"))
-        self.terminal_third = QCheckBox(tr("Terminal del tercer panel"))
-        self.terminal_fourth = QCheckBox(tr("Terminal del cuarto panel"))
+        self.pane_terminals = tuple(QCheckBox(tr(label)) for label in _PANE_TERMINAL_LABELS)
         self.terminal_general = QCheckBox(tr("Terminal general"))
         self.position = _combo(_POSITIONS)
-        self._pane_terminals = (self.terminal_first, self.terminal_second, self.terminal_third, self.terminal_fourth)
         form = QFormLayout()
         form.addRow(tr("Nombre:"), self.name)
         form.addRow(tr("Paneles:"), self.panes)
@@ -64,11 +63,11 @@ class StylesPage(QWidget):
         form.addRow(tr("Vista:"), self.view)
         form.addRow(tr("Paneles laterales:"), self.viewer)
         form.addRow("", self.meta)
-        form.addRow(tr("Terminales:"), self.terminal_first)
-        form.addRow("", self.terminal_second)
-        form.addRow("", self.terminal_third)
-        form.addRow("", self.terminal_fourth)
-        form.addRow("", self.terminal_general)
+        terminals = QVBoxLayout()  # en una sola fila del formulario: así las de los paneles que no hay se ocultan sin dejar hueco
+        terminals.setContentsMargins(0, 0, 0, 0)
+        for check in (*self.pane_terminals, self.terminal_general):
+            terminals.addWidget(check)
+        form.addRow(tr("Terminales:"), terminals)
         form.addRow(tr("Posición de la terminal del panel:"), self.position)
         self.add_button = self._button(tr("Nuevo"), self.add)
         self.duplicate_button = self._button(tr("Duplicar"), self.duplicate)
@@ -108,7 +107,7 @@ class StylesPage(QWidget):
         self.name.textEdited.connect(self._edited)
         for box in (self.panes, self.tree, self.view, self.position):
             box.currentIndexChanged.connect(self._edited)
-        for check in (self.viewer, self.meta, *self._pane_terminals, self.terminal_general):
+        for check in (self.viewer, self.meta, *self.pane_terminals, self.terminal_general):
             check.toggled.connect(self._edited)
         current = next((row for row in range(self.names.count()) if self._style_at(row)["name"] == config.get("style")), 0)
         self.names.setCurrentRow(current)
@@ -159,7 +158,7 @@ class StylesPage(QWidget):
             self.viewer.setChecked(bool(style.get("viewer", False)))
             self.meta.setChecked(bool(style.get("meta", False)))
             wanted = styles.terminals_of(style) or set()
-            for name, check in zip(styles.TERMINALS, (*self._pane_terminals, self.terminal_general)):
+            for name, check in zip(styles.TERMINALS, (*self.pane_terminals, self.terminal_general)):
                 check.setChecked(name in wanted)
             self.position.setCurrentIndex(max(0, self.position.findData(styles.position_of(style) or "")))
             self.preview.set_style(style)
@@ -169,9 +168,9 @@ class StylesPage(QWidget):
     def _update_enabled(self) -> None:
         self.remove_button.setEnabled(self.names.count() > 1)
         count = styles.pane_count(self.panes.currentData())
-        for index, check in enumerate(self._pane_terminals):
-            check.setEnabled(index < count)
-        self.position.setEnabled(any(check.isChecked() for check in self._pane_terminals[:count]))
+        for index, check in enumerate(self.pane_terminals):
+            check.setVisible(index < count)
+        self.position.setEnabled(any(check.isChecked() for check in self.pane_terminals[:count]))
 
     def _edited(self, *_args) -> None:
         row = self.names.currentRow()
@@ -192,7 +191,7 @@ class StylesPage(QWidget):
         style["viewer"] = self.viewer.isChecked()
         style["meta"] = self.meta.isChecked()
         count = styles.pane_count(style["dual"])
-        wanted = [name for index, (name, check) in enumerate(zip(styles.TERMINALS, (*self._pane_terminals, self.terminal_general)))
+        wanted = [name for index, (name, check) in enumerate(zip(styles.TERMINALS, (*self.pane_terminals, self.terminal_general)))
                   if check.isChecked() and (name == styles.GENERAL or index < count)]
         if wanted or "terminals" in style:  # sin marcar ninguna y sin haberlas tenido, no cierra las que se abran a mano
             style["terminals"] = wanted

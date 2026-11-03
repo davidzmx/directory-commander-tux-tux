@@ -439,7 +439,7 @@ def test_changing_layouts_keeps_each_pane_in_its_place(window):
         assert count == styles.pane_count(mode), mode
         assert all(nest.count() > 0 for nest in nests), mode
         total = window.splitter.count() + sum(nest.count() - 1 for nest in nests)
-        assert total == 4, mode
+        assert total == styles.MAX_PANES, mode
 
 
 def test_hidden_tabs_get_their_new_role_when_shown(window, monkeypatch):

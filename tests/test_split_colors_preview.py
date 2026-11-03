@@ -62,13 +62,13 @@ def test_layouts_are_read(text, expected):
     assert styles.layout_tree(text) == expected and styles.valid_layout(text)
 
 
-@pytest.mark.parametrize("text", ["", "x", "h()", "h(0)", "h(0,1", "h(0,1))", "h(0,0)", "h(1,2)", "h(0,1,2,3,4)", "h(0,1)x", "5-Grid", 3, None, "v(0,,1)"])
+@pytest.mark.parametrize("text", ["", "x", "h()", "h(0)", "h(0,1", "h(0,1))", "h(0,0)", "h(1,2)", "h(0,1,2,3,4,5,6,7,8)", "h(0,1)x", "5-Grid", 3, None, "v(0,,1)"])
 def test_wrong_layouts_are_rejected(text):
     assert not styles.valid_layout(text) and styles.pane_count(text) == 2
 
 
 def test_every_named_layout_is_valid_and_has_its_panes():
-    assert [styles.pane_count(mode) for mode in styles.PANE_MODES] == [1, 2, 2, 3, 3, 3, 3, 4, 4, 4]
+    assert [styles.pane_count(mode) for mode in styles.PANE_MODES] == [1, 2, 2, 3, 3, 3, 3, 4, 4, 4, 6, 8]
 
 
 @pytest.mark.parametrize("mode, pane, where, expected, new", [
@@ -82,9 +82,10 @@ def test_splitting_a_pane(mode, pane, where, expected, new):
     assert styles.split_layout(mode, pane, where) == (expected, new)
 
 
-def test_there_is_no_fifth_pane():
-    assert styles.split_layout("4-Grid", 0, "right") is None
-    assert styles.split_layout("Vertical", 3, "right") is None
+def test_there_is_no_ninth_pane():
+    assert styles.split_layout("8-Grid", 0, "right") is None
+    assert styles.split_layout("4-Grid", 0, "right") == ("v(h(0,4,1),h(2,3))", 4)
+    assert styles.split_layout("Vertical", 3, "right") is None  # no está en esa disposición
 
 
 @pytest.mark.parametrize("mode", list(styles.PANE_MODES) + ["h(v(0,3),v(1,2))", "h(0,2,1)"])
@@ -177,11 +178,12 @@ def test_splitting_to_the_right_only_halves_that_pane(window):
     assert abs(b.width() - right_width) < 20 and abs(a.width() - left_width / 2) < 20 and abs(c.width() - left_width / 2) < 20
 
 
-def test_up_to_four_and_then_the_options_are_disabled(window):
-    window.split_pane("right")
-    window.split_pane("below")
+def test_up_to_eight_and_then_the_options_are_disabled(window):
+    window.resize(1800, 1000)
+    for where in ("right", "below", "right", "below", "right", "below"):
+        window.split_pane(where)
     settle()
-    assert styles.pane_count(window.dual) == 4
+    assert styles.pane_count(window.dual) == styles.MAX_PANES == 8
     assert all(group.isVisible() for group in window.groups)
     entries = menu_entries(window)
     assert not entries["Dividir panel - Horizontal"].isEnabled() and not entries["Dividir panel - Vertical"].isEnabled()
@@ -202,7 +204,7 @@ def test_every_combination_of_splits_leaves_the_panes_apart(window):
                     window.split_pane(where)
                 settle()
                 assert styles.pane_count(window.dual) == 4
-                rects = [group.rect().translated(corner(group, window)) for group in window.groups]
+                rects = [group.rect().translated(corner(group, window)) for group in window.groups[:4]]
                 for index, rect in enumerate(rects):
                     assert rect.width() > 40 and rect.height() > 40
                     assert not any(rect.intersects(other) for other in rects[index + 1:])
@@ -607,7 +609,7 @@ def test_page_preview_follows_what_is_selected_and_edited(window):
     assert (styles.PANE, 1) in kinds(page.preview.regions) and (styles.TREE, 0) not in kinds(page.preview.regions)
     page.panes.setCurrentIndex(page.panes.findData("4-Grid"))
     assert (styles.PANE, 3) in kinds(page.preview.regions)
-    page.terminal_fourth.setChecked(True)
+    page.pane_terminals[3].setChecked(True)
     assert (styles.TERMINAL, 3) in kinds(page.preview.regions)
     page.tree.setCurrentIndex(page.tree.findData("shared"))
     assert (styles.TREE, 0) in kinds(page.preview.regions)

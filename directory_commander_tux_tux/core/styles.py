@@ -8,7 +8,7 @@ from typing import NamedTuple
 
 from .config import DEFAULT_STYLES
 
-MAX_PANES = 4
+MAX_PANES = 8  # cada panel es una cifra en las disposiciones: no puede pasar de 10
 # Cómo se reparten los paneles: h, uno junto al otro; v, uno encima del otro. Cada número es un panel.
 PANE_MODES = {"Off": "0",
               "Vertical": "h(0,1)",
@@ -19,10 +19,13 @@ PANE_MODES = {"Off": "0",
               "3-Top": "v(h(0,1),2)",
               "4-Vertical": "h(0,1,2,3)",
               "4-Horizontal": "v(0,1,2,3)",
-              "4-Grid": "v(h(0,1),h(2,3))"}
+              "4-Grid": "v(h(0,1),h(2,3))",
+              "6-Grid": "v(h(0,1,2),h(3,4,5))",
+              "8-Grid": "v(h(0,1,2,3),h(4,5,6,7))"}
 VIEWS = ("list", "details", "smallicons", "largeicons", "tiles", "thumbnails", "filmstrip")
-FIRST, SECOND, THIRD, FOURTH, GENERAL = "first", "second", "third", "fourth", "general"
-TERMINALS = (FIRST, SECOND, THIRD, FOURTH, GENERAL)  # la de cada panel y, detrás, la general
+FIRST, GENERAL = "first", "general"
+PANE_TERMINALS = (FIRST, "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth")
+TERMINALS = (*PANE_TERMINALS, GENERAL)  # la de cada panel y, detrás, la general
 POSITIONS = ("right", "below")
 
 

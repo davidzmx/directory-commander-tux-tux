@@ -2009,7 +2009,7 @@ def test_old_config_gets_the_button_next_to_open_terminal(tmp_path):
     arranged = bar_buttons.arrange_toolbar(config, config["toolbar"])
     assert [item["label"] for item in arranged] == ["Último", "Comparar archivos", "Terminal", "Terminal general", "Otro"]
     order = bar_buttons.arranged(config, bar_buttons.PANE)
-    assert order.index("terminalpane") == order.index("gitbranch") + 1 and order.index("gitbranch") == order.index("copypath") + 1 and order.index("copypath") == order.index("menu-arrow") + 1
+    assert order.index("terminalpane") == order.index("treepane") + 1 == order.index("gitbranch") + 2 and order.index("gitbranch") == order.index("copypath") + 1 and order.index("copypath") == order.index("menu-arrow") + 1
 
 
 def test_toolbar_without_open_terminal_gets_it_at_the_end_and_only_once(tmp_path):

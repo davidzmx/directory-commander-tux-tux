@@ -77,6 +77,7 @@ _SHAPES = {
     "gomydocuments": _DOC + '<path d="M9 13h6M9 16h6"/>',
     "gotrash": '<path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14"/>',
     "terminal": '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M7 9l3 3-3 3M12 15h5"/>',
+    "treepane": '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M10 4v16"/><path d="M5.500 8v7.500h2M5.500 11.500h2" stroke="{a}"/>',
     "terminalpane": '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 11h18"/><path d="M6.500 13.500l2 1.750-2 1.750M11 17.500h4" stroke="{a}"/>',
     "terminalgeneral": '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 12h18M12 4v8"/><path d="M6.500 14l2 1.750-2 1.750M11 17.500h4" stroke="{a}"/>',
     "prefs": '<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.600 5.600l2.100 2.100M16.300 16.300l2.100 2.100M18.400 5.600l-2.100 2.100M7.700 16.300l-2.100 2.100"/>',

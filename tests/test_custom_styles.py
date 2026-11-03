@@ -290,10 +290,10 @@ def test_page_shows_every_style_starting_with_the_current_one(window, page):
     assert page.names.count() == len(window.config["styles"])
     assert page.names.currentItem().text() == "Vertical doble panel" and page.panes.currentData() == "Vertical" and page.tree.currentData() == "shared"
     select(page, "Vertical panel-terminal")
-    assert page.panes.currentData() == "Off" and page.terminal_first.isChecked() and page.position.currentData() == "right"
-    assert not page.terminal_second.isEnabled() and page.position.isEnabled()
+    assert page.panes.currentData() == "Off" and page.pane_terminals[0].isChecked() and page.position.currentData() == "right"
+    assert page.pane_terminals[1].isHidden() and page.position.isEnabled()
     select(page, "Vertical doble árbol")
-    assert page.tree.currentData() == "each" and not page.terminal_first.isChecked() and not page.position.isEnabled()
+    assert page.tree.currentData() == "each" and not page.pane_terminals[0].isChecked() and not page.position.isEnabled()
     select(page, "Imágenes")
     assert page.viewer.isChecked() and page.view.currentData() == "thumbnails"
 
@@ -307,8 +307,8 @@ def test_new_style_with_everything_chosen(window, page):
     set_combo(page.tree, "each")
     set_combo(page.view, "details")
     page.meta.setChecked(True)
-    page.terminal_first.setChecked(True)
-    page.terminal_second.setChecked(True)
+    page.pane_terminals[0].setChecked(True)
+    page.pane_terminals[1].setChecked(True)
     page.terminal_general.setChecked(True)
     set_combo(page.position, "below")
     page.apply_to(window.config)
@@ -322,8 +322,8 @@ def test_applying_a_style_made_on_the_page_places_everything(window, page):
     page.name.textEdited.emit("Pruebas")
     set_combo(page.panes, "Vertical")
     set_combo(page.tree, "none")
-    page.terminal_first.setChecked(True)
-    page.terminal_second.setChecked(True)
+    page.pane_terminals[0].setChecked(True)
+    page.pane_terminals[1].setChecked(True)
     page.terminal_general.setChecked(True)
     page.apply_to(window.config)
     window._preferences_changed()
@@ -336,9 +336,9 @@ def test_applying_a_style_made_on_the_page_places_everything(window, page):
 
 def test_second_terminal_is_not_saved_with_a_single_pane(window, page):
     page.add()
-    page.terminal_second.setChecked(True)
+    page.pane_terminals[1].setChecked(True)
     set_combo(page.panes, "Off")
-    page.terminal_first.setChecked(True)
+    page.pane_terminals[0].setChecked(True)
     page.apply_to(window.config)
     assert stored(window, "Estilo nuevo")["terminals"] == ["first"]
 
@@ -662,7 +662,7 @@ def test_new_style_button_keeps_the_style_when_accepted(window, monkeypatch):
         page = dialog.styles_page
         page.name.setText("Hecho con el botón")
         page.name.textEdited.emit("Hecho con el botón")
-        page.terminal_first.setChecked(True)
+        page.pane_terminals[0].setChecked(True)
         return 1
 
     monkeypatch.setattr(PreferencesDialog, "exec", fake_exec)
@@ -746,7 +746,7 @@ def test_send_arrow_points_to_the_other_pane(mode, side, target, icon):
 
 
 def test_a_normal_window_only_creates_tabs_for_its_two_panes(window):
-    assert [group.count() for group in window.groups] == [1, 1, 0, 0]
+    assert [group.count() for group in window.groups] == [1, 1] + [0] * (styles.MAX_PANES - 2)
     assert len(window.all_views()) == 2 and window.sides[2].isHidden() and window.sides[3].isHidden()
 
 
@@ -763,7 +763,7 @@ def test_every_arrangement_shows_its_panes_without_overlapping(window, mode):
 
 def test_grid_has_two_rows_of_two_of_the_same_size(window):
     apply_panes(window, "4-Grid")
-    a, b, c, d = window.groups
+    a, b, c, d = window.groups[:4]
     assert left_of(b, window) > left_of(a, window) and top_of(b, window) == top_of(a, window)
     assert top_of(c, window) > top_of(a, window) and left_of(c, window) == left_of(a, window)
     assert left_of(d, window) == left_of(b, window) and top_of(d, window) == top_of(c, window)
@@ -814,7 +814,7 @@ def test_destination_is_the_pane_that_was_active_before(window):
 def test_roles_of_four_panes(window):
     apply_panes(window, "4-Grid")
     window.groups[2].current.activated.emit(window.groups[2].current)
-    assert [group.current.property("role") for group in window.groups] == ["dest", "other", "source", "other"]
+    assert [group.current.property("role") for group in window.groups[:4]] == ["dest", "other", "source", "other"]
 
 
 def test_two_panes_keep_their_roles(window):
@@ -931,7 +931,7 @@ def test_session_reopens_four_panes_with_their_folders_and_sizes(qapp_offscreen,
     close_window(first)
     second = open_window(folders)
     settle()
-    assert second.dual == "4-Grid" and all(group.isVisible() for group in second.groups)
+    assert second.dual == "4-Grid" and all(group.isVisible() for group in second.groups[:4]) and not any(group.isVisible() for group in second.groups[4:])
     assert os.path.samefile(second.groups[2].current.path, third)
     assert abs(second.groups[0].width() - width) < 40
     close_window(second)
@@ -945,7 +945,7 @@ def test_session_of_two_panes_from_the_previous_version_still_opens(qapp_offscre
     main.resize(1500, 800)
     main.show()
     settle()
-    assert [group.count() for group in main.groups] == [1, 1, 0, 0] and main.dual == "Vertical" and os.path.samefile(main.groups[1].current.path, folders[1])
+    assert [group.count() for group in main.groups] == [1, 1] + [0] * (styles.MAX_PANES - 2) and main.dual == "Vertical" and os.path.samefile(main.groups[1].current.path, folders[1])
     close_window(main)
 
 
@@ -972,12 +972,14 @@ def test_page_offers_every_arrangement_and_its_terminals(window, page):
     assert {page.panes.itemData(row) for row in range(page.panes.count())} == set(styles.PANE_MODES)
     page.add()
     set_combo(page.panes, "Off")
-    assert [check.isEnabled() for check in page._pane_terminals] == [True, False, False, False]
+    assert [not check.isHidden() for check in page.pane_terminals] == [True] + [False] * 7
     set_combo(page.panes, "3-Top")
-    assert [check.isEnabled() for check in page._pane_terminals] == [True, True, True, False]
+    assert [not check.isHidden() for check in page.pane_terminals] == [True] * 3 + [False] * 5
+    set_combo(page.panes, "8-Grid")
+    assert not any(check.isHidden() for check in page.pane_terminals)
     set_combo(page.panes, "4-Grid")
-    assert all(check.isEnabled() for check in page._pane_terminals)
-    page.terminal_fourth.setChecked(True)
+    assert [not check.isHidden() for check in page.pane_terminals] == [True] * 4 + [False] * 4
+    page.pane_terminals[3].setChecked(True)
     assert page.position.isEnabled()
     page.apply_to(window.config)
     assert stored(window, "Estilo nuevo")["dual"] == "4-Grid" and stored(window, "Estilo nuevo")["terminals"] == ["fourth"]
@@ -986,8 +988,8 @@ def test_page_offers_every_arrangement_and_its_terminals(window, page):
 def test_terminals_of_panes_removed_on_the_page_are_not_saved(window, page):
     page.add()
     set_combo(page.panes, "4-Grid")
-    page.terminal_third.setChecked(True)
-    page.terminal_fourth.setChecked(True)
+    page.pane_terminals[2].setChecked(True)
+    page.pane_terminals[3].setChecked(True)
     set_combo(page.panes, "Vertical")
     page.apply_to(window.config)
     assert stored(window, "Estilo nuevo")["terminals"] == []

@@ -347,6 +347,51 @@ def test_changing_the_active_pane_does_not_move_the_other_tree(window, monkeypat
     assert calls == []
 
 
+# ------------------------------------------------------------------ el árbol de un solo panel
+def test_a_pane_shows_and_hides_its_own_tree_with_the_button_of_its_bar(window, folders):
+    left, right = folders
+    assert not window.double_tree and all(panel.isHidden() for panel in window.tree_panels)
+    window.groups[1].current._bar_tools()["treepane"].click()
+    QApplication.processEvents()
+    assert window.active_side == 1
+    assert window.tree_panels[1].isVisible() and window.tree_panels[0].isHidden()
+    assert window.tree_panels[1].geometry().right() < window.pane_areas[1].geometry().left()
+    assert item_for(window.pane_trees[1], right)
+    window.groups[1].current.navigate(str(right / "otra"))
+    assert item_for(window.pane_trees[1], right / "otra")  # sigue a su panel, también sin un árbol por panel
+    window.run_command("Set PANETREE=Toggle")
+    assert window.tree_panels[1].isHidden()
+
+
+def test_the_tree_of_a_pane_does_not_touch_the_general_tree(window, folders):
+    window.run_command("Set TREE=On")
+    window.run_command("Set PANETREE=On")
+    QApplication.processEvents()
+    assert not window.tree_dock.isHidden() and window.tree_panels[0].isVisible()
+    window.run_command("Set PANETREE=Off")
+    assert not window.tree_dock.isHidden() and window.tree_panels[0].isHidden()
+
+
+def test_a_tree_shown_again_goes_to_where_its_pane_is_now(window, folders):
+    left, _right = folders
+    window.run_command("Set PANETREE=On")
+    assert item_for(window.pane_trees[0], left)
+    window.run_command("Set PANETREE=Off")
+    window.groups[0].current.navigate(str(left / "sub"))
+    window.run_command("Set PANETREE=On")
+    assert item_for(window.pane_trees[0], left / "sub")
+
+
+def test_the_session_remembers_which_panes_show_their_tree(window):
+    window.groups[1].current.activated.emit(window.groups[1].current)
+    window.run_command("Set PANETREE=On")
+    snapshot = window._session_snapshot()
+    window.run_command("Set PANETREE=Off")
+    window._apply_session(snapshot, [])
+    QApplication.processEvents()
+    assert window.tree_panels[1].isVisible() and window.tree_panels[0].isHidden()
+
+
 def test_a_new_tab_moves_the_tree_of_its_side(window, folders):
     window.run_command('Set STYLE="Vertical doble árbol"')
     left, right = folders

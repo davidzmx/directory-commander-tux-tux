@@ -3294,7 +3294,7 @@ def test_show_bar_modes(window, tmp_path, mode, expected):
 
 def test_balanced_hides_both_only_when_both_have_one_tab(window):
     set_tabs(window, show_bar="balanced")
-    assert all(g.tabBar().isHidden() for g in window.groups)
+    assert all(g.tabBar().isHidden() for g in window.groups)  # también los paneles que aún no se ven
     assert not window.groups[0].add_button.isVisible()
 
 

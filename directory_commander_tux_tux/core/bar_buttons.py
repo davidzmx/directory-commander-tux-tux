@@ -28,7 +28,7 @@ _FIXED_BARS: dict[str, tuple[str, list[tuple[str, str]]]] = {
     LOCATION: (tr("Barra de localización"), [(PATH, tr("Ruta")), ("recent", tr("Carpetas recientes")), ("content_type", tr("Filtro de contenido"))]),
     PANE: (tr("Barra de cada panel"), [("goback", tr("Atrás")), ("goforward", tr("Adelante")), ("goup", tr("Subir")), ("refresh", tr("Actualizar")),
                                    ("home", tr("Inicio")), ("favorites", tr("Favoritos")), (PATH, tr("Ruta")), ("menu-arrow", tr("Carpetas recientes")), ("copypath", tr("Copiar la ruta")), ("gitbranch", tr("Rama de git")),
-                                   ("terminalpane", tr("Terminal de este panel")), ("send", tr("Mostrar esta carpeta en el otro panel")), ("swap", tr("Intercambiar paneles")),
+                                   ("treepane", tr("Árbol de este panel")), ("terminalpane", tr("Terminal de este panel")), ("send", tr("Mostrar esta carpeta en el otro panel")), ("swap", tr("Intercambiar paneles")),
                                    ("close", tr("Cerrar este panel"))]),
     GIT: (tr("Barra de git de las terminales"), [("status", tr("Status")), ("add", tr("Add…")), ("unstage", tr("Unstage…")), ("commit", tr("Commit…")), ("push", tr("Push")), ("pull", tr("Pull")),
                                                  ("fetch", tr("Fetch")), ("diff", tr("Diff")), ("log", tr("Log"))]),
