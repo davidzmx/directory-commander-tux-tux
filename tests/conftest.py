@@ -4,6 +4,15 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402 - la plataforma de Qt debe fijarse antes de cargarlo
 
+from directory_commander_tux_tux.core import i18n  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def source_language_again():
+    """`app.main` fija el idioma del sistema: sin esto, en un equipo en inglés las pruebas siguientes verían los textos traducidos."""
+    yield
+    i18n.set_language(i18n.SOURCE_CODE)
+
 
 @pytest.fixture
 def qapp_for_gc():
