@@ -11,6 +11,7 @@ from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSize, QTimer, Qt, Si
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QFontMetricsF, QKeySequence, QPainter
 from PySide6.QtWidgets import QAbstractScrollArea, QApplication, QComboBox, QMenu
 
+from ..core import remote
 from ..core.git_tools import quote
 from ..core.i18n import tr
 from ..core.pty_session import PtySession
@@ -110,6 +111,7 @@ class TerminalView(QAbstractScrollArea):
     _received = Signal(int, bytes)
     _ended = Signal(int)
     session_factory = PtySession
+    remote_session_factory = remote.RemoteShellSession  # la de un panel remoto: un intérprete en el servidor
 
     def __init__(self, folder: Callable[[], str], shell: Callable[[], Shell] = default_shell, parent=None) -> None:
         super().__init__(parent)
@@ -119,6 +121,7 @@ class TerminalView(QAbstractScrollArea):
         self.running_shell: Shell | None = None
         self._generation = 0  # lo que aún llegue del intérprete anterior ya no es de esta pantalla
         self.following = True
+        self.server = ""  # el servidor en el que está, o "" si es del equipo
         self._family = DEFAULT_FAMILY
         self._credits = threading.Semaphore(_PENDING_CHUNKS)
         self._selection: tuple[tuple[int, int], tuple[int, int]] | None = None
@@ -196,11 +199,17 @@ class TerminalView(QAbstractScrollArea):
             found = prompt_folder(self.screen_.line_before_cursor()) if self._family == POWERSHELL else self.session.current_directory()
         return found if found and os.path.isdir(found) else self._current_folder or self.folder()
 
+    def restart_in(self, folder: str) -> None:
+        """Otro intérprete, en otra carpeta: al pasar el panel de este equipo a un servidor, o al revés."""
+        self._open_session(folder)
+
     def _open_session(self, folder: str) -> None:
         cols, rows = self._grid_size()
-        shell = self.shell()
+        on_server = remote.is_remote(folder)
+        shell = remote.SSH_SHELL if on_server else self.shell()
+        factory = self.remote_session_factory if on_server else self.session_factory
         generation = self._generation + 1
-        session = self.session_factory(shell.argv, folder, cols, rows, lambda data: self._data_arrived(generation, data), lambda: self._exit_arrived(generation), shell.env)
+        session = factory(shell.argv, folder, cols, rows, lambda data: self._data_arrived(generation, data), lambda: self._exit_arrived(generation), shell.env)
         previous, self.session = self.session, session
         self._generation = generation
         self.running_shell = shell
@@ -209,6 +218,7 @@ class TerminalView(QAbstractScrollArea):
         if previous is not None:
             threading.Thread(target=previous.close, daemon=True).start()  # el sistema puede tardar, y la ventana no debe esperarlo
         self._family = shell.family
+        self.server = remote.server_of(folder)
         self._current_folder = folder
         self._wanted_folder = None
         self._line_started = False
@@ -230,10 +240,16 @@ class TerminalView(QAbstractScrollArea):
 
     def follow(self, path: str) -> None:
         """Lleva el intérprete a la carpeta del panel, ahora o en cuanto deje de estar ocupado. Solo se quedan sin ir las carpetas que no se pueden escribir sin riesgo."""
-        if self.session is None or not self.following:
-            return
-        self._wanted_folder = path if path != self._current_folder and cd_command(path, self._family) else None
+        if self.session is None or not self.following or remote.server_of(path) != self.server:
+            return  # una carpeta de otro sitio: quien la muestra decide si cambia de intérprete
+        self._wanted_folder = path if path != self._current_folder and self._cd_text(path) else None
         self._try_follow()
+
+    def _cd_text(self, folder: str) -> str | None:
+        return remote.cd_line(folder) if remote.is_remote(folder) else cd_command(folder, self._family)
+
+    def ready_for_command(self) -> bool:
+        return self.session is not None and self._ready_for_command()
 
     def _ready_for_command(self) -> bool:
         """Se escribe solo en un indicador vacío: nunca en lo que el usuario esté tecleando ni en un programa que espera una respuesta."""
@@ -260,7 +276,7 @@ class TerminalView(QAbstractScrollArea):
         elif self._ready_for_command():
             self._current_folder, self._wanted_folder = self._wanted_folder, None
             self._follow_timer.stop()
-            self._write(cd_command(self._current_folder, self._family).encode())
+            self._write(self._cd_text(self._current_folder).encode())
         elif not self._follow_timer.isActive():
             self._follow_timer.start()
 

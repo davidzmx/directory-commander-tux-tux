@@ -40,6 +40,8 @@ class _Info:
 
 
 def _describe(path: str) -> _Info:
+    if path.startswith("sftp://"):  # preguntarle al servidor desde la ventana la dejaría esperando si no responde
+        return _Info(QFileIconProvider().icon(QFileIconProvider.IconType.File), None, 0.0, tr("Archivo del servidor"))
     try:
         entry = entry_from_path(path)
     except OSError:  # un miembro de un comprimido: de él solo se puede saber el tamaño
@@ -79,6 +81,8 @@ def _text_page(path: str) -> QPixmap | None:
 
 
 def _thumbnail(path: str, info: _Info) -> QPixmap:
+    if path.startswith("sftp://"):
+        return info.icon.pixmap(48, 48)
     try:
         if os.path.isfile(path) and os.path.getsize(path) <= _THUMB_MAX_BYTES:
             reader = QImageReader(path)

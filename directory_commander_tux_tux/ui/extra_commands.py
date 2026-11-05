@@ -6,16 +6,18 @@ import os
 import time
 import zipfile
 
-from PySide6.QtCore import QStorageInfo, Qt, QUrl
+from PySide6.QtCore import QStorageInfo, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices
-from PySide6.QtWidgets import (QApplication, QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QInputDialog,
+from PySide6.QtWidgets import (QApplication, QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QInputDialog, QLineEdit,
                                QLabel, QMenu, QMessageBox, QSizePolicy, QToolBar, QToolButton, QVBoxLayout, QWidget)
 
 from .. import APP_NAME
-from ..core import archive, favorites, frequent, fsops, settings_io
+from ..core import archive, favorites, frequent, fsops, remote, settings_io
 from ..core.fsops import Collision, OpResult
 from ..core.listing import COMPUTER_PATH, path_states, listing_text, location_label
-from . import image_ops, theme
+from . import image_ops, sftp, theme
+from .open_external import open_externally
+from .settings_transfer import ENCRYPTED, NO_PASSWORDS, SettingsTransferDialog
 from .background import run_bg
 from .icons import themed
 from .model import COLUMNS, IMAGE_EXTENSIONS
@@ -104,6 +106,8 @@ class ExtraCommands:
         """Con el bloqueo activo, el otro panel repite el mismo movimiento relativo."""
         if not self.nav_lock or self._following or view is not self.source or self.dest is None or not previous:
             return
+        if any(path.startswith("sftp://") for path in (view.path, previous, self.dest.path)):
+            return  # entre un servidor y el equipo no hay un movimiento relativo que repetir
         try:
             relative = os.path.relpath(view.path, previous)
         except ValueError:
@@ -133,6 +137,12 @@ class ExtraCommands:
 
     def _set_output(self, value: str) -> None:
         self._set_utility("log,toggle" if value.lower().startswith("toggle") else ("log" if _turn(value, False) else "off"))
+
+    def _set_generationmarks(self, value: str) -> None:
+        self.config["show_generation_marks"] = _turn(value, self.config.get("show_generation_marks") is True)
+        for view in self.all_views():
+            self._apply_previews(view)
+        self.statusBar().showMessage(tr("Marcas de IA visibles") if self.config["show_generation_marks"] else tr("Marcas de IA ocultas"), 3000)
 
     def _set_checkboxmode(self, value: str) -> None:
         for view in self.all_views():
@@ -498,18 +508,59 @@ class ExtraCommands:
         note = tr(" Se descartaron {skipped} no válidos.", skipped=skipped) if skipped else ""
         QMessageBox.information(self, APP_NAME, tr("Se añadieron {added} favoritos.{note}", added=added, note=note))
 
-    def export_settings_file(self, path: str) -> None:
+    def export_settings_file(self, path: str, groups=settings_io.DEFAULT_GROUPS, passwords: dict[str, str] | None = None, key: str = "",
+                             known_hosts: bool = False) -> None:
+        """Los grupos elegidos. Con `passwords`, también las contraseñas SSH/SFTP: cifradas con `key`, o en texto plano sin ella."""
         self.save_session()
-        settings_io.export_settings(path, self.config.data)
+        hosts = remote.known_host_lines([(profile.host, profile.port) for profile in sftp.profiles(self.config)]) if known_hosts else ()
+        settings_io.export_settings(path, self.config.data, groups, passwords, key, hosts)
 
-    def import_settings_file(self, path: str) -> list[str]:
-        """Aplica un archivo de configuración al momento. Devuelve los nombres de lo descartado."""
-        settings, ignored = settings_io.read_settings(path)
+    def exportable_passwords(self) -> dict[str, str]:
+        """Las guardadas de los perfiles que las guardan. Las escritas solo para una conexión no se guardaron a propósito: no viajan."""
+        found = {}
+        for profile in sftp.profiles(self.config):
+            if profile.auth != "agent" and profile.save_password:
+                password = remote.stored_password(profile.server) or sftp._session_passwords.get(profile.server)
+                if password:
+                    found[profile.server] = password
+        return found
+
+    def import_settings_file(self, path: str, groups=settings_io.DEFAULT_GROUPS) -> list[str]:
+        """Aplica al momento los grupos elegidos de un archivo. Devuelve los nombres de lo descartado o no elegido."""
+        bundle = settings_io.read_bundle(path)
+        self.apply_imported(bundle, groups)
+        return bundle.ignored + [key for key in bundle.settings if settings_io.group_of(key) not in set(groups)]
+
+    def apply_imported(self, bundle: settings_io.Bundle, groups, passwords: dict[str, str] | None = None, known_hosts: bool = False) -> list[str]:
+        """Aplica lo elegido de un archivo ya leído. Devuelve las frases con lo que conviene contar de cómo ha ido."""
+        settings = settings_io.chosen_settings(bundle, groups)
         if settings:
             self.config.data.update(settings)
             self.apply_settings()
+            self._preferences_changed()
             self.config.save()
-        return ignored
+        report = []
+        if passwords:
+            in_keyring = 0
+            for server, password in passwords.items():
+                sftp._session_passwords[server] = password
+                in_keyring += remote.store_password(server, password)
+            if in_keyring:
+                report.append(tr("Se guardaron {count} contraseñas en el llavero del sistema.", count=in_keyring))
+            if in_keyring < len(passwords):
+                report.append(tr("No hay un llavero del sistema donde guardar {count} contraseñas: se recordarán hasta cerrar el programa.",
+                                 count=len(passwords) - in_keyring))
+        if known_hosts and bundle.known_hosts:
+            try:
+                added, conflicts = remote.add_known_hosts(bundle.known_hosts)
+            except OSError as exc:
+                report.append(tr("No se pudo guardar en known_hosts: {exc}", exc=exc))
+            else:
+                if added:
+                    report.append(tr("Se añadieron {count} claves de servidores a known_hosts.", count=added))
+                if conflicts:
+                    report.append(tr("Ya había otra clave para {hosts}: se ha dejado la que tenías.", hosts=", ".join(conflicts)))
+        return report
 
     def apply_settings(self) -> None:
         """Lleva la configuración actual a la ventana, sin tener que reiniciar el programa."""
@@ -532,21 +583,64 @@ class ExtraCommands:
             self.apply_style(config["style"])
 
     def _export_settings_dialog(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(self, tr("Exportar configuración"), "configuracion.json", "JSON (*.json)")
-        if path:
-            self.export_settings_file(path)
-            self.statusBar().showMessage(tr("Configuración exportada"), 5000)
+        dialog = SettingsTransferDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        path, _ = QFileDialog.getSaveFileName(self, tr("Exportar configuración"), settings_io.export_name(), "JSON (*.json)")
+        if not path:
+            return
+        # El llavero se consulta solo si se piden: abrirlo puede pedir su contraseña.
+        passwords = self.exportable_passwords() if dialog.password_mode() != NO_PASSWORDS else None
+        self.export_settings_file(path, dialog.groups(), passwords, dialog.password_key(), dialog.known_hosts())
+        if dialog.password_mode() == NO_PASSWORDS:
+            message = tr("Configuración exportada")
+        elif not passwords:
+            message = tr("Configuración exportada. No había contraseñas guardadas que llevar.")
+        elif dialog.password_mode() == ENCRYPTED:
+            message = tr("Configuración exportada, con {count} contraseñas cifradas", count=len(passwords))
+        else:
+            message = tr("Configuración exportada, con {count} contraseñas en texto plano: guarda el archivo en un sitio seguro", count=len(passwords))
+        self.statusBar().showMessage(message, 8000)
 
     def _import_settings_dialog(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, tr("Importar configuración"), "", "JSON (*.json)")
         if not path:
             return
-        # Los botones de una barra pueden ejecutar programas con `Run`.
-        if not self._confirm(tr("¿Importar esta configuración?\nSustituye los ajustes que contenga el archivo. Sus botones pueden ejecutar programas: importa solo archivos de confianza."), True):
+        bundle = settings_io.read_bundle(path)
+        if not bundle.groups():
+            QMessageBox.information(self, APP_NAME, tr("El archivo no trae nada que se pueda importar."))
             return
-        ignored = self.import_settings_file(path)
-        note = tr("\nSe descartó lo que no era válido: {join}.", join=', '.join(ignored)) if ignored else ""
-        QMessageBox.information(self, APP_NAME, tr("Configuración importada.{note}", note=note))
+        dialog = SettingsTransferDialog(self, bundle)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        passwords, report = None, []
+        if dialog.passwords_wanted():
+            passwords = self._open_imported_passwords(bundle)
+            if passwords is None:
+                report.append(tr("Las contraseñas no se importaron."))
+        language = self.config.get("language")
+        report = self.apply_imported(bundle, dialog.groups(), passwords, dialog.known_hosts()) + report
+        names = ", ".join(tr(group.label) for group in settings_io.GROUPS if group.key in dialog.groups())
+        lines = [tr("Configuración importada: {names}.", names=names), *report]
+        if bundle.ignored:
+            lines.append(tr("Se descartó lo que no era válido: {join}.", join=", ".join(bundle.ignored)))
+        QMessageBox.information(self, APP_NAME, "\n".join(lines))
+        if self.config.get("language") != language:
+            QTimer.singleShot(0, self._offer_restart)
+
+    def _open_imported_passwords(self, bundle: settings_io.Bundle) -> dict[str, str] | None:
+        """None si se cancela al pedir la clave."""
+        if not bundle.encrypted:
+            return settings_io.open_passwords(bundle.passwords)
+        label = tr("Clave con la que se cifraron las contraseñas:")
+        while True:
+            key, ok = QInputDialog.getText(self, tr("Importar configuración"), label, QLineEdit.EchoMode.Password)
+            if not ok:
+                return None
+            try:
+                return settings_io.open_passwords(bundle.passwords, key)
+            except settings_io.WrongKey:
+                label = tr("No es correcta. Clave con la que se cifraron las contraseñas:")
 
     # ---------------------------------------------------------------- comandos sueltos
     def _cmd_find(self, _cmd) -> None:
@@ -588,7 +682,7 @@ class ExtraCommands:
         menu.exec(self.cursor().pos())
 
     def _open_url(self, url: str) -> None:
-        QDesktopServices.openUrl(QUrl(url))
+        open_externally(url)
 
     def _copy_update(self, paths: list[str], target: str, move: bool, policy: Collision) -> None:
         self.jobs.start(tr("Copiar lo más reciente"), lambda sink: fsops.transfer(paths, target, move, policy, sink), None,

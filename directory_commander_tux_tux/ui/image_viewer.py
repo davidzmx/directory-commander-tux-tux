@@ -5,8 +5,8 @@ import math
 import os
 import time
 
-from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QTimer, QUrl
-from PySide6.QtGui import QAction, QDesktopServices, QImageReader, QPixmap, QTransform
+from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QTimer
+from PySide6.QtGui import QAction, QImageReader, QPixmap, QTransform
 from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QScrollArea,
                                QSizePolicy, QSlider, QToolBar, QToolButton, QWidgetAction)
 
@@ -14,6 +14,7 @@ from .. import APP_NAME
 from ..core import bar_buttons
 from ..core.listing import format_size
 from . import image_ops, theme
+from .open_external import open_externally
 from .background import run_bg
 from .crop_overlay import CropOverlay
 from .icons import app_icon, themed
@@ -440,7 +441,7 @@ class ImageViewer(QMainWindow):
 
     def open_with_system(self) -> None:
         if self.current_path:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(self.current_path))
+            open_externally(self.current_path)
 
     def reveal_current(self) -> None:
         if self.host is not None and self.current_path:

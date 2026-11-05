@@ -9,7 +9,7 @@ from PySide6.QtCore import QPoint, QSize, Qt, QThreadPool, QTimer
 from PySide6.QtGui import QGuiApplication, QImage, QPixmap
 from PySide6.QtWidgets import QFormLayout, QFrame, QHBoxLayout, QLabel, QVBoxLayout
 
-from ..core import archive, fsops
+from ..core import ai_metadata, archive, fsops
 from ..core.listing import Entry, format_size, format_time, list_dir, sort_entries
 from ..core.media_info import (MediaInfo, codec_name, format_duration, is_media_extension, read_media_info,
                                video_frame)
@@ -115,6 +115,14 @@ def card_details(entry: Entry, image: tuple[int, int, int] | None, media: MediaI
     return subtitle, rows
 
 
+def generation_rows(generated) -> list[tuple[str, str]]:
+    """Con qué programa de IA se generó y con qué modelo, si lo dejó escrito."""
+    if generated is None or not (generated.has_prompt or generated.workflow):
+        return []
+    rows = [(tr("Generada con IA"), generated.tool or tr("No se sabe con qué programa"))]
+    return rows + ([(tr("Modelo"), generated.model)] if generated.model else [])
+
+
 class HoverCard(QFrame):
     """Ventana flotante con miniatura y datos. Nada de esto bloquea la interfaz: los datos
     se leen en segundo plano y se descartan si el ratón ya se movió a otro archivo."""
@@ -191,24 +199,25 @@ class HoverCard(QFrame):
 
         def work(_sink):
             if member and extension in IMAGE_EXTENSIONS:
-                return read_image_info(path, True), None
+                return read_image_info(path, True), None, None
             if not readable:
-                return None, None
+                return None, None, None
+            generated = ai_metadata.read_generation(path, extension) if extension in ai_metadata.IMAGE_EXTENSIONS | ai_metadata.VIDEO_EXTENSIONS else None
             if extension in IMAGE_EXTENSIONS:
-                return read_image_info(path), None
+                return read_image_info(path), None, generated
             if is_media_extension(extension):
-                return None, read_media_info(path, ffmpeg_dir)
-            return None, None
+                return None, read_media_info(path, ffmpeg_dir), generated
+            return None, None, generated
 
         run_bg(work, lambda value: self._details_ready(token, entry, *value),
                lambda _exc: self._details_ready(token, entry, None, None))
 
-    def _details_ready(self, token: int, entry: Entry, image, media) -> None:
+    def _details_ready(self, token: int, entry: Entry, image, media, generated=None) -> None:
         if token != self._token:
             return
         subtitle, rows = card_details(entry, image, media)
         self._reset_content(entry, subtitle, folder=False)
-        for label, value in rows:
+        for label, value in rows + generation_rows(generated):
             self._add_row(label, value)
         self._reveal()
         self._load_thumbnail(token, entry, image, media)

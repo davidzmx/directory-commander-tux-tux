@@ -11,7 +11,7 @@ from . import favorites
 from .i18n import AUTO, LANGUAGE_FOLDER, N_, tr
 from .pane_colors import DEFAULT_SCHEME, adopt_old_colors
 
-CONFIG_VERSION = 18
+CONFIG_VERSION = 21
 PORTABLE_MARKER = "portable.txt"
 VISIT_POINTS = 3
 
@@ -69,6 +69,11 @@ GENERAL_TERMINAL_COMMAND = "Set GENERALTERMINAL=Toggle"
 OLD_TERMINAL_BUTTON = "Panel de terminal"
 COMPARE_COMMAND = "Compare FILES"
 FRAMES_TOGGLE_COMMAND = "Set PANEFRAMES=Toggle"
+GENERATION_MARKS_COMMAND = "Set GENERATIONMARKS=Toggle"
+DISK_USAGE_COMMAND = "DiskUsage"
+OLD_SIZES_COMMAND = "GetSizes"
+OLD_SIZES_LABEL = "Tamaños de carpeta"
+IMAGE_VIEWER_COMMAND = "Show"
 DEFAULT_TOOLBAR = [
     _btn(N_("Atrás"), "goback", "Go BACK", N_("Atrás (Alt+←)")),
     _btn(N_("Adelante"), "goforward", "Go FORWARD", N_("Adelante (Alt+→)")),
@@ -94,6 +99,7 @@ DEFAULT_TOOLBAR = [
         _item(N_("Copiar a destino"), "copy", "Copy"),
         _item(N_("Copiar con otro nombre…"), "copy", "Copy AS"),
         _item(N_("Duplicar aquí"), "copy", "Copy DUPLICATE"),
+        _item(N_("Copiar a destino y comprobar la copia"), "copy", "Copy VERIFY"),
         _item(N_("Crear enlace simbólico en destino"), "shortcut", "Copy MAKELINK=softlink"),
     ]),
     _btn(N_("Mover"), "move", "Copy MOVE", N_("Mover la selección al panel de destino (Mayús+F6)"), [
@@ -114,7 +120,8 @@ DEFAULT_TOOLBAR = [
     ]),
     _btn(N_("Deshacer"), "undo", "Undo", N_("Deshacer la última operación (Ctrl+Z)")),
     _sep(),
-    _btn(N_("Mostrar imágenes"), "show", "Show", N_("Abrir el visor de imágenes"), [
+    _btn(N_("Marcas de IA"), "aimarks", GENERATION_MARKS_COMMAND, N_("Mostrar u ocultar las marcas de prompt y workflow de las imágenes y vídeos generados con IA")),
+    _btn(N_("Mostrar imágenes"), "show", IMAGE_VIEWER_COMMAND, N_("Abrir el visor de imágenes"), [
         _item(N_("Abrir el visor"), "show", "Show"),
         _item(N_("Presentación a pantalla completa"), "slideshow", "Show SLIDESHOW FULLSCREEN"),
     ]),
@@ -136,7 +143,10 @@ DEFAULT_TOOLBAR = [
         _item(N_("Cambiar atributos…"), "setattr", "SetAttr"),
         _item(N_("Poner la fecha actual"), "setdate", "SetAttr MODIFIED=now"),
     ]),
-    _btn(N_("Tamaños de carpeta"), "getsizes", "GetSizes", N_("Calcular tamaños de carpetas")),
+    _btn(N_("Uso del disco"), "diskusage", DISK_USAGE_COMMAND, N_("Uso del disco: qué carpetas y archivos ocupan más, en una lista y un mapa"), [
+        _item(N_("Uso del disco…"), "diskusage", DISK_USAGE_COMMAND),
+        _item(N_("Calcular tamaños de carpetas"), "getsizes", OLD_SIZES_COMMAND),
+    ]),
     _sep(),
     _btn(N_("Buscar"), "search", "Set UTILITY=Find", N_("Buscar archivos (Ctrl+Shift+F)")),
     _btn(N_("Sincronizar"), "sync", "Set UTILITY=Sync", N_("Comparar los dos paneles")),
@@ -166,15 +176,37 @@ DEFAULT_STYLES = [
 STYLE_RENAMES = {"Vertical Dual": "Vertical doble panel", "Horizontal Dual": "Horizontal doble panel"}
 OLD_METADATA_STYLE = "Metadatos"
 
+THUMB_SIZES = (64, 96, 128, 160, 192, 256)
+VIDEO_THUMBNAILS = ("four", "one", "off")
+GENERATION_MARK_KINDS = ("both", "prompt", "workflow")
+DEFAULT_SORTS = ("type", "name", "size", "modified")
+
 DEFAULTS: dict = {
     "config_version": CONFIG_VERSION,
     "theme": "dark",
     "dest_tint": True,
     "confirm_delete": True,
+    "confirm_exit": True,
+    "verify_copies": False,  # releer cada copia y compararla con el original
+    "single_click": False,  # un clic abre, y se selecciona con la marca + del icono
     "use_trash": True,
     "expandable_folders": True,
     "friendly_dates": "off",
     "show_favorites_bar": False,
+    "general_status_bar": True,
+    "pane_free_space": "other_disk",  # con la barra general, en qué paneles se ve también el espacio libre: other_disk, always o never
+    "list_column_chars": 50,  # el ancho máximo de las columnas de la vista de lista; 0 sin límite
+    "thumbnail_size": 128,
+    "video_thumbnails": "four",  # four: cuatro fotogramas y la duración; one: uno; off: el icono
+    "folder_previews": True,  # las carpetas, en las miniaturas, con las primeras imágenes de dentro
+    "show_generation_marks": False,  # las marcas de prompt y workflow de las imágenes y vídeos generados con IA; se muestran con su botón
+    "generation_mark_kinds": "both",  # cuáles: both, prompt o workflow
+    "git_marks": True,  # en la lista, el estado de git de cada archivo y carpeta
+    "default_sort": "type",  # con qué orden empieza cada pestaña: type, name, size o modified (las carpetas, siempre primero)
+    "default_sort_reverse": False,
+    "remember_folder_views": True,  # la vista y el orden de cada carpeta
+    "folder_views": {},  # ruta: [vista, columna, al revés]
+    "detail_columns": {},  # los anchos elegidos a mano en la vista de detalles
     "lock_bars": False,
     "full_row_select": False,
     "hover_info": True,
@@ -182,6 +214,8 @@ DEFAULTS: dict = {
     "open_images": "viewer",
     "open_archives": "system",
     "open_videos": "viewer",
+    "open_json": "viewer",  # viewer: el visor de JSON del programa; system: la aplicación predeterminada
+    "open_markdown": "editor",  # editor: el de doble vista del programa; system: la aplicación predeterminada
     "tree_level_colors": True,
     "shell_menu_items": True,
     "context_menus": {},
@@ -391,6 +425,47 @@ def _add_frames_button(stored: dict) -> None:
     toolbar.insert(len(toolbar) if after is None else after + 1, button)
 
 
+def _add_marks_button(stored: dict) -> None:
+    """Delante del de abrir el visor de imágenes, o al final si la barra no lo tiene."""
+    toolbar = stored.get("toolbar")
+    if not isinstance(toolbar, list) or any(_runs(item, GENERATION_MARKS_COMMAND) for item in toolbar):
+        return
+    button = next(json.loads(json.dumps(item)) for item in DEFAULT_TOOLBAR if _runs(item, GENERATION_MARKS_COMMAND))
+    viewer = next((position for position, item in enumerate(toolbar) if _runs(item, IMAGE_VIEWER_COMMAND)), None)
+    toolbar.insert(len(toolbar) if viewer is None else viewer, button)
+
+
+def _add_verified_copy(stored: dict) -> None:
+    """En el menú del botón Copiar, detrás de «Duplicar aquí»: copiar comprobando la copia."""
+    toolbar = stored.get("toolbar")
+    for button in toolbar if isinstance(toolbar, list) else []:
+        children = button.get("children") if isinstance(button, dict) else None
+        if _runs(button, "Copy") and isinstance(children, list) and not any(_runs(child, "Copy VERIFY") for child in children):
+            item = next(json.loads(json.dumps(child)) for default in DEFAULT_TOOLBAR if _runs(default, "Copy")
+                        for child in default["children"] if _runs(child, "Copy VERIFY"))
+            after = next((position for position, child in enumerate(children) if _runs(child, "Copy DUPLICATE")), len(children) - 1)
+            children.insert(after + 1, item)
+
+
+def _swap_sizes_for_disk_usage(stored: dict) -> None:
+    """El botón de calcular los tamaños de las carpetas pasa a ser el del uso del disco, en su mismo sitio; calcular los tamaños queda en su menú.
+    Un botón que el usuario haya cambiado (otra etiqueta u otras órdenes) se respeta."""
+    toolbar = stored.get("toolbar")
+    if not isinstance(toolbar, list) or any(_runs(item, DISK_USAGE_COMMAND) for item in toolbar):
+        return
+    old = next((position for position, item in enumerate(toolbar) if isinstance(item, dict) and item.get("commands") == [OLD_SIZES_COMMAND]
+                and item.get("label") == OLD_SIZES_LABEL), None)
+    if old is None:
+        return
+    button = next(json.loads(json.dumps(item)) for item in DEFAULT_TOOLBAR if _runs(item, DISK_USAGE_COMMAND))
+    toolbar[old] = button
+    for section in ("bar_buttons", "bar_order"):
+        bars = stored.get(section)
+        keys = bars.get("toolbar") if isinstance(bars, dict) else None
+        if isinstance(keys, list):
+            bars["toolbar"] = [button["label"] if key == OLD_SIZES_LABEL else key for key in keys]
+
+
 def _adopt_old_frame_modes(stored: dict) -> None:
     """La primera forma de elegirlos tenía «nunca» y un número fijo, dos."""
     mode = stored.get("pane_frames")
@@ -500,6 +575,12 @@ class Config:
         if version < 18:
             _add_frames_button(stored)
             _adopt_old_frame_modes(stored)
+        if version < 19:
+            _add_marks_button(stored)
+        if version < 20:
+            _add_verified_copy(stored)
+        if version < 21:
+            _swap_sizes_for_disk_usage(stored)
         if version < 17:
             stored.pop("find_window_geometry", None)  # era de otra forma de colocar el panel, con otras medidas
         if version < 15:

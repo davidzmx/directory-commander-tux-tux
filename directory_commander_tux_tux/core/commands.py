@@ -18,7 +18,7 @@ KNOWN_ARGS: dict[str, set[str]] = {
            "TABCLOSE", "TABNEXT", "TABPREV", "SWAP", "DEST", "BACKLIST", "FORWARDLIST", "NEWTAB", "FROMSEL",
            "DRIVEBUTTONS", "TABGROUPSAVE", "TABGROUPLIST"},
     "copy": {"MOVE", "HERE", "TO", "AS", "DUPLICATE", "ADDTOARCHIVE", "ADDTOZIP", "ZIP", "ARCHIVE", "EXTRACT",
-             "MAKELINK", "CREATEFOLDER", "UPDATEALL", "UPDATEEXISTING", "PATTERN", "IGNOREEXT"},
+             "MAKELINK", "CREATEFOLDER", "UPDATEALL", "UPDATEEXISTING", "PATTERN", "IGNOREEXT", "VERIFY"},
     "delete": {"NORECYCLE", "QUIET", "SHIFT"},
     "createfolder": {"NAME", "ZIP", "ARCHIVE"},
     "createfile": {"NAME"},
@@ -32,7 +32,7 @@ KNOWN_ARGS: dict[str, set[str]] = {
     "setattr": {"MODIFIED"},
     "show": {"AUTOFILELIST", "SLIDESHOW", "FULLSCREEN"},
     "undo": {"REDO"},
-    "prefs": {"PAGE", "BARS", "STYLELIST", "LAYOUTSAVE", "LAYOUTLIST", "LAYOUTEDIT", "THEMES", "IMPORT", "EXPORT"},
+    "prefs": {"PAGE", "BARS", "STYLELIST", "LAYOUTSAVE", "LAYOUTLIST", "LAYOUTEDIT", "THEMES", "IMPORT", "EXPORT", "SFTP"},
     "help": {"ABOUT"},
     "favorites": {"ADD", "ADDDIALOG", "IMPORT", "EXPORT", "MENU", "EDIT", "SMART"},
     "cli": {"DOSPROMPT"},
@@ -49,6 +49,7 @@ KNOWN_ARGS: dict[str, set[str]] = {
     "split": set(),
     "join": set(),
     "play": set(),
+    "diskusage": set(),
 }
 _FREE_FORM = {"run", "marker"}
 _SET_BARE = {"CONTENTTYPE", "SPACER", "QUICKFILTER"}

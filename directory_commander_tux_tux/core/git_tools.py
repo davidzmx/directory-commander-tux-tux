@@ -285,3 +285,73 @@ def commit_command(message: str, family: str = POSIX, amend: bool = False, all_c
 def switch_command(branch: str, family: str = POSIX, create: bool = False) -> str | None:
     quoted = quote(branch, family)
     return None if quoted is None or family == OTHER or branch.startswith("-") else f"git switch {'-c ' if create else ''}{quoted}"
+
+
+# Lo que se marca en la lista, de más a menos importante: en conflicto, modificado, añadido, renombrado, borrado, nuevo sin seguimiento e ignorado.
+STATE_ORDER = "UMARD?!"
+
+
+def _state_of(index: str, worktree: str) -> str:
+    pair = index + worktree
+    if "U" in pair or pair in ("AA", "DD"):
+        return "U"
+    if pair in ("??", "!!"):
+        return pair[0]
+    for state in "DRA":
+        if state in pair:
+            return state
+    return "M"
+
+
+def _more_important(first: str | None, second: str) -> str:
+    return second if first is None or STATE_ORDER.index(second) < STATE_ORDER.index(first) else first
+
+
+def folder_states(git: str, folder: str) -> tuple[dict[str, str], dict[str, str], tuple[tuple[str, str], ...]]:
+    """El estado de git de lo que hay en la carpeta y debajo: (archivo → estado, carpeta → el estado más importante de lo que
+    contiene, (carpeta entera ignorada o sin seguimiento, su estado)). Las rutas, absolutas. Vacío si la carpeta no está en un repositorio."""
+    if not _git_folder(folder):
+        return {}, {}, ()
+    top = _run(git, folder, "rev-parse", "--show-toplevel")
+    done = _run(git, folder, "status", "--porcelain=v1", "-z", "--ignored", "--", ".")
+    if top.returncode != 0 or done.returncode != 0:
+        return {}, {}, ()
+    root = os.path.normpath(_text(top))
+    base = os.path.normcase(os.path.normpath(folder))
+    files: dict[str, str] = {}
+    folders: dict[str, str] = {}
+    whole: list[tuple[str, str]] = []  # git da la carpeta, no cada archivo: lo de dentro tiene su mismo estado
+    fields = done.stdout.decode("utf-8", "replace").split("\0")
+    position = 0
+    while position < len(fields) and fields[position]:
+        line = fields[position]
+        index, worktree, path = line[0], line[1], line[3:]
+        if index in "RC" or worktree in "RC":
+            position += 1  # el nombre anterior
+        position += 1
+        state = _state_of(index, worktree)
+        absolute = os.path.normpath(os.path.join(root, path))
+        files[absolute] = _more_important(files.get(absolute), state)
+        if state in "!?" and path.endswith("/"):
+            whole.append((absolute, state))
+            continue  # una carpeta entera sin seguimiento o ignorada: ella misma lleva la marca
+        parent = os.path.dirname(absolute)
+        while os.path.normcase(parent).startswith(base) and len(parent) >= len(base) and state != "!":
+            folders[parent] = _more_important(folders.get(parent), state)
+            if os.path.normcase(parent) == base:
+                break
+            parent = os.path.dirname(parent)
+    return files, folders, tuple(whole)
+
+
+def state_of(path: str, files: dict[str, str], folders: dict[str, str], whole: tuple[tuple[str, str], ...]) -> tuple[str, bool] | None:
+    """(estado, si es el de lo que contiene una carpeta) de una ruta, o None si no tiene cambios."""
+    path = os.path.normpath(path)
+    if path in files:
+        return files[path], False
+    if path in folders:
+        return folders[path], True
+    for folder, state in whole:
+        if path.startswith(folder + os.sep):
+            return state, False
+    return None

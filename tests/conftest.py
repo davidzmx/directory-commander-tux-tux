@@ -14,6 +14,26 @@ def source_language_again():
     i18n.set_language(i18n.SOURCE_CODE)
 
 
+@pytest.fixture(autouse=True)
+def no_real_devices(monkeypatch):
+    """Los discos de este equipo no deben cambiar lo que ven las pruebas, ni ninguna prueba montarlos: las que los usan dan los suyos."""
+    from directory_commander_tux_tux.core import devices
+
+    monkeypatch.setattr(devices, "list_devices", lambda: [])
+    monkeypatch.setattr(devices, "_run", lambda argv, timeout: pytest.fail(f"Una prueba intentó ejecutar {argv[0]}"))
+    from directory_commander_tux_tux.ui import udisks
+
+    monkeypatch.setattr(udisks.UDisks, "bus", lambda self: None)  # sin el bus del sistema: se usa `devices`, que cada prueba sustituye
+
+
+@pytest.fixture(autouse=True)
+def no_real_programs(monkeypatch):
+    """Abrir un archivo pasa por QDesktopServices, que cada prueba sustituye por lo que necesita: nunca por xdg-open, que abriría el programa de verdad."""
+    from directory_commander_tux_tux.ui import open_external
+
+    monkeypatch.setattr(open_external, "_use_xdg_open", lambda: False)
+
+
 @pytest.fixture
 def qapp_for_gc():
     from PySide6.QtWidgets import QApplication

@@ -14,7 +14,7 @@ from PySide6.QtGui import (QAction, QCloseEvent, QColor, QContextMenuEvent, QDra
                            QMouseEvent, QPalette, QWheelEvent)
 from PySide6.QtMultimedia import QMediaMetaData, QMediaPlayer, QVideoFrame, QVideoFrameFormat
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFormLayout, QLineEdit, QMenu, QMessageBox, QStyle, QStyleOptionToolBar, QToolButton, QWidget,
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QDialog, QFormLayout, QLineEdit, QMenu, QMessageBox, QStyle, QStyleOptionToolBar, QToolButton, QWidget,
                                QTreeWidgetItem)
 
 from directory_commander_tux_tux.core import bar_buttons, context_menu, desktop_apps, fsops, media_info, platform_utils, settings_io, tab_settings, windows_shell
@@ -31,7 +31,6 @@ from directory_commander_tux_tux.ui.image_viewer import ImageViewer, color_depth
 from directory_commander_tux_tux.ui.file_view import COLUMN_INDEX, Breadcrumb, FileView, path_crumbs
 from directory_commander_tux_tux.ui.main_window import MAX_TAB_NAME, MainWindow, _tab_title, move_to_trash
 from directory_commander_tux_tux.ui.media_player import SEEK_MIN_WIDTH, MediaPlayer, SeekSlider, frame_index_at, frame_middle_ms
-from directory_commander_tux_tux.ui.video_viewer import format_exact_position
 from directory_commander_tux_tux.ui.model import COLUMNS, EntryRole
 from directory_commander_tux_tux.ui.shell_menu import add_shell_items, tidy_separators
 from directory_commander_tux_tux.ui.preview import PreviewPane
@@ -825,6 +824,8 @@ def test_hover_highlight_follows_the_name_only(window):
     viewport = details.viewport()
     point = name_point(view, "a.txt")
     row = view.model.row_of(os.path.join(view.path, "a.txt"))
+    # Qt descarta un movimiento al punto donde ya estaba el ratón, y puede haberlo dejado ahí otra prueba.
+    QTest.mouseMove(viewport, QPoint(viewport.width() - 4, viewport.height() - 4))
     QTest.mouseMove(viewport, point)
     assert wait_until(lambda: details.hover_row == row, 1)
     QTest.mouseMove(viewport, QPoint(viewport.width() - 8, point.y()))
@@ -977,6 +978,19 @@ def test_file_menu_contents(window):
     select(view, "a.txt", "b.txt")
     entries = labels(window.build_file_menu(view))
     assert "Abrir" not in entries and "Calcular hash" in entries
+    assert entries.index("Copiar rutas como texto") == entries.index("Copiar") + 1  # varios: las rutas, detrás de «Copiar»
+
+
+def test_copy_path_of_one_file_says_so(window):
+    view = window.source
+    select(view, "a.txt")
+    entries = labels(window.build_file_menu(view))
+    assert "Copiar rutas como texto" not in entries
+    assert entries.index("Copiar ruta del archivo") == entries.index("Copiar") + 1
+    next(a for a in window.build_file_menu(view).actions() if a.text() == "Copiar ruta del archivo").trigger()
+    assert QApplication.clipboard().text().strip() == os.path.join(view.path, "a.txt")
+    select(view, "subcarpeta")
+    assert "Copiar ruta de la carpeta" in labels(window.build_file_menu(view))
 
 
 def test_folder_menu_contents(window):
@@ -1557,8 +1571,10 @@ def tree_children(item):
 def test_tree_has_home_favorites_and_drives(window):
     tree_widget = window.tree
     tops = [tree_widget.topLevelItem(i) for i in range(tree_widget.topLevelItemCount())]
-    assert [t.isExpanded() for t in tops] == [True, True, True]
+    assert [t.isExpanded() for t in tops[:3]] == [True, True, True]
     assert tops[0] is tree_widget.home_item and tops[1] is tree_widget.favorites_item and tops[2] is tree_widget.root_item
+    # En Linux, detrás, los dispositivos: ocultos mientras no haya ninguno, como en estas pruebas.
+    assert tops[3:] == ([] if sys.platform == "win32" else [tree_widget.devices_item]) and all(top.isHidden() for top in tops[3:])
     assert assert_label(tops[0]) and tops[1].text(0) == "Favoritos"
 
 
@@ -1700,7 +1716,7 @@ def test_status_row_counts(window, tree):
     select(view, "a.txt")
     assert view.status.files.text() == "1 / 2"
     assert "txt" in view.status.chip.text()
-    assert view.status.meter.isVisibleTo(view.status)
+    assert not view.status.meter.isVisibleTo(view.status)  # con la barra de estado general, el espacio libre va en ella
 
 
 # ---- carpetas desplegables ----
@@ -2362,7 +2378,7 @@ def test_import_settings_asks_first(window, tmp_path, monkeypatch):
     path = tmp_path / "c.json"
     path.write_text('{"format": "directory-commander-tux-tux-settings", "version": 1, "settings": {"dest_tint": false}}', encoding="utf-8")
     monkeypatch.setattr("directory_commander_tux_tux.ui.extra_commands.QFileDialog.getOpenFileName", lambda *a, **k: (str(path), ""))
-    monkeypatch.setattr(window, "_confirm", lambda *a, **k: False)
+    monkeypatch.setattr("directory_commander_tux_tux.ui.extra_commands.SettingsTransferDialog.exec", lambda self: QDialog.DialogCode.Rejected)
     window.run_command("Prefs IMPORT")
     assert window.config["dest_tint"] is True
 
@@ -3565,7 +3581,7 @@ def test_preferences_pages_roundtrip(app):
                               "same_size": True, "same_size_mode": "fixed", "fixed_size": 77, "selected_click": "previous",
                               "drag_delay_ms": 300, "vertical_auto_width": True, "show_index": True, "shrink": True}}
     dialog = PreferencesDialog(config)
-    assert dialog.pages.count() == (16 if windows_shell.AVAILABLE else 15)
+    assert dialog.pages.count() == (21 if windows_shell.AVAILABLE else 20)  # con la de SFTP y General en cinco
     dialog.apply_to(config)
     assert config["folder_tabs"] == {**tab_settings.DEFAULTS, **config["folder_tabs"]}
     saved = config["folder_tabs"]
@@ -3976,7 +3992,7 @@ def open_entry_in(window, path):
 
 def test_image_opens_in_internal_viewer_by_default(window, image_file, monkeypatch):
     opened = []
-    monkeypatch.setattr("directory_commander_tux_tux.ui.main_window.QDesktopServices.openUrl", lambda url: opened.append(url))
+    monkeypatch.setattr("PySide6.QtGui.QDesktopServices.openUrl", lambda url: opened.append(url))
     assert window.config["open_images"] == "viewer"
     open_entry_in(window, image_file)
     assert not opened and len(window._viewers) == 1
@@ -3988,7 +4004,7 @@ def test_image_opens_in_internal_viewer_by_default(window, image_file, monkeypat
 
 def test_image_opens_with_system_application_if_chosen(window, image_file, monkeypatch):
     opened = []
-    monkeypatch.setattr("directory_commander_tux_tux.ui.main_window.QDesktopServices.openUrl", lambda url: opened.append(url))
+    monkeypatch.setattr("PySide6.QtGui.QDesktopServices.openUrl", lambda url: opened.append(url))
     window.config["open_images"] = "system"
     open_entry_in(window, image_file)
     assert len(opened) == 1 and not window._viewers
@@ -3997,7 +4013,7 @@ def test_image_opens_with_system_application_if_chosen(window, image_file, monke
 def test_other_files_always_open_with_the_system(window, tree, monkeypatch):
     left, _ = tree
     opened = []
-    monkeypatch.setattr("directory_commander_tux_tux.ui.main_window.QDesktopServices.openUrl", lambda url: opened.append(url))
+    monkeypatch.setattr("PySide6.QtGui.QDesktopServices.openUrl", lambda url: opened.append(url))
     window._open_file(window.source, entry_from_path(str(left / "a.txt")))
     assert len(opened) == 1 and not window._viewers
 
@@ -4962,7 +4978,7 @@ def test_pane_bar_hides_buttons_by_priority(app):
     view.resize(1000, 300)
     settle()
     send = dict(view._tool_buttons)[view.send_button]
-    every = {icon for _button, icon in view._tool_buttons}
+    every = {icon for _button, icon in view._tool_buttons} - {"disconnect"}  # Desconectar solo está en un panel remoto
     assert shown_tools(view) == every
     view.resize(260, 300)
     settle()
@@ -5237,7 +5253,7 @@ def test_selected_zip_gets_the_options_of_other_programs(window, zip_in_left, me
 
 def test_zip_opens_with_the_system_by_default(window, zip_in_left, monkeypatch):
     opened = []
-    monkeypatch.setattr("directory_commander_tux_tux.ui.main_window.QDesktopServices.openUrl", lambda url: opened.append(url.toLocalFile()) or True)
+    monkeypatch.setattr("PySide6.QtGui.QDesktopServices.openUrl", lambda url: opened.append(url.toLocalFile()) or True)
     view = window.source
     folder = view.path
     view.open_entry(entry_from_path(str(zip_in_left)))
@@ -5246,14 +5262,14 @@ def test_zip_opens_with_the_system_by_default(window, zip_in_left, monkeypatch):
 
 
 def test_zip_can_be_set_to_open_as_a_folder(window, zip_in_left, monkeypatch):
-    monkeypatch.setattr("directory_commander_tux_tux.ui.main_window.QDesktopServices.openUrl", lambda url: pytest.fail("no debe abrir un programa"))
+    monkeypatch.setattr("PySide6.QtGui.QDesktopServices.openUrl", lambda url: pytest.fail("no debe abrir un programa"))
     window.config["open_archives"] = "browse"
     window.source.open_entry(entry_from_path(str(zip_in_left)))
     assert wait_until(lambda: "dentro.txt" in names(window.source))
 
 
 def test_zip_without_a_program_is_browsed(window, zip_in_left, monkeypatch):
-    monkeypatch.setattr("directory_commander_tux_tux.ui.main_window.QDesktopServices.openUrl", lambda url: False)
+    monkeypatch.setattr("PySide6.QtGui.QDesktopServices.openUrl", lambda url: False)
     window.source.open_entry(entry_from_path(str(zip_in_left)))
     assert wait_until(lambda: "dentro.txt" in names(window.source))
 
@@ -5790,7 +5806,7 @@ def video_folder(window, tree):
 
 def open_video(window, folder, monkeypatch, name="uno.mp4"):
     opened = []
-    monkeypatch.setattr("directory_commander_tux_tux.ui.main_window.QDesktopServices.openUrl", lambda url: opened.append(url) or True)
+    monkeypatch.setattr("PySide6.QtGui.QDesktopServices.openUrl", lambda url: opened.append(url) or True)
     window.source.open_entry(entry_from_path(os.path.normpath(str(folder / name))))
     return opened
 
@@ -5949,8 +5965,10 @@ def test_frame_name_does_not_overwrite_and_shows_hours(tmp_path):
     assert os.path.basename(image_ops.frame_name(str(video), 3661007)) == "v_fotograma_1-01-01-007.png"
 
 
-def test_exact_position_text():
-    assert format_exact_position(83456) == "01:23.456" and format_exact_position(5) == "00:00.005"
+def test_video_window_time_goes_up_to_seconds():
+    from directory_commander_tux_tux.ui.media_player import format_position
+
+    assert format_position(83456) == "01:23" and format_position(3691400) == "1:01:31"
 
 
 def test_click_on_the_video_plays_or_pauses(window, video_folder, monkeypatch):
@@ -6899,7 +6917,8 @@ def test_default_layouts_match_the_real_menus(window, tree):
     assert texts_of(folder)[0] == "Pegar" and texts_of(folder)[-1] == "Propiedades de esta carpeta"
     select(window.source, "a.txt")
     files = window.build_file_menu(window.source)
-    assert {t for t in texts_of(files) if t != "-"} <= set(context_menu.DEFAULT_LAYOUTS[context_menu.FILE])
+    # Con un solo archivo, «Copiar rutas como texto» se lee «Copiar ruta del archivo»: la clave guardada es la misma.
+    assert {t for t in texts_of(files) if t != "-"} - {"Copiar ruta del archivo"} <= set(context_menu.DEFAULT_LAYOUTS[context_menu.FILE])
     assert texts_of(files)[0] == "Abrir" and texts_of(files)[-1] == "Propiedades"
     assert "-" not in (texts_of(files)[0], texts_of(files)[-1])
 
@@ -7152,3 +7171,32 @@ def test_menu_settings_travel_in_exported_configuration(window, tmp_path):
 def test_the_icon_theme_follows_the_brightness_of_the_background(name, dark, installed, expected):
     from directory_commander_tux_tux.ui.theme import icon_theme_variant
     assert icon_theme_variant(name, dark, installed.__contains__) == expected
+
+
+def test_list_does_not_jump_to_show_a_whole_column_when_the_name_is_visible(app, tmp_path):
+    """En la lista, Qt da a cada archivo el ancho del nombre más largo de su columna. Marcar uno cuyo nombre ya se ve, como hace el visor
+    de imágenes al abrirlo, no debe desplazar la lista hasta ver la columna entera."""
+    for number in range(60):
+        name = f"archivo_{number:02d}.txt" if number != 30 else f"un nombre larguísimo para que su columna sea muy ancha y se salga {number:02d}.pdf"
+        (tmp_path / name).write_text("", encoding="utf-8")
+    view = FileView()
+    view.resize(720, 400)
+    view.show()
+    view.set_view_mode("list")
+    view.navigate(str(tmp_path))
+    assert wait_until(lambda: view.model.rowCount() == 60)
+    items = view.thumbs
+    items.finish_layout()
+    long_row = next(row for row in range(60) if view.model.entry(row).name.startswith("un"))
+    column = items.visualRect(view.model.index(long_row, 0)).x()
+    row = next(row for row in range(60) if row != long_row and items.visualRect(view.model.index(row, 0)).x() == column)
+    index = view.model.index(row, 0)
+    assert items.visualRect(index).right() > items.viewport().width() and items.viewport().rect().contains(items.name_rect(index))
+    bar = items.horizontalScrollBar()
+    view.mark_path(view.model.entry(row).path)
+    assert bar.value() == 0  # el nombre ya se veía
+    view.resize(260, 400)
+    QApplication.processEvents()
+    items.scrollTo(index)
+    assert bar.value() > 0  # uno que no se ve sí se trae
+    view.dispose()

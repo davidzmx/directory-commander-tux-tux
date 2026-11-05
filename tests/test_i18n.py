@@ -241,7 +241,7 @@ def test_create_translation_button(app, tmp_path, monkeypatch):
     from directory_commander_tux_tux.ui.dialogs import PreferencesDialog
 
     opened, shown = [], []
-    monkeypatch.setattr("directory_commander_tux_tux.ui.dialogs.QDesktopServices.openUrl", lambda url: opened.append(url.toLocalFile()))
+    monkeypatch.setattr("PySide6.QtGui.QDesktopServices.openUrl", lambda url: opened.append(url.toLocalFile()))
     monkeypatch.setattr("directory_commander_tux_tux.ui.dialogs.QMessageBox.information", lambda _p, _t, message: shown.append(message))
     config = Config(str(tmp_path))
     dialog = PreferencesDialog(config)

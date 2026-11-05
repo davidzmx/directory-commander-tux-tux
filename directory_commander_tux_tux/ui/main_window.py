@@ -8,8 +8,8 @@ import sys
 import tempfile
 from dataclasses import replace
 
-from PySide6.QtCore import QByteArray, QEvent, QFile, QMimeDatabase, QPoint, QProcess, QSize, QStandardPaths, QStorageInfo, QThreadPool, QTimer, QUrl, Qt
-from PySide6.QtGui import QAction, QActionGroup, QCursor, QDesktopServices, QIcon, QKeySequence
+from PySide6.QtCore import QByteArray, QEvent, QFile, QMimeDatabase, QPoint, QProcess, QSize, QStandardPaths, QStorageInfo, QThreadPool, QTimer, Qt
+from PySide6.QtGui import QAction, QActionGroup, QCursor, QIcon, QKeySequence
 from PySide6.QtWidgets import QProxyStyle, QStyle
 from PySide6.QtWidgets import (QApplication, QComboBox, QDockWidget, QFileDialog, QFrame, QHBoxLayout,
                                QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QMenuBar, QMessageBox,
@@ -17,11 +17,12 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QDockWidget, QFileDialog
                                QTabWidget, QToolBar, QToolButton, QVBoxLayout, QWidget, QWidgetAction)
 
 from .. import APP_NAME, __version__
-from ..core import sessions, archive, bar_buttons, commands, context_menu, desktop_apps, favorites, file_compare, frequent, fsops, git_tools, listing, pane_colors, platform_utils, rename, shells, styles, tab_settings, windows_shell
-from ..core.config import COMPARE_COMMAND, STYLE_RENAMES, Config
+from ..core import sessions, archive, bar_buttons, commands, context_menu, desktop_apps, devices, favorites, file_compare, frequent, fsops, git_tools, listing, pane_colors, platform_utils, remote, rename, shells, styles, tab_settings, windows_shell
+from ..core.config import COMPARE_COMMAND, DEFAULT_SORTS, GENERATION_MARK_KINDS, STYLE_RENAMES, THUMB_SIZES, VIDEO_THUMBNAILS, Config
 from ..core.fsops import Answer, Collision, OpResult
+from ..core import media_info
 from ..core.media_info import VIDEO_EXTENSIONS
-from ..core.listing import (COMPUTER_LABEL, COMPUTER_PATH, CONTENT_TYPES, entry_from_path, has_computer_view, is_results, results_exist, results_name, results_path,
+from ..core.listing import (COMPUTER_LABEL, COMPUTER_PATH, CONTENT_TYPES, entry_from_path, format_size, format_time, has_computer_view, is_results, results_exist, results_name, results_path,
                             location_label)
 from . import clipboard, theme
 from .background import GuiAsker, collect_garbage_in_gui_thread, run_bg
@@ -29,12 +30,17 @@ from .check_combo import CheckCombo
 from .dialogs import PreferencesDialog, PropertiesDialog, RenameDialog, SetAttrDialog
 from .extra_commands import ExtraCommands, _turn
 from .favorites_pages import AddFavoriteDialog
-from .file_view import Breadcrumb, FileView, FolderList
+from .file_view import Breadcrumb, DiskMeter, FileView, FolderList
+from .hover_card import read_image_info
+from .code_view import is_json, is_markdown
 from .shell_menu import LAST_GROUP, add_section, add_shell_items, menu_text, tidy_separators
 from .drag_drop import accept_drop
 from .replace_dialog import ReplaceDialog
+from . import sftp, udisks
+from .connection_led import BLINK_MS, ConnectionLed
+from .open_external import has_default_app, open_externally
 from .tab_bar import ADD_BUTTON_WIDTH, PaneTabBar, folders_in
-from .folder_tree import FolderTree
+from .folder_tree import PATH_ROLE, FolderTree
 from .icons import app_icon, themed
 from .image_viewer import ImageViewer
 from .model import IMAGE_EXTENSIONS, folder_icon
@@ -53,6 +59,7 @@ MENU_ITEMS = [
     (N_("&Archivo"), N_("Nueva carpeta"), "makedir", "F7", "CreateFolder", True),
     (N_("&Archivo"), N_("Nuevo archivo"), "newfile", "Shift+F7", "CreateFile", True),
     (N_("&Archivo"), N_("Abrir terminal aquí"), "terminal", "Ctrl+Alt+T", "CLI DOSPROMPT", True),
+    (N_("&Archivo"), N_("Panel remoto (SFTP)…"), "remote", None, "Set SFTP=Menu", False),
     (N_("&Archivo"), None, None, None, None, False),
     (N_("&Archivo"), N_("Comprimir en ZIP…"), "addtozip", None, "Archive", True),
     (N_("&Archivo"), N_("Extraer en destino"), "extract", None, "Extract", True),
@@ -107,7 +114,7 @@ MENU_ITEMS = [
     (N_("&Ver"), N_("Vista plana"), "flat", "Ctrl+Shift+V", "Set FLATVIEW=Toggle", False),
     (N_("&Ver"), N_("Mostrar ocultos"), None, "Ctrl+H", "Set HIDDEN=Toggle", False),
     (N_("&Ver"), N_("Filtrar…"), "filter", "Ctrl+F", "Set FILTER=Show", False),
-    (N_("&Ver"), N_("Casillas de selección"), None, None, "Set CHECKBOXMODE=Toggle", False),
+    (N_("&Ver"), N_("Marcas de IA"), "aimarks", None, "Set GENERATIONMARKS=Toggle", False),
     (N_("&Ver"), N_("Líneas entre filas"), None, None, "Set GRIDLINESH=Toggle", False),
     (N_("&Ver"), N_("Seleccionar la fila completa"), None, None, "Set FULLROWSELECT=Toggle", False),
     (N_("&Ver"), N_("Fechas relativas"), None, None, "Set FRIENDLYDATES=normal", False),
@@ -136,6 +143,7 @@ MENU_ITEMS = [
     (N_("&Ir"), N_("Intercambiar paneles"), "swap", "Ctrl+Shift+X", "Go SWAP", False),
     (N_("&Ir"), N_("Abrir en el otro panel"), "sendright", "Ctrl+Shift+D", "Go DEST", False),
     (N_("&Ajustes"), N_("Preferencias…"), "prefs", "Ctrl+,", "Prefs", False),
+    (N_("&Ajustes"), N_("Perfiles SSH/SFTP…"), "remote", None, "Prefs SFTP", False),
     (N_("&Ajustes"), N_("Barras visibles…"), "single", None, "Toolbar LIST", False),
     (N_("&Ajustes"), N_("Bloquear las barras"), None, None, "Set LOCKBARS=Toggle", False),
     (N_("&Ajustes"), N_("Información al pasar el ratón"), None, None, "Set HOVERINFO=Toggle", False),
@@ -151,6 +159,7 @@ MENU_ITEMS = [
     (N_("&Herramientas"), N_("Sincronizar paneles"), "sync", None, "Set UTILITY=Sync", False),
     (N_("&Herramientas"), N_("Buscar duplicados"), "duplicates", None, "Set UTILITY=Dupe", False),
     (N_("&Herramientas"), N_("Comparar archivos"), "compare", None, COMPARE_COMMAND, False),
+    (N_("&Herramientas"), N_("Uso del disco…"), "diskusage", None, "DiskUsage", False),
     (N_("&Herramientas"), N_("Visor de imágenes"), "show", None, "Show", False),
     (N_("&Herramientas"), N_("Convertir imágenes…"), "show", None, "Image CONVERT", True),
     (N_("&Herramientas"), N_("Girar 90° a la derecha"), "refresh", None, "Image ROTATE=90 HERE REPLACE PRESERVEDATE", True),
@@ -169,15 +178,24 @@ MENU_ITEMS = [
 LAYOUT_STATE_VERSION = 2  # súbelo si cambian las barras o paneles de la ventana
 DEFAULT_STYLE_NAME = "Vertical doble panel"
 PANE_BRANCH_POLL_MS = 2000
+HOVER_PREVIEW_MS = 150
+LIST_COLUMN_CHARS = 50  # el ancho máximo de las columnas de la lista, de serie
+DEVICES_POLL_MS = 3000  # un USB que se conecta, o un disco que se monta desde otro programa
 COMPARE_STATE_DELAY_MS = 60
 SHELL_BOX_MAX_WIDTH = 150
 PANE_TREE_WIDTH = 260
 TERMINAL_MIN_HEIGHT = 160
+SSH_CHOICE = "ssh:"  # en la lista de intérpretes de una terminal, un perfil SSH: la terminal se abre en ese servidor
 GENERAL_TERMINAL = styles.MAX_PANES  # las terminales son la de cada panel y, detrás, la general
 BAR_OVERFLOW_WIDTH = 26
 # En «Este equipo» los elementos son unidades enteras: estas operaciones no tienen sentido ahí.
-NOT_IN_RESULTS = {"createfolder", "createfile", "filetype", "archive", "extract", "split", "join", "cli"}  # hacen algo en la carpeta, y los resultados no son una
-NOT_ON_COMPUTER = {"copy", "delete", "rename", "createfolder", "createfile", "filetype", "archive", "extract", "setattr",
+NOT_IN_RESULTS = {"diskusage", "createfolder", "createfile", "filetype", "archive", "extract", "split", "join", "cli"}  # hacen algo en la carpeta, y los resultados no son una
+# En un panel remoto: lo que sabe hacer en un servidor. Lo demás lee o escribe archivos del equipo.
+ON_SERVER = {"go", "copy", "delete", "rename", "createfolder", "createfile", "select", "set", "clipboard", "favorites", "help", "close", "prefs",
+             "toolbar", "recent", "marker", "compare"}
+# Formas de Copy que trabajan con archivos del equipo: con un servidor de por medio, no.
+REMOTE_COPY_LIMITS = ("ADDTOARCHIVE", "ADDTOZIP", "ZIP", "ARCHIVE", "EXTRACT", "MAKELINK", "UPDATEALL", "UPDATEEXISTING")
+NOT_ON_COMPUTER = {"diskusage", "copy", "delete", "rename", "createfolder", "createfile", "filetype", "archive", "extract", "setattr",
                    "image", "split", "join", "getsizes", "cli", "run", "print", "play"}
 HIDDEN_FILESYSTEMS = {"squashfs", "tmpfs", "devtmpfs", "overlay", "proc", "sysfs", "efivarfs", "cgroup2"}
 VIEW_MODES = {"list": "list", "details": "details", "power": "details", "smallicons": "smallicons",
@@ -206,11 +224,19 @@ def _location_exists(path: str) -> bool:
     return (path == COMPUTER_PATH and has_computer_view()) or results_exist(path) or os.path.isdir(path)
 
 
+def remote_host(path: str) -> str:
+    """El servidor, tal como se escribió en el perfil: una IP o un nombre."""
+    return remote.server_parts(remote.server_of(path))[1]
+
+
 def _tab_title(path: str, show_drive: bool = True) -> str:
     if path == COMPUTER_PATH:
         return COMPUTER_LABEL
     if is_results(path):
         return results_name(path)
+    if remote.is_remote(path):
+        name = remote.name_of(path) if remote.inner_of(path) != "/" else "/"
+        return f"{name} ({remote_host(path)})"  # que se vea siempre que no es una carpeta del equipo
     name = os.path.basename(path.rstrip("/\\")) or path
     if len(name) > MAX_TAB_NAME:  # la ruta completa queda en la descripción emergente
         name = f"{name[:MAX_TAB_NAME - 11]}…{name[-10:]}"
@@ -398,18 +424,42 @@ class PaneGroup(QTabWidget):
     def _tab_text(self, index: int) -> str:
         view = self.widget(index)
         name = view.tab_name or _tab_title(view.path, self.settings["show_drive"])
+        if view.tab_name and remote.is_remote(view.path):
+            name = f"{name} ({remote_host(view.path)})"
         return f"{index + 1} {name}" if self.settings["show_index"] else name
 
     def _tab_icon(self, view: FileView):
+        if remote.is_remote(view.path):
+            return themed("remote")  # aunque no se muestren iconos: es lo que avisa de que no es del equipo
         if not self.settings["show_icons"]:
             return QIcon()
         return themed("search" if is_results(view.path) else "gomycomputer" if view.path == COMPUTER_PATH else "folder")
+
+    def update_leds(self, lit: bool) -> None:
+        """El foquito de las pestañas conectadas a un servidor. Sin conexión viva no hay foquito: Qt reserva el sitio de un botón aunque esté oculto."""
+        bar = self.tabBar()
+        side = bar.ButtonPosition.LeftSide
+        for index in range(self.count()):
+            path = self.widget(index).path
+            server = remote.server_of(path) if remote.is_remote(path) else ""
+            led = bar.tabButton(index, side)
+            if not isinstance(led, ConnectionLed):
+                led = None
+            if server and remote.is_alive(server):
+                if led is None or led.server != server:
+                    led = ConnectionLed(server)
+                    led.setToolTip(tr("Conectado con {server}", server=server))
+                    bar.setTabButton(index, side, led)
+                led.set_lit(lit)
+            elif led is not None:
+                bar.setTabButton(index, side, None)
+                led.deleteLater()
 
     def retitle(self, view: FileView) -> None:
         index = self.indexOf(view)
         if index >= 0:
             self.setTabText(index, self._tab_text(index))
-            self.setTabToolTip(index, location_label(view.path))
+            self.setTabToolTip(index, tr("En el servidor: {place}", place=location_label(view.path)) if remote.is_remote(view.path) else location_label(view.path))
             self.setTabIcon(index, self._tab_icon(view))
             QTimer.singleShot(0, self._place_add_button)
 
@@ -646,6 +696,9 @@ class MainWindow(ExtraCommands, QMainWindow):
         super().__init__()
         self.config = config or Config()
         self._temp_dirs: list[str] = []
+        self.remote_files = sftp.RemoteFiles(self)
+        self.remote_files.changed.connect(self._remote_copy_changed)
+        self._remote_connector = sftp.RemoteConnector(self, self._report)
         self._undo: list[dict] = []
         self._redo: list[dict] = []
         self._viewers: list[ImageViewer] = []
@@ -746,10 +799,11 @@ class MainWindow(ExtraCommands, QMainWindow):
         self._build_style_bar()
         self._build_location_bar()
         self._rebuild_favorites_bar()
-        # La barra de estado nunca se ve: mostrarla y ocultarla movería toda la ventana. Sus avisos van en la fila del panel activo.
+        # La barra de estado general se ve o no según las preferencias, nunca a ratos: mostrarla y ocultarla movería toda la ventana.
+        # Sin ella, sus avisos van en la fila del panel activo.
         self.statusBar().setSizeGripEnabled(False)
         self.statusBar().messageChanged.connect(self._show_notice)
-        self.statusBar().hide()
+        self._build_general_status()
         self._restore_session(start_paths or [])
         self._check_smart_folders()
         if self.config.warning:
@@ -757,8 +811,118 @@ class MainWindow(ExtraCommands, QMainWindow):
             self.statusBar().showMessage(self.config.warning, 10000)
 
     def _show_notice(self, text: str) -> None:
+        general = self._general_status_on()
         for view in self.all_views():
-            view.status.set_notice(text if view is self.source else "")
+            view.status.set_notice(text if view is self.source and not general else "")
+
+    # ------------------------------------------------------------------ barra de estado general
+    def _general_status_on(self) -> bool:
+        return self.config.get("general_status_bar", True) is not False
+
+    def _build_general_status(self) -> None:
+        """Abajo de la ventana: el archivo bajo el ratón o lo seleccionado en el panel activo, el espacio libre, y los avisos."""
+        bar = self.statusBar()
+        self.general_info = QLabel()
+        self.general_info.setTextFormat(Qt.TextFormat.PlainText)
+        self.general_info.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)  # un nombre largo no ensancha la ventana
+        self.general_free = QLabel()
+        self.general_meter = DiskMeter()
+        self.general_flags = QLabel()  # filtro activo, ocultos visibles
+        self.general_jobs = QLabel()  # copias y movimientos en curso
+        self._media_facts: dict[tuple, str] = {}  # (ruta, fecha): dimensiones o duración
+        self._facts_pending: set[tuple] = set()
+        bar.addWidget(self.general_info, 1)
+        bar.addPermanentWidget(self.general_jobs)
+        bar.addPermanentWidget(self.general_flags)
+        bar.addPermanentWidget(self.general_free)
+        bar.addPermanentWidget(self.general_meter)
+        self._apply_general_status()
+
+    def _apply_general_status(self) -> None:
+        self.statusBar().setVisible(self._general_status_on())
+        self._update_free_space_panes()
+        self._show_notice(self.statusBar().currentMessage())
+        self._update_general_status()
+
+    def _entry_facts(self, entry) -> list[str]:
+        """Nombre, tipo, tamaño, fecha y, de una imagen, sus dimensiones; de un vídeo, sus dimensiones y su duración; de un audio, su duración.
+        Lo último se lee en segundo plano."""
+        size = "" if entry.is_dir and entry.dir_size is None else format_size(entry.effective_size)
+        facts = [entry.display_name, entry.type_label, size, format_time(entry.mtime, self.config.get("friendly_dates", "off"))]
+        key = (entry.path, entry.mtime)
+        local = not (entry.is_dir or entry.in_archive or remote.is_remote(entry.path))
+        if key in self._media_facts:
+            facts.append(self._media_facts[key])
+        elif local and (entry.extension in IMAGE_EXTENSIONS or media_info.is_media_extension(entry.extension)) and key not in self._facts_pending:
+            self._facts_pending.add(key)
+            path, extension, ffmpeg_dir = entry.path, entry.extension, self.config.get("ffmpeg_dir", "")
+
+            def work(_sink) -> str:
+                if extension in IMAGE_EXTENSIONS:
+                    width, height, _depth = read_image_info(path)
+                    return f"{width} × {height}" if width else ""
+                info = media_info.read_media_info(path, ffmpeg_dir)
+                if info is None:
+                    return ""
+                size = f"{info.width} × {info.height}" if info.width and info.height else ""
+                return " · ".join(part for part in (size, media_info.format_duration(info.duration) if info.duration else "") if part)
+
+            def done(text: str) -> None:
+                self._facts_pending.discard(key)
+                if len(self._media_facts) > 5000:
+                    self._media_facts.clear()
+                self._media_facts[key] = text
+                if text:
+                    self._update_general_status()
+
+            run_bg(work, done, lambda _exc: self._facts_pending.discard(key))
+        return facts
+
+    def _update_jobs_status(self) -> None:
+        if hasattr(self, "general_jobs"):
+            text = self.jobs.summary()
+            self.general_jobs.setText(text)
+            self.general_jobs.setVisible(bool(text))
+
+    def _update_free_space_panes(self) -> None:
+        """Con la barra general, el espacio libre del panel activo va en ella; un panel con una carpeta de otro disco muestra el suyo."""
+        on = self._general_status_on()
+        active = self.source.model.device if getattr(self, "groups", None) and self.groups[self.active_side].current is not None else None
+        mode = self.config.get("pane_free_space", "other_disk")
+        for view in self.all_views():
+            other_disk = view.model.device is None or view.model.device != active
+            view.set_free_space_shown(not on or mode == "always" or (mode != "never" and other_disk))
+
+    def _update_general_status(self) -> None:
+        if not hasattr(self, "general_info") or not self._general_status_on() or not self.groups or self.groups[self.active_side].current is None:
+            return
+        view = self.source
+        entry = getattr(self, "_hover_entry", None)
+        selected = view.selected_entries()
+        if entry is None and len(selected) == 1:
+            entry = selected[0]  # uno solo seleccionado: sus datos, como el de bajo el ratón
+        if entry is not None:
+            self.general_info.setText(" · ".join(part for part in self._entry_facts(entry) if part))
+        else:
+            shown = selected or view.model.entries
+            folders = sum(1 for item in shown if item.is_dir)
+            size = format_size(sum(item.effective_size for item in shown))
+            counts = tr("{folders} carpetas y {files} archivos, {size}", folders=folders, files=len(shown) - folders, size=size)
+            self.general_info.setText(tr("Seleccionados: {counts}", counts=counts) if selected else counts)
+        flags = []
+        if view.model.filter_text or view.model.content_types:
+            flags.append(tr("Filtro: {filter}", filter=", ".join(part for part in (view.model.filter_text, *view.model.content_types) if part)))
+        if view.show_hidden:
+            flags.append(tr("Ocultos visibles"))
+        self.general_flags.setText(" · ".join(flags))
+        self.general_flags.setVisible(bool(flags))
+        free, total = view.model.free_space, view.model.total_space
+        if free is not None and total:
+            self.general_free.setText(tr("{free} libres ({percent} %) de {total}", free=format_size(free), percent=round(free * 100 / total), total=format_size(total)))
+        else:
+            self.general_free.setText(tr("{value} libres", value=format_size(free)) if free is not None else "")
+        self.general_meter.set_usage(free, view.model.total_space)
+        self.general_meter.setVisible(free is not None)
 
     # ------------------------------------------------------------------ tema
     def _wanted_theme(self) -> tuple[theme.Theme, str]:
@@ -906,6 +1070,8 @@ class MainWindow(ExtraCommands, QMainWindow):
         self.tree.pathActivated.connect(self._tree_path_activated)
         self.tree.filesDropped.connect(lambda paths, target, move: self._files_dropped(self.source, paths, target, move))
         self.tree.filesDroppedMenu.connect(lambda paths, target, move: self._files_dropped_menu(self.source, paths, target, move))
+        self.tree.deviceActivated.connect(lambda device: self.open_device(device, self.source))
+        self.tree.deviceMenuRequested.connect(lambda device, where: self._device_menu(device, lambda: self.source).exec(where))
         self.tree_dock = self._dock(tr("Árbol de Carpetas"), "tree", self.tree, Qt.DockWidgetArea.LeftDockWidgetArea,
                                     [("collapse", tr("Plegar todo"), self.tree.collapseAll)])
         self.pane_trees: list[FolderTree] = []
@@ -916,6 +1082,7 @@ class MainWindow(ExtraCommands, QMainWindow):
         self.terminal_follow_buttons: list[QToolButton] = []
         self.terminal_files_buttons: list[QToolButton] = []
         self.terminal_close_buttons: list[QToolButton] = []
+        self.terminal_titles: list[QLabel] = []
         self.git_bars: list[GitBar] = []
         self._compare_timer = QTimer(self, singleShot=True, interval=COMPARE_STATE_DELAY_MS)
         self._compare_timer.timeout.connect(self._update_compare_state)
@@ -923,9 +1090,31 @@ class MainWindow(ExtraCommands, QMainWindow):
         self._pane_branch_timer = QTimer(self, interval=PANE_BRANCH_POLL_MS)
         self._pane_branch_timer.timeout.connect(self._pane_branch_tick)
         self._pane_branch_timer.start()
+        self._hover_entry = None
+        self._hover_preview_entry = None
+        self._hover_preview_timer = QTimer(self, singleShot=True, interval=HOVER_PREVIEW_MS)
+        self._hover_preview_timer.timeout.connect(self._show_hover_preview)
+        self._exit_asked = ""  # mientras se sale por el menú: "default" pregunta según las preferencias, "always" siempre
+        self._led_lit = True
+        self._led_timer = QTimer(self, interval=BLINK_MS)  # el foquito de las conexiones: parpadea, y desaparece si se pierden
+        self._led_timer.timeout.connect(self._led_tick)
+        self._led_timer.start()
+        self._devices: list[devices.Device] = []
+        self._devices_reading = False
+        self._devices_timer = QTimer(self, interval=DEVICES_POLL_MS)
+        self._devices_timer.timeout.connect(self._refresh_devices)
+        self._udisks = udisks.UDisks(self)
+        if not has_computer_view() and devices.is_supported():  # en Windows, las unidades ya están en «Este equipo»
+            self._udisks.bus()  # se abre ya: si luego algún programa acapara las conexiones del sistema, esta sigue sirviendo
+            self._devices_timer.start()
+            QTimer.singleShot(0, self._refresh_devices)
         self._terminal_start_folders: dict[int, str] = {}
         self.terminal_shell_boxes: list[ShellBox] = []
+        self.terminal_ssh_buttons: list[QToolButton] = []
+        self.terminal_ssh_off_buttons: list[QToolButton] = []
+        self.terminal_leds: list[ConnectionLed] = []
         self._terminal_choices: dict[int, str] = {}  # el intérprete elegido en la propia terminal. Las demás usan el de las preferencias
+        self._terminal_pinned: set[int] = set()  # elegidas en su lista: no cambian entre el equipo y un servidor al cambiar su panel
         self._terminal_preference = self._terminal_preference_now()
         self._terminals_sized: dict[int, object] = {}
         self._general_docked = False
@@ -935,6 +1124,8 @@ class MainWindow(ExtraCommands, QMainWindow):
         self._build_terminal(GENERAL_TERMINAL)
 
         self.preview = PreviewPane(self.config)
+        self.preview.editRequested.connect(self.open_markdown_editor)
+        self.preview.jsonRequested.connect(self.open_json_viewer)
         self.viewer_dock = self._dock(tr("Visor"), "viewer", self.preview, Qt.DockWidgetArea.RightDockWidgetArea)
         self.viewer_dock.visibilityChanged.connect(lambda _v: self._update_preview())
         self.metadata = MetadataPanel()
@@ -949,6 +1140,7 @@ class MainWindow(ExtraCommands, QMainWindow):
         self._collision_asker = GuiAsker(lambda src, dest: self._ask_collision(src, dest), self)
         self.jobs.aboutToStart.connect(self.release_media)
         self.jobs.jobFinished.connect(self._job_finished)
+        self.jobs.progressChanged.connect(self._update_jobs_status)
         self.log = LogPanel()
         self.find_panel = FindPanel(self._source_path_for_find, lambda: self.dest.path if self.dest is not None else "", self.config)
         self.find_panel.get_open_tabs = lambda: [view.path for view in self.all_views()]
@@ -992,6 +1184,10 @@ class MainWindow(ExtraCommands, QMainWindow):
         tree.pathActivated.connect(lambda path: self._pane_tree_activated(self.pane_trees.index(tree), path))
         tree.filesDropped.connect(lambda paths, target, move: self._files_dropped(self.groups[self.pane_trees.index(tree)].current, paths, target, move))
         tree.filesDroppedMenu.connect(lambda paths, target, move: self._files_dropped_menu(self.groups[self.pane_trees.index(tree)].current, paths, target, move))
+        pane = lambda: self.groups[self.pane_trees.index(tree)].current  # noqa: E731
+        tree.deviceActivated.connect(lambda device: self.open_device(device, pane()))
+        tree.deviceMenuRequested.connect(lambda device, where: self._device_menu(device, pane).exec(where))
+        tree.set_devices(self._devices)
         panel = QWidget()
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1023,6 +1219,8 @@ class MainWindow(ExtraCommands, QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         bar = self._title_bar(tr("Terminal general") if general else tr("Terminal"), [])
+        title = bar.layout().itemAt(0).widget()
+        title.base_text = title.text()
         files = self._title_button("filespane", tr("Volver a mostrar los archivos de este panel"), lambda: self._set_terminal_only(number(), False))
         files.hide()  # solo en un panel que muestra únicamente su terminal
         close = self._title_button("close", tr("Ocultar"), lambda: self._terminal_close_clicked(number()))
@@ -1035,11 +1233,20 @@ class MainWindow(ExtraCommands, QMainWindow):
         box.setMaximumWidth(SHELL_BOX_MAX_WIDTH)  # el nombre de algunos es larguísimo: la barra de git necesita ese sitio
         box.setToolTip(tr("Intérprete de esta terminal. Al cambiarlo se queda en la misma carpeta"))
         box.activated.connect(lambda row: self._terminal_shell_chosen(number(), row))
-        bar.layout().insertWidget(1, box)
-        bar.layout().insertWidget(2, follow)
+        ssh = self._title_button("remote", tr("Conectar esta terminal a un servidor por SSH"),
+                                 lambda: self.build_ssh_menu(number()).exec(QCursor.pos()))
+        ssh_off = self._title_button("disconnect", tr("Desconectar esta terminal del servidor"), lambda: self.disconnect_terminal(number()))
+        ssh_off.hide()  # solo conectada
+        led = ConnectionLed("")
+        led.hide()  # solo con la conexión SSH viva
+        bar.layout().insertWidget(1, led)
+        bar.layout().insertWidget(2, box)
+        bar.layout().insertWidget(3, ssh)
+        bar.layout().insertWidget(4, ssh_off)
+        bar.layout().insertWidget(5, follow)
         git = GitBar(terminal, self.config, lambda text: self.statusBar().showMessage(text, 6000))
         bar.layout().setStretch(0, 0)  # el título, a su ancho. El hueco lo ocupa la barra de git, también cuando está vacía
-        bar.layout().insertWidget(3, git, 1)
+        bar.layout().insertWidget(6, git, 1)
         self.git_bars.append(git)
         layout.addWidget(bar)
         layout.addWidget(terminal, 1)
@@ -1053,11 +1260,18 @@ class MainWindow(ExtraCommands, QMainWindow):
         self.terminal_follow_buttons.append(follow)
         self.terminal_files_buttons.append(files)
         self.terminal_close_buttons.append(close)
+        self.terminal_titles.append(title)
         self.terminal_shell_boxes.append(box)
+        self.terminal_ssh_buttons.append(ssh)
+        self.terminal_ssh_off_buttons.append(ssh_off)
+        self.terminal_leds.append(led)
         self._refresh_follow_button(index)
 
     def _chosen_shell(self, index: int | None = None) -> shells.Shell:
-        return shells.chosen_shell(self._terminal_choices.get(index) or self.config.get("terminal_shell", ""), self.config.get("terminal_command", ""))
+        choice = self._terminal_choices.get(index) or ""
+        if choice.startswith(SSH_CHOICE):
+            choice = ""  # mientras conecta con el servidor, o si no se pudo, el del equipo
+        return shells.chosen_shell(choice or self.config.get("terminal_shell", ""), self.config.get("terminal_command", ""))
 
     def _terminal_preference_now(self) -> tuple:
         return self.config.get("terminal_shell", ""), self.config.get("terminal_command", "")
@@ -1065,10 +1279,29 @@ class MainWindow(ExtraCommands, QMainWindow):
     def _terminal_started(self, index: int) -> None:
         self._refresh_follow_button(index)
         self._refresh_shell_box(index)
+        server, title = self.terminals[index].server, self.terminal_titles[index]
+        title.setText(f"{title.base_text} ({remote.server_parts(server)[1]})" if server else title.base_text)
+        title.setToolTip(tr("En el servidor {server}", server=server) if server else "")
 
     def _refresh_shell_box(self, index: int) -> None:
-        """Muestra lo que se está ejecutando. Puede que ya no esté en la lista: se cambiaron las preferencias con ella abierta."""
+        """Muestra lo que se está ejecutando. Conectada a un servidor, solo él: no se cambia en la lista, sino desconectándola.
+        Puede que el intérprete ya no esté en la lista: se cambiaron las preferencias con ella abierta."""
         terminal, box = self.terminals[index], self.terminal_shell_boxes[index]
+        server = terminal.server
+        self.terminal_ssh_buttons[index].setEnabled(not server)
+        self.terminal_ssh_off_buttons[index].setVisible(bool(server))
+        box.clear()
+        if server:
+            choice = self._terminal_choices.get(index) or ""
+            # Elegida con su botón, el perfil elegido; abierta al conectar su panel, el perfil de ese servidor, si lo hay.
+            name = choice[len(SSH_CHOICE):] if choice.startswith(SSH_CHOICE) else next(
+                (profile.name for profile in sftp.profiles(self.config) if profile.server == server), "")
+            box.addItem(f"SSH: {name or remote.server_parts(server)[1]}", "ssh")
+            box.setEnabled(False)
+            box.setToolTip(tr("Conectada por SSH a {server}. Para usar otro intérprete, desconéctala", server=server))
+            return
+        box.setEnabled(True)
+        box.setToolTip(tr("Intérprete de esta terminal. Al cambiarlo se queda en la misma carpeta"))
         choices = shells.available_shells()
         command = self.config.get("terminal_command", "")
         if command:
@@ -1077,21 +1310,109 @@ class MainWindow(ExtraCommands, QMainWindow):
             except OSError:
                 pass  # se avisará si llega a elegirse
         running = terminal.running_shell
-        if running is not None and all(shell.key != running.key for shell in choices):
+        if running is not None and running is not remote.SSH_SHELL and all(shell.key != running.key for shell in choices):
             choices.append(running)
-        box.clear()
         for shell in choices:
             box.addItem(shell.label, shell.key)
-        shown = running.key if running is not None else self._terminal_choices.get(index) or self.config.get("terminal_shell", "")
+        choice = self._terminal_choices.get(index) or ""
+        local_choice = "" if choice.startswith(SSH_CHOICE) else choice
+        shown = running.key if running is not None else local_choice or self.config.get("terminal_shell", "")
         box.setCurrentIndex(max(0, box.findData(shown)))
 
     def _terminal_shell_chosen(self, index: int, row: int) -> None:
         terminal, key = self.terminals[index], self.terminal_shell_boxes[index].itemData(row)
-        if terminal.running_shell is None or terminal.running_shell.key != key:
-            if terminal.session is None or terminal.session.shell_is_idle() or self._confirm(tr("En esta terminal hay un programa en marcha. Al cambiar de intérprete se cerrará. ¿Continuar?"), True):
-                self._switch_terminal_shell(index, key)
+        current = terminal.running_shell.key if terminal.running_shell else None
+        if key and key != "ssh" and key != current and not terminal.server and self._can_close_terminal_program(index, tr("Al cambiar de intérprete se cerrará")):
+            self._terminal_pinned.add(index)  # lo ha elegido el usuario: su panel ya no la cambia de sitio
+            self._switch_terminal_shell(index, key)
         self._refresh_shell_box(index)
         terminal.setFocus()
+
+    def _can_close_terminal_program(self, index: int, what: str) -> bool:
+        session = self.terminals[index].session
+        return session is None or session.shell_is_idle() or self._confirm(tr("En esta terminal hay un programa en marcha. {what}. ¿Continuar?", what=what), True)
+
+    def build_ssh_menu(self, index: int) -> QMenu:
+        """Los perfiles con los que se puede abrir la terminal en un servidor, como el botón de conectar de un panel."""
+        menu = QMenu(self)
+        terminal = self.terminals[index]
+        number = lambda: self.terminals.index(terminal)  # noqa: E731 - al cerrar otro panel puede cambiar
+        connected = bool(terminal.server)
+        profiles = sftp.profiles(self.config)
+        for profile in profiles:
+            action = menu.addAction(themed("remote"), profile.name, lambda p=profile: self._ssh_chosen(number(), p))
+            action.setToolTip(profile.server)
+            action.setEnabled(not connected)
+        if not profiles:
+            menu.addAction(tr("No hay perfiles guardados")).setEnabled(False)
+        menu.addSeparator()
+        menu.addAction(themed("plus"), tr("Conexión nueva…"), lambda: self.new_terminal_connection(number())).setEnabled(not connected)
+        if connected:
+            menu.addAction(themed("disconnect"), tr("Desconectar del servidor"), lambda: self.disconnect_terminal(number()))
+        menu.addAction(themed("prefs"), tr("Administrar perfiles…"), lambda: QTimer.singleShot(0, lambda: self.open_preferences(sftp_page=True)))
+        return menu
+
+    def _ssh_chosen(self, index: int, profile: remote.Profile, password: str | None = None, typed: bool = False) -> None:
+        if self._can_close_terminal_program(index, tr("Al conectarla al servidor se cerrará")):
+            self._terminal_pinned.add(index)  # su panel ya no la cambia de sitio
+            self.connect_terminal(index, profile, password, typed)
+
+    def new_terminal_connection(self, index: int) -> None:
+        stored = sftp.profiles(self.config)
+        dialog = sftp.ProfileDialog(quick=True, taken=[profile.name for profile in stored], parent=self)
+        if not dialog.exec():
+            return
+        profile = dialog.profile()
+        if dialog.save_profile.isChecked():
+            self.config[sftp.PROFILES_KEY] = [item.to_dict() for item in stored] + [profile.to_dict()]
+        password = dialog.typed_password()
+        self._ssh_chosen(index, profile, password or None, typed=bool(password))
+
+    def disconnect_terminal(self, index: int) -> None:
+        """La terminal vuelve al intérprete del equipo, en la carpeta de su panel. Si nada más usa ese servidor, se cierra la conexión."""
+        terminal = self.terminals[index]
+        server = terminal.server
+        if not server or not self._can_close_terminal_program(index, tr("Al desconectarla se cerrará")):
+            return
+        self._terminal_pinned.add(index)  # aunque su panel esté en ese servidor, no vuelve a él sola
+        self._terminal_choices.pop(index, None)
+        self._terminal_to_local(index)
+        self._release_server(server)
+        self._refresh_shell_box(index)
+        terminal.setFocus()
+
+    def _release_server(self, server: str) -> None:
+        """Se desconecta si ningún panel ni ninguna terminal lo usa."""
+        if not any(remote.server_of(view.path) == server for view in self.all_views()) and not any(terminal.server == server for terminal in self.terminals):
+            remote.disconnect(server)
+
+    def connect_terminal(self, index: int, profile: remote.Profile, password: str | None = None, typed: bool = False) -> None:
+        """Abre la terminal en ese servidor, conectando antes si hace falta. En la carpeta de su panel si es de ese servidor."""
+        terminal = self.terminals[index]
+        choice = SSH_CHOICE + profile.name
+
+        def connected(connection) -> None:
+            if not _alive(terminal) or terminal not in self.terminals:
+                return
+            position = self.terminals.index(terminal)
+            self._terminal_choices[position] = choice
+            pane = self._terminal_group(position).current.path
+            folder = pane if remote.server_of(pane) == connection.server else connection.start_path()
+            try:
+                terminal.restart_in(folder)
+            except OSError as exc:
+                self._terminal_switch_failed(exc)
+            self._show_terminal(position, True)
+            self._refresh_shell_box(position)
+
+        self._remote_connector.open(profile, connected, password, typed)
+
+    def _terminal_to_local(self, index: int) -> None:
+        path = self._terminal_group(index).current.path
+        try:
+            self.terminals[index].restart_in(path if not remote.is_remote(path) and os.path.isdir(path) else platform_utils.home_dir())
+        except OSError as exc:
+            self._terminal_switch_failed(exc)
 
     def _switch_terminal_shell(self, index: int, key: str) -> None:
         previous = self._terminal_choices.get(index)
@@ -1136,6 +1457,16 @@ class MainWindow(ExtraCommands, QMainWindow):
         if saved and os.path.isdir(saved):
             return saved  # la de la sesión que se acaba de cargar
         path = self._terminal_group(index).current.path
+        choice = self._terminal_choices.get(index, "")
+        if choice.startswith(SSH_CHOICE):  # elegida en su lista: en ese servidor
+            profile = remote.find_profile(self.config.get(sftp.PROFILES_KEY), choice[len(SSH_CHOICE):])
+            if profile is not None and remote.is_connected(profile.server):
+                return path if remote.server_of(path) == profile.server else remote.connection_for(remote.make_path(profile.server)).start_path()
+            if profile is not None:
+                terminal = self.terminals[index]
+                QTimer.singleShot(0, lambda: terminal in self.terminals and self.connect_terminal(self.terminals.index(terminal), profile))
+        elif remote.is_remote(path) and remote.is_connected(remote.server_of(path)):
+            return path  # se abre en el servidor
         return path if os.path.isdir(path) else platform_utils.home_dir()
 
     def _terminal_failed(self, index: int, message: str) -> None:
@@ -1352,8 +1683,41 @@ class MainWindow(ExtraCommands, QMainWindow):
         self._dock_buttons.append((button, icon))
         return button
 
+    def _menu_states(self) -> dict:
+        """Las opciones de los menús que están activas o no: se muestran marcadas cuando lo están."""
+        modes = {f"Set VIEW={name}": mode for name, mode in (("List", "list"), ("Details", "details"), ("SmallIcons", "smallicons"),
+                                                               ("LargeIcons", "largeicons"), ("Tiles", "tiles"), ("Thumbnails", "thumbnails"))}
+        states = {command: (lambda mode=mode: self.source.view_mode == mode) for command, mode in modes.items()}
+        states.update({
+            "Set DUAL=Off": lambda: self.dual == "Off",
+            "Set DUAL=Vertical": lambda: self.dual == "Vertical",
+            "Set DUAL=Horizontal": lambda: self.dual == "Horizontal",
+            "Set TREE=Toggle": lambda: (any(not panel.isHidden() for panel in self.tree_panels) if self.double_tree else not self.tree_dock.isHidden()),
+            "Set VIEWPANE=Toggle": lambda: not self.viewer_dock.isHidden(),
+            "Set METAPANE=Toggle": lambda: not self.meta_dock.isHidden(),
+            "Set FLATVIEW=Toggle": lambda: self.source.flat,
+            "Set HIDDEN=Toggle": lambda: bool(self.config.get("show_hidden", False)),
+            "Set GENERATIONMARKS=Toggle": lambda: self.config.get("show_generation_marks") is True,
+            "Set GRIDLINESH=Toggle": lambda: self.source.grid_lines,
+            "Set FULLROWSELECT=Toggle": lambda: bool(self.config.get("full_row_select", False)),
+            "Set FRIENDLYDATES=normal": lambda: self.config.get("friendly_dates", "off") == "normal",
+            "Set FRIENDLYDATES=off": lambda: self.config.get("friendly_dates", "off") == "off",
+            "Set NAVLOCK=Toggle": lambda: self.nav_lock,
+            "Set HOVERINFO=Toggle": lambda: bool(self.config.get("hover_info", True)),
+        })
+        return states
+
+    def _update_menu_checks(self) -> None:
+        states = self._menu_states()
+        for action, command in self._checked_menu_actions:
+            try:
+                action.setChecked(bool(states[command]()))
+            except (AttributeError, RuntimeError):
+                pass  # al arrancar, aún sin paneles
+
     def _build_menus(self) -> None:
         self._menu_icons: list[tuple[QAction, str]] = []
+        self._checked_menu_actions: list[tuple[QAction, str]] = []
         menus: dict[str, QMenu] = {}
         central = self.centralWidget()
         for menu_name, label, icon, shortcut, command, pane_only in MENU_ITEMS:
@@ -1380,6 +1744,11 @@ class MainWindow(ExtraCommands, QMainWindow):
                     self.addAction(action)
             action.triggered.connect(lambda _=False, c=command: self.run_command(c))
             menu.addAction(action)
+            if command in self._menu_states():
+                action.setCheckable(True)
+                self._checked_menu_actions.append((action, command))
+        for menu in menus.values():
+            menu.aboutToShow.connect(self._update_menu_checks)
         go_menu = menus["&Ir"]
         go_menu.addSeparator()
         self.drives_menu = go_menu.addMenu(themed("drive"), tr("Unidades"))
@@ -1809,10 +2178,22 @@ class MainWindow(ExtraCommands, QMainWindow):
         view.folderOpened.connect(lambda _view, path: self._award("double_click", path))
         view.hover_card.ffmpeg_dir = self.config.get("ffmpeg_dir", "")
         view.set_full_row(bool(self.config.get("full_row_select", False)))
+        view.set_single_click(self.config.get("single_click") is True)
+        view.set_list_name_limit(self._list_name_limit())
+        view.set_thumbnail_size(self._thumbnail_size())
+        self._apply_previews(view)
+        column = self.config.get("default_sort", "type")
+        view.set_default_sort(column if column in DEFAULT_SORTS else "type", self.config.get("default_sort_reverse") is True)
+        view.set_free_space_shown(not self._general_status_on())  # hasta que se sepa en qué disco está su carpeta
+        view.set_column_widths(self.config.get("detail_columns"))
+        view.columnsResized.connect(self._remember_columns)
         view.set_level_colors(bool(self.config.get("tree_level_colors", True)))
+        view.model.remote_previews = sftp.previews(self.config)
         style = self._style_named(self.config.get("style", ""))
         view.set_view_mode(style.get("view", "list") if style else "list")
         view.activated.connect(self._view_activated)
+        view.hoveredEntryChanged.connect(lambda entry, v=view: self._hover_preview(v, entry))
+        view.statusChanged.connect(lambda v=view: (self._update_free_space_panes(), v is self.source and self._update_general_status()))
         view.pathChanged.connect(self._view_path_changed)
         view.pathChanged.connect(self._check_pane_branch)
         view.pathChanged.connect(lambda _view: self._compare_timer.start())
@@ -1836,6 +2217,8 @@ class MainWindow(ExtraCommands, QMainWindow):
         self.run_command(command)
 
     def _view_renamed(self, old: str, new: str) -> None:
+        if remote.is_remote(new):
+            return
         self._push_undo({"kind": "rename", "dir": os.path.dirname(new), "pairs": [(os.path.basename(old), os.path.basename(new))]})
 
     def _push_undo(self, entry: dict) -> None:
@@ -2064,6 +2447,8 @@ class MainWindow(ExtraCommands, QMainWindow):
         return self.source.path
 
     def _update_roles(self) -> None:
+        self._update_general_status()
+        self._update_free_space_panes()
         if hasattr(self, "find_panel"):
             self.find_panel.sync_source()
         destination = self._dest_side
@@ -2183,16 +2568,86 @@ class MainWindow(ExtraCommands, QMainWindow):
             return
         selected = self.source.selected_entries()
         entry = selected[0] if selected else None
+        if entry is not None and remote.is_remote(entry.path):
+            self._preview_remote(entry)
+            return
         if self.viewer_dock.isVisible():
             self.preview.show_entry(entry)
         if self.meta_dock.isVisible():
             self.metadata.show_entry(entry)
 
+    def _list_name_limit(self) -> int:
+        value = self.config.get("list_column_chars", LIST_COLUMN_CHARS)
+        return value if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 500 else LIST_COLUMN_CHARS
+
+    def _thumbnail_size(self) -> int:
+        value = self.config.get("thumbnail_size", 128)
+        return value if value in THUMB_SIZES else 128
+
+    def _apply_previews(self, view) -> None:
+        videos = self.config.get("video_thumbnails", "four")
+        view.set_previews(videos if videos in VIDEO_THUMBNAILS else "four", self.config.get("folder_previews") is not False, self.config.get("ffmpeg_dir", ""))
+        kinds = self.config.get("generation_mark_kinds", "both")
+        view.set_generation_marks(self.config.get("show_generation_marks") is True, kinds if kinds in GENERATION_MARK_KINDS else "both")
+        view.folder_views = self.config.setdefault_dict("folder_views") if self.config.get("remember_folder_views") is not False else None
+        view.set_git_marks(self.config.get("git_marks") is not False, self.config.get("git_program", ""))
+
+    def _remember_columns(self, widths: dict) -> None:
+        """Las pestañas que se abran después las usan. Las de las columnas que no se ven en este panel se conservan."""
+        stored = self.config.get("detail_columns")
+        merged = {**(stored if isinstance(stored, dict) else {}), **widths}
+        if "name" not in widths:
+            merged.pop("name", None)  # el nombre ha vuelto a ajustarse al panel
+        self.config["detail_columns"] = merged
+
+    def _hover_preview(self, view: FileView, entry) -> None:
+        """En el modo de un clic, el visor y los metadatos muestran el archivo bajo el ratón, como el panel de información del escritorio.
+        Los vídeos y el audio no: empezarían a sonar con solo pasar por encima. Tampoco los del servidor, que habría que descargar.
+        Al salir del archivo vuelven a lo seleccionado."""
+        self._hover_entry = entry
+        self._update_general_status()
+        if self.config.get("single_click") is not True or not (self.viewer_dock.isVisible() or self.meta_dock.isVisible()):
+            return
+        if entry is not None and (remote.is_remote(entry.path) or media_info.is_media_extension(entry.extension)):
+            return
+        self._hover_preview_entry = entry
+        self._hover_preview_timer.start()  # al cruzar la lista no se carga cada archivo que se toca de paso
+
+    def _show_hover_preview(self) -> None:
+        entry = self._hover_preview_entry
+        if entry is None:
+            self._update_preview()
+            return
+        if self.viewer_dock.isVisible():
+            self.preview.show_entry(entry)
+        if self.meta_dock.isVisible():
+            self.metadata.show_entry(entry)
+
+    def _preview_remote(self, entry) -> None:
+        """Se descarga, si así se ha pedido y cabe, y se muestra la copia. Mientras tanto, nada: lo anterior sería de otro archivo."""
+        for dock, panel in ((self.viewer_dock, self.preview), (self.meta_dock, self.metadata)):
+            if dock.isVisible():
+                panel.show_entry(None)
+        if entry.is_dir or not sftp.previews(self.config) or not (self.viewer_dock.isVisible() or self.meta_dock.isVisible()):
+            return
+
+        def ready(local: str) -> None:
+            current = self.source.selected_entries()
+            if not current or current[0].path != entry.path:
+                return  # ya se ha elegido otro
+            copy = entry_from_path(local)
+            if self.viewer_dock.isVisible():
+                self.preview.show_entry(copy)
+            if self.meta_dock.isVisible():
+                self.metadata.show_entry(copy)
+
+        self.remote_files.fetch_for_preview(entry, sftp.preview_limit(self.config), ready)
+
     def _sync_tree(self) -> None:
         # isHidden y no isVisible: durante el arranque la ventana aún no se ha mostrado.
         if not hasattr(self, "tree_dock"):
             return
-        if not self.tree_dock.isHidden():
+        if not self.tree_dock.isHidden() and not remote.is_remote(self.source.path):  # el árbol es de las carpetas del equipo
             self.tree.sync_to(self.source.path)
         self._sync_pane_trees()
 
@@ -2209,13 +2664,26 @@ class MainWindow(ExtraCommands, QMainWindow):
         active = self.groups[self.active_side]
         for index, terminal in enumerate(self.terminals):
             group = active if index == GENERAL_TERMINAL or index in self._terminal_only else self.groups[index]
-            if group.current is not None and os.path.isdir(group.current.path):
-                terminal.follow(group.current.path)
+            path = group.current.path if group.current is not None else ""
+            if remote.is_remote(path) and not remote.is_connected(remote.server_of(path)):
+                continue
+            if not remote.is_remote(path) and not os.path.isdir(path):
+                continue
+            if terminal.session is not None and terminal.server != remote.server_of(path):
+                # Su panel ha pasado de este equipo a un servidor, o al revés: si no está ocupada, la terminal cambia con él.
+                # La general y las de los paneles solo de terminal no: siguen al activo, y perderían lo que tienen a cada cambio.
+                if index != GENERAL_TERMINAL and index not in self._terminal_only and index not in self._terminal_pinned and terminal.ready_for_command():
+                    try:
+                        terminal.restart_in(path)
+                    except OSError as exc:
+                        self._report(tr("No se pudo abrir la terminal: {exc}", exc=exc))
+                continue
+            terminal.follow(path)
 
     def _pane_tree_activated(self, side: int, path: str) -> None:
         view = self.groups[side].current
         self._view_activated(view)
-        if _location_exists(path):
+        if remote.is_remote(path) or _location_exists(path):
             view.navigate(path)
         else:
             self.statusBar().showMessage(tr("No existe la carpeta: {path}", path=path), 5000)
@@ -2303,6 +2771,9 @@ class MainWindow(ExtraCommands, QMainWindow):
             return
         if is_results(self.source.path) and (command.name in NOT_IN_RESULTS or (command.name == "copy" and command.has("HERE"))):
             self.statusBar().showMessage(tr("No disponible en los resultados de una búsqueda: abre primero una carpeta"), 5000)
+            return
+        if remote.is_remote(self.source.path) and (command.name not in ON_SERVER or (command.name == "clipboard" and (command.has("COPY") or command.has("CUT")))):
+            self.statusBar().showMessage(tr("No disponible en un panel remoto"), 5000)
             return
         if self.source.path == COMPUTER_PATH and (command.name in NOT_ON_COMPUTER or
                                                   (command.name == "clipboard" and command.has("CUT"))):
@@ -2409,6 +2880,9 @@ class MainWindow(ExtraCommands, QMainWindow):
 
     def _cmd_copy(self, cmd: commands.Command) -> None:
         view = self.source
+        limited = any(cmd.has(flag) or flag in cmd.values for flag in REMOTE_COPY_LIMITS) or (cmd.has("DUPLICATE") and cmd.has("AS"))
+        if limited and (remote.is_remote(view.path) or (self.dest is not None and remote.is_remote(self.dest.path) and not cmd.has("HERE"))):
+            raise OSError(tr("No disponible con un panel remoto"))
         if cmd.has("ADDTOARCHIVE") or cmd.has("ADDTOZIP") or cmd.has("ZIP") or cmd.has("ARCHIVE"):
             self._cmd_archive(cmd)
             return
@@ -2461,7 +2935,7 @@ class MainWindow(ExtraCommands, QMainWindow):
             reason = fsops.validate_name(new_name)
             if reason:
                 raise ValueError(reason)
-        self.start_transfer(paths, target, cmd.has("MOVE"), new_name)
+        self.start_transfer(paths, target, cmd.has("MOVE"), new_name, verify=cmd.has("VERIFY") or None)
 
     def _make_links(self, paths: list[str], target: str, kind: str) -> None:
         created = []
@@ -2470,7 +2944,8 @@ class MainWindow(ExtraCommands, QMainWindow):
         self._push_undo({"kind": "created", "paths": created})
         self._refresh_all()
 
-    def start_transfer(self, paths: list[str], target: str, move: bool, new_name: str | None = None) -> None:
+    def start_transfer(self, paths: list[str], target: str, move: bool, new_name: str | None = None, verify: bool | None = None) -> None:
+        """`verify`: comparar cada copia con su original; sin decirlo, lo que diga Preferencias."""
         if archive.split_archive_path(target) is not None:
             raise OSError(tr("No se puede escribir dentro de un comprimido. Extrae primero los archivos."))
         if target == COMPUTER_PATH:
@@ -2478,14 +2953,18 @@ class MainWindow(ExtraCommands, QMainWindow):
         if is_results(target):
             raise OSError(tr("No se puede copiar en los resultados de una búsqueda: abre primero una carpeta."))
         verb = tr("Mover") if move else tr("Copiar")
+        if verify is None:
+            verify = self.config.get("verify_copies") is True
+        if verify:
+            verb = tr("{verb} y comprobar", verb=verb)
 
         def remember(result: OpResult) -> None:
-            if result.placed:
+            if result.placed and not remote.is_remote(target) and not any(remote.is_remote(path) for path in paths):
                 self._push_undo({"kind": "transfer", "move": move, "placed": list(result.placed), "renamed": list(result.renamed)})
 
         self.jobs.start(tr("{verb} {count} elementos", verb=verb, count=len(paths)),
                         lambda sink: fsops.transfer(paths, target, move, Collision.ASK, sink, new_name,
-                                                    lambda src, dest: self._collision_asker(sink, src, dest)), remember,
+                                                    lambda src, dest: self._collision_asker(sink, src, dest), verify), remember,
                         (tr("Moviendo") if move else tr("Copiando"), os.path.dirname(paths[0]), target))
         self.statusBar().showMessage(tr("Operación en curso…"), 3000)
 
@@ -2498,6 +2977,13 @@ class MainWindow(ExtraCommands, QMainWindow):
 
     def _files_dropped(self, view: FileView, paths: list[str], target: str | None, move: bool) -> None:
         destination = target or view.path
+        if remote.is_remote(destination) or any(remote.is_remote(path) for path in paths):
+            if paths and fsops.drop_operation(paths, destination, force_move=move) is not None:
+                try:
+                    self.start_transfer(paths, destination, move)
+                except OSError as exc:
+                    QMessageBox.warning(self, APP_NAME, str(exc))
+            return
         here = os.path.normcase(os.path.normpath(destination))
         if not paths or all(os.path.normcase(os.path.dirname(os.path.normpath(p))) == here for p in paths):
             return
@@ -2557,20 +3043,28 @@ class MainWindow(ExtraCommands, QMainWindow):
         if not paths:
             return
         self.source.remember_selection()
-        permanent = cmd.has("NORECYCLE") or not self.config.get("use_trash", True)
+        self.delete_paths(paths, cmd.has("NORECYCLE"), quiet=cmd.has("QUIET"))
+
+    def delete_paths(self, paths: list[str], permanent: bool = False, done=None, quiet: bool = False, parent: QWidget | None = None, detail: str = "") -> bool:
+        """Envía a la papelera o elimina, en segundo plano. `done(resultado)` al terminar. Devuelve False si no se confirmó."""
+        # En un servidor no hay papelera.
+        permanent = permanent or not self.config.get("use_trash", True) or any(remote.is_remote(path) for path in paths)
         name = os.path.basename(paths[0]) if len(paths) == 1 else tr("{count} elementos", count=len(paths))
+        name += detail
         question = (tr("¿Eliminar definitivamente {name}?\nEsta acción no se puede deshacer.", name=name) if permanent
                     else tr("¿Enviar {name} a la papelera?", name=name))
         # El borrado definitivo siempre se confirma, aunque se desactive la confirmación general.
-        must_ask = permanent or (self.config.get("confirm_delete", True) and not cmd.has("QUIET"))
-        if must_ask and not self._confirm(question, permanent):
-            return
+        must_ask = permanent or (self.config.get("confirm_delete", True) and not quiet)
+        if must_ask and not (self._confirm(question, permanent, parent=parent) if parent is not None else self._confirm(question, permanent)):
+            return False
         self.jobs.start(tr("Eliminar") if permanent else tr("Enviar a la papelera"),
-                        lambda sink: fsops.delete_paths(paths, permanent, move_to_trash, sink))
+                        lambda sink: fsops.delete_paths(paths, permanent, move_to_trash, sink), done)
+        return True
 
-    def _confirm(self, question: str, dangerous: bool = False) -> bool:
+    def _confirm(self, question: str, dangerous: bool = False, parent: QWidget | None = None) -> bool:
+        """`parent`: la ventana sobre la que se pregunta, si no es la principal (el mapa de uso del disco, por ejemplo)."""
         default = QMessageBox.StandardButton.No if dangerous else QMessageBox.StandardButton.Yes
-        answer = QMessageBox.question(self, APP_NAME, question,
+        answer = QMessageBox.question(parent or self, APP_NAME, question,
                                       QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, default)
         return answer == QMessageBox.StandardButton.Yes
 
@@ -2583,17 +3077,35 @@ class MainWindow(ExtraCommands, QMainWindow):
             self._create_empty_zip(cmd.get("NAME"))
             return
         name = cmd.get("NAME") or self._ask_text(tr("Nueva carpeta"), tr("Nombre:"), tr("Nueva carpeta"))
-        if name:
+        if name and remote.is_remote(self.source.path):
+            self._create_on_server(fsops.create_folder, commands.expand_date_codes(name))
+        elif name:
             path = fsops.create_folder(self.source.path, commands.expand_date_codes(name))
             self._push_undo({"kind": "created", "paths": [path]})
             self.source.navigate(self.source.path, focus=path)
 
     def _cmd_createfile(self, cmd: commands.Command) -> None:
         name = cmd.get("NAME") or self._ask_text(tr("Nuevo archivo"), tr("Nombre:"), tr("Nuevo archivo.txt"))
-        if name:
+        if name and remote.is_remote(self.source.path):
+            self._create_on_server(fsops.create_file, commands.expand_date_codes(name))
+        elif name:
             path = fsops.create_file(self.source.path, commands.expand_date_codes(name))
             self._push_undo({"kind": "created", "paths": [path]})
             self.source.navigate(self.source.path, focus=path)
+
+    def _create_on_server(self, create, name: str) -> None:
+        """En segundo plano: un servidor lento o colgado no debe dejar la ventana esperando. Deshacer no sabe de servidores."""
+        view, folder = self.source, self.source.path
+        reason = fsops.validate_name(name)
+        if reason:
+            raise ValueError(reason)
+
+        def created(path: str) -> None:
+            if _alive(view) and view.path == folder:
+                view.navigate(folder, add_history=False, focus=path)
+
+        run_bg(lambda _sink: create(folder, name), on_done=created,
+               on_error=lambda exc: (self._report(f"{name}: {exc}"), QMessageBox.warning(self, APP_NAME, str(exc))))
 
     def _cmd_filetype(self, cmd: commands.Command) -> None:
         if cmd.has("NEWMENU"):
@@ -2622,6 +3134,8 @@ class MainWindow(ExtraCommands, QMainWindow):
             return
         if archive.split_archive_path(view.path) is not None or any(e.in_archive for e in entries):
             raise OSError(tr("No se puede renombrar dentro de un comprimido"))
+        if remote.is_remote(view.path) and (cmd.has("ADVANCED") or preset or len(entries) != 1 or view.flat):
+            raise OSError(tr("En un panel remoto se renombra de uno en uno"))
         if not cmd.has("ADVANCED") and not preset and len(entries) == 1 and not view.flat:
             view.begin_rename()
             return
@@ -2806,7 +3320,7 @@ class MainWindow(ExtraCommands, QMainWindow):
         de la disposición y sigue con su última pestaña."""
         count = styles.pane_count(self.dual)
         if count == 1:
-            self.close()
+            self.run_command("Close")  # como Salir: pregunta si hace falta
         elif count == 2 and group is self.groups[1]:
             self.set_dual("Off")
 
@@ -2936,6 +3450,7 @@ class MainWindow(ExtraCommands, QMainWindow):
         terminal.dispose()
         terminal.following = True
         self._terminal_choices.pop(side, None)
+        self._terminal_pinned.discard(side)
         self._refresh_follow_button(side)
         self.tree_panels[side].hide()
         self._pane_tree_paths.pop(side, None)
@@ -2963,13 +3478,15 @@ class MainWindow(ExtraCommands, QMainWindow):
         """Todo lo de ese panel pasa al último número, libre, y los siguientes bajan uno: siempre están seguidos."""
         last = styles.MAX_PANES - 1
         for items in (self.groups, self.sides, self.pane_areas, self.pane_trees, self.tree_panels, self.terminals, self.terminal_panels,
-                      self.terminal_follow_buttons, self.terminal_files_buttons, self.terminal_close_buttons, self.terminal_shell_boxes, self.terminal_areas, self.git_bars):
+                      self.terminal_follow_buttons, self.terminal_files_buttons, self.terminal_close_buttons, self.terminal_titles, self.terminal_shell_boxes,
+                      self.terminal_ssh_buttons, self.terminal_ssh_off_buttons, self.terminal_leds, self.terminal_areas, self.git_bars):
             items.insert(last, items.pop(side))
 
         def moved(pane: int) -> int:
             return last if pane == side else pane - 1 if side < pane <= last else pane
 
         self._terminal_choices = {moved(pane): value for pane, value in self._terminal_choices.items()}
+        self._terminal_pinned = {moved(pane) for pane in self._terminal_pinned}
         self._terminals_sized = {moved(pane): value for pane, value in self._terminals_sized.items()}
         self._pane_tree_paths = {moved(pane): value for pane, value in self._pane_tree_paths.items()}
         self._style_terminals = {moved(pane) for pane in self._style_terminals}
@@ -3020,6 +3537,7 @@ class MainWindow(ExtraCommands, QMainWindow):
         if mode is None:
             raise ValueError(tr("Vista desconocida: {value}", value=value))
         self.source.set_view_mode(mode)
+        self.source.remember_folder_view()
         if mode == "thumbnails":
             self._award("thumbnails")
 
@@ -3074,6 +3592,284 @@ class MainWindow(ExtraCommands, QMainWindow):
     def _set_generalterminal(self, value: str) -> None:
         value = value.lower()
         self._show_terminal(GENERAL_TERMINAL, self.terminal_panels[GENERAL_TERMINAL].isHidden() if value == "toggle" else value in ("on", "yes"))
+
+    # ------------------------------------------------------------------ el foquito de las conexiones
+    def _led_tick(self) -> None:
+        self._led_lit = not self._led_lit
+        for group in self.groups:
+            group.update_leds(self._led_lit)
+        for terminal, led in zip(self.terminals, self.terminal_leds):
+            server = terminal.server
+            alive = bool(server) and terminal.session is not None and remote.is_alive(server)
+            if alive and led.server != server:
+                led.server = server
+                led.setToolTip(tr("Conectado con {server}", server=server))
+            led.setVisible(alive)
+            led.set_lit(self._led_lit)
+        for tree in self.all_trees():
+            root = tree.remote_item.data(0, PATH_ROLE) if tree.remote_item is not None else ""
+            tree.set_led(self._led_lit if root and remote.is_alive(remote.server_of(root)) else None)
+
+    # ------------------------------------------------------------------ dispositivos (Linux)
+    def _refresh_devices(self) -> None:
+        if self._devices_reading:
+            return
+        self._devices_reading = True
+
+        def read(result) -> None:
+            self._devices_reading = False
+            found, root = result
+            if not _alive(self):
+                return
+            if devices.changed(self._devices, found):
+                self._devices = found
+                for tree in self.all_trees():
+                    tree.set_devices(found)
+            else:
+                self._devices = found  # lo ocupado, al día para el menú y la barra de estado, sin tocar el árbol
+            for tree in self.all_trees():
+                tree.set_root_usage(*root)
+
+        def failed(_exc) -> None:
+            self._devices_reading = False
+
+        def work(_sink):
+            try:
+                usage = shutil.disk_usage(os.sep)
+                root = (usage.total, usage.free)
+            except OSError:
+                root = (None, None)
+            return devices.list_devices(), root
+
+        run_bg(work, on_done=read, on_error=failed)
+
+    def _device(self, path: str) -> devices.Device | None:
+        return next((device for device in self._devices if device.path == path), None)
+
+    def _device_job(self, use_udisks, fallback, done, failed_text: str, name: str) -> None:
+        """Por D-Bus si hay conexión con el bus del sistema; si no, con `udisksctl` en segundo plano.
+        Cancelar la ventana de la contraseña no es un error: solo se dice en la barra de estado."""
+        def failed(exc) -> None:
+            self.statusBar().clearMessage()
+            if isinstance(exc, udisks.Cancelled):
+                self.statusBar().showMessage(tr("Cancelado: {device}", device=name), 4000)
+                return
+            message = failed_text.format(device=name, exc=exc)
+            if "LimitsExceeded" in str(exc) or "maximum number of active connections" in str(exc):
+                message += "\n\n" + tr("El sistema no admite más conexiones de tu usuario con su bus: algún programa las está acaparando "
+                                         "(por ejemplo, una ventana de Wine). Al cerrarlo, o al cerrar la sesión, se resuelve.")
+            self._report(message.split("\n")[0])
+            QMessageBox.warning(self, APP_NAME, message)
+
+        if self._udisks.bus() is not None:
+            use_udisks(done, failed)
+        else:
+            run_bg(lambda _sink: fallback(), on_done=done, on_error=failed)
+
+    def open_device(self, path: str, view: FileView) -> None:
+        """Lo muestra en ese panel, montándolo antes si hace falta. Si el sistema pide la contraseña, la pide él, en su propia ventana."""
+        found = self._device(path)
+        if found is not None and found.mounted:
+            self._view_activated(view)
+            view.navigate(found.mount_point)
+            return
+        name = found.name if found is not None else path
+        self.statusBar().showMessage(tr("Montando {device}…", device=name), 120000)
+
+        def mounted(point: str) -> None:
+            self.statusBar().clearMessage()
+            self._refresh_devices()
+            if point and _alive(view):
+                self._view_activated(view)
+                view.navigate(point)
+
+        self._device_job(lambda done, failed: self._udisks.mount(path, done, failed), lambda: devices.mount(path), mounted,
+                         tr("No se pudo montar {device}: {exc}"), name)
+
+    def _device_menu(self, path: str, view_of) -> QMenu:
+        """`view_of` da el panel en el que se abre: el del árbol, o el activo en el árbol de la ventana."""
+        menu = QMenu(self)
+        found = self._device(path)
+        mounted = found is not None and found.mounted
+        menu.addAction(themed("folder"), tr("Abrir"), lambda: self.open_device(path, view_of()))
+        if not mounted:
+            menu.addAction(themed("drive"), tr("Montar"), lambda: self.open_device(path, view_of()))
+        elif not found.is_root:
+            menu.addAction(themed("disconnect"), tr("Desmontar"), lambda: self.unmount_device(path))
+        if found is not None and found.removable:
+            menu.addAction(themed("close"), tr("Quitar con seguridad"), lambda: self.unmount_device(path, eject=True))
+        return menu
+
+    def unmount_device(self, path: str, eject: bool = False) -> None:
+        """Los paneles que estén dentro pasan a la carpeta personal: si no, el sistema no lo deja desmontar.
+        Para quitarlo con seguridad se desmonta todo lo de ese disco y después se apaga."""
+        found = self._device(path)
+        if found is None:
+            return
+        mounted = [device for device in self._devices if device.mounted and (device.drive == found.drive if eject else device.path == path)]
+        for device in mounted:
+            for view in self.all_views():
+                if not remote.is_remote(view.path) and _inside(view.path, device.mount_point):
+                    view.navigate(platform_utils.home_dir())
+        self.statusBar().showMessage(tr("Desmontando {device}…", device=found.name), 120000)
+
+        def finished(_value=None) -> None:
+            self.statusBar().clearMessage()
+            self._report(tr("Ya se puede quitar {device}", device=found.name) if eject else tr("{device} desmontado", device=found.name))
+            self._refresh_devices()
+
+        def by_udisks(done, failed) -> None:
+            pending = [device.path for device in mounted]
+
+            def next_step(*_args) -> None:
+                if pending:
+                    self._udisks.unmount(pending.pop(0), next_step, failed)
+                elif eject:
+                    self._udisks.power_off(path, done, failed)
+                else:
+                    done()
+
+            next_step()
+
+        self._device_job(by_udisks, lambda: devices.eject(found) if eject else devices.unmount(path), finished,
+                         tr("No se pudo desmontar {device}: {exc}"), found.name)
+
+    # ------------------------------------------------------------------ paneles remotos
+    def _set_sftp(self, value: str) -> None:
+        """Menu, el menú de las conexiones; Off, el panel activo vuelve a las carpetas del equipo; otro valor, el perfil con ese nombre."""
+        key = value.strip()
+        if key.lower() == "menu":
+            self.build_sftp_menu(self.source).exec(QCursor.pos())
+        elif key.lower() == "off":
+            self.leave_remote(self.source)
+        else:
+            profile = remote.find_profile(self.config.get(sftp.PROFILES_KEY), key)
+            if profile is None:
+                raise ValueError(tr("No hay ningún perfil SSH/SFTP llamado «{name}»", name=key))
+            self.connect_remote(profile, self.source)
+
+    def build_sftp_menu(self, view: FileView) -> QMenu:
+        menu = QMenu(self)
+        on_server = remote.is_remote(view.path)  # ya conectado: primero hay que desconectarlo
+        profiles = sftp.profiles(self.config)
+        for profile in profiles:
+            action = menu.addAction(themed("remote"), profile.name, lambda p=profile: self.connect_remote(p, view))
+            action.setToolTip(profile.server)
+            action.setEnabled(not on_server)
+        if not profiles:
+            menu.addAction(tr("No hay perfiles guardados")).setEnabled(False)
+        menu.addSeparator()
+        menu.addAction(themed("plus"), tr("Conexión nueva…"), lambda: self.new_remote_connection(view)).setEnabled(not on_server)
+        if on_server:
+            menu.addAction(themed("disconnect"), tr("Desconectar del servidor"), lambda: self.leave_remote(view))
+        menu.addAction(themed("prefs"), tr("Administrar perfiles…"), lambda: QTimer.singleShot(0, lambda: self.open_preferences(sftp_page=True)))
+        return menu
+
+    def connect_remote(self, profile: remote.Profile, view: FileView) -> None:
+        """El panel pasa a mostrar la carpeta inicial del perfil. Lo que haya que preguntar, se pregunta antes."""
+        self._remote_connector.open(profile, lambda connection: self._show_remote(view, connection))
+
+    def _show_remote(self, view: FileView, connection) -> None:
+        if not _alive(view):
+            return
+        if not remote.is_remote(view.path):
+            view.local_before_remote = view.path  # adónde vuelve al desconectar
+        self._unpin_terminal_of(view)
+        self._view_activated(view)
+        view.navigate(connection.start_path())
+        view.focus_list()
+
+    def leave_remote(self, view: FileView) -> None:
+        """El panel vuelve a la carpeta del equipo en la que estaba. Si ningún otro panel usa ese servidor, se cierra la conexión."""
+        server = remote.server_of(view.path)
+        if not server:
+            return
+        back = getattr(view, "local_before_remote", "")
+        self._unpin_terminal_of(view)
+        view.navigate(back if back and os.path.isdir(back) else platform_utils.home_dir())
+        self._release_server(server)
+
+    def _unpin_terminal_of(self, view: FileView) -> None:
+        """Al conectar o desconectar su panel, la terminal de ese panel vuelve a ir con él, aunque se hubiera elegido otra cosa en su lista."""
+        side = next((index for index, group in enumerate(self.groups) if view in group.views()), None)
+        if side is not None and not self._terminal_choices.get(side, "").startswith(SSH_CHOICE):
+            self._terminal_pinned.discard(side)
+
+    def _can_reconnect(self, path: str) -> bool:
+        """Una pestaña remota guardada se restaura si queda un perfil de ese servidor con el que volver a conectar."""
+        return remote.is_remote(path) and any(profile.server == remote.server_of(path) for profile in sftp.profiles(self.config))
+
+    def _reconnect_remote_tabs(self) -> None:
+        """Conecta los servidores de las pestañas remotas restauradas. Hasta entonces muestran que no hay conexión."""
+        servers = {remote.server_of(view.path) for view in self.all_views() if remote.is_remote(view.path)}
+        for server in sorted(servers):
+            if remote.is_connected(server):
+                self._server_ready(server)
+                continue
+            profile = next((item for item in sftp.profiles(self.config) if item.server == server), None)
+            if profile is not None:
+                self._remote_connector.open(profile, lambda _connection, s=server: self._server_ready(s))
+
+    def _server_ready(self, server: str) -> None:
+        for view in self.all_views():
+            if remote.server_of(view.path) == server:
+                view.refresh()
+        self._sync_terminals()
+        self._pane_tree_paths.clear()
+        self._sync_pane_trees()
+
+    def new_remote_connection(self, view: FileView) -> None:
+        stored = sftp.profiles(self.config)
+        dialog = sftp.ProfileDialog(quick=True, taken=[profile.name for profile in stored], parent=self)
+        if not dialog.exec():
+            return
+        profile = dialog.profile()
+        if dialog.save_profile.isChecked():
+            self.config[sftp.PROFILES_KEY] = [item.to_dict() for item in stored] + [profile.to_dict()]
+        password = dialog.typed_password()
+        self._remote_connector.open(profile, lambda connection: self._show_remote(view, connection), password or None, typed=bool(password))
+
+    def _open_remote_file(self, entry) -> None:
+        """Se descarga a una carpeta temporal y se abre con su programa. Si se guardan cambios, se pregunta si se suben."""
+        if not sftp.open_files(self.config):
+            self.statusBar().showMessage(tr("Abrir los archivos del servidor está desactivado en Preferencias → SFTP"), 6000)
+            return
+        self.statusBar().showMessage(tr("Descargando {name}…", name=entry.name), 30000)
+
+        def opened(local: str) -> None:
+            self.statusBar().clearMessage()
+            if is_markdown(entry.name) and self.config.get("open_markdown", "editor") == "editor":
+                self.open_markdown_editor(local)  # al guardar en el editor, la copia cambia y se sube como con cualquier programa
+            elif not open_externally(local):
+                self._report(tr("No hay un programa para abrir {name}", name=entry.name))
+
+        self.remote_files.fetch_for_opening(entry.path, opened, lambda exc: self._report(tr("No se pudo descargar {name}: {exc}", name=entry.name, exc=exc)))
+
+    def _remote_copy_changed(self, local: str, path: str) -> None:
+        """Se ha guardado la copia de un archivo del servidor: se sube, preguntando antes o no según Preferencias → SSH/SFTP.
+        Si mientras tanto alguien lo cambió en el servidor, se pregunta siempre: subirla borraría ese cambio."""
+        name = remote.name_of(path)
+        server = remote.label(remote.parent(path) or remote.root(path))
+        if not sftp.uploads_without_asking(self.config) and not self._confirm(
+                tr("Se ha guardado un cambio en «{name}», abierto desde {server}.\n¿Subirlo al servidor, sustituyendo el que hay allí?", name=name, server=server)):
+            return
+
+        def uploaded(_path: str) -> None:
+            self.statusBar().showMessage(tr("{name} subido al servidor", name=name), 5000)
+            for view in self.all_views():
+                if remote.is_remote(view.path) and remote.normalize(view.path) == remote.normalize(remote.parent(path) or remote.root(path)):
+                    view.refresh()
+
+        def failed(exc) -> None:
+            if isinstance(exc, sftp.RemoteChanged):
+                if self._confirm(tr("«{name}» ha cambiado en {server} desde que lo abriste. Si subes tu copia, ese cambio se perderá.\n¿Subirla igualmente?",
+                                    name=name, server=server), dangerous=True):
+                    self.remote_files.upload(local, uploaded, failed, force=True)
+                return
+            QMessageBox.warning(self, APP_NAME, tr("No se pudo subir {name}: {exc}", name=name, exc=exc))
+
+        self.statusBar().showMessage(tr("Subiendo {name}…", name=name), 30000)
+        self.remote_files.upload(local, uploaded, failed)
 
     def _set_cmdline(self, value: str) -> None:
         value = value.lower()
@@ -3178,9 +3974,34 @@ class MainWindow(ExtraCommands, QMainWindow):
                 sink.check()
                 sink.report(index, len(folders), os.path.basename(path))
                 sizes[path] = fsops.tree_size(path, sink)[0]
-            return OpResult(done=len(folders))
+            # Se ven en la columna Tamaño de Detalles, en la tarjeta, en las barras de estado y al ordenar por tamaño; en las demás vistas no hay columna.
+            where = "" if view.view_mode == "details" else " " + tr("Se ven en la columna Tamaño de la vista Detalles.")
+            return OpResult(done=len(folders), summary=tr("Tamaño de {count} carpetas: {size} en total.", count=len(folders),
+                                                          size=format_size(sum(sizes.values()))) + where)
 
         self.jobs.start(tr("Calcular tamaños"), work, lambda _r: view.model.apply_dir_sizes(sizes))
+
+    def _cmd_diskusage(self, _cmd: commands.Command) -> None:
+        """El mapa de uso del disco de la carpeta seleccionada o, sin una, de la abierta."""
+        from .disk_usage import DiskUsageWindow
+
+        view = self.source
+        folders = [entry.path for entry in view.selected_entries() if entry.is_dir and not entry.in_archive]
+        target = folders[0] if len(folders) == 1 else view.path
+        if archive.split_archive_path(target) is not None:
+            self.statusBar().showMessage(tr("No disponible dentro de un comprimido"), 5000)
+            return
+
+        def show(folder: str, selected: str) -> None:
+            pane = self.source
+            pane.navigate(folder, focus=selected or None)
+            self.activateWindow()
+
+        def open_file(path: str) -> None:
+            if os.path.isfile(path):
+                self._open_file(self.source, entry_from_path(path))
+
+        DiskUsageWindow(target, show, self, delete=self.delete_paths, open_file=open_file).show()
 
     def _hash_selection(self, view: FileView, algorithm: str) -> None:
         if algorithm not in fsops.HASH_ALGORITHMS:
@@ -3328,10 +4149,13 @@ class MainWindow(ExtraCommands, QMainWindow):
         if cmd.has("IMPORT"):
             self._import_settings_dialog()
             return
+        if cmd.has("SFTP"):
+            self.open_preferences(sftp_page=True)
+            return
         self.open_preferences(cmd.get("BARS"))
 
     def open_preferences(self, bars: str | None = None, tabs: bool = False, parent: QWidget | None = None, favorites_page: bool = False, styles_page: bool = False,
-                         new_style: bool = False, sessions_page: bool = False) -> None:
+                         new_style: bool = False, sessions_page: bool = False, sftp_page: bool = False) -> None:
         """`bars` abre la página de las barras de botones, en esa barra si no está vacío; `tabs`, la de las pestañas;
         `favorites_page`, la lista de favoritos; `styles_page`, la de los estilos; `new_style`, la misma con uno nuevo ya empezado; `sessions_page`, la de las sesiones."""
         language = self.config.get("language", i18n.AUTO)
@@ -3343,7 +4167,9 @@ class MainWindow(ExtraCommands, QMainWindow):
 
         dialog.applied.connect(follow_session)
         dialog.applied.connect(self._preferences_changed)
-        if sessions_page:
+        if sftp_page:
+            dialog.show_sftp()
+        elif sessions_page:
             dialog.show_sessions()
         elif styles_page or new_style:
             dialog.show_styles()
@@ -3372,6 +4198,7 @@ class MainWindow(ExtraCommands, QMainWindow):
 
     def _preferences_changed(self) -> None:
         self.apply_theme()
+        self._apply_general_status()
         self._apply_pane_frames()
         self._apply_path_options()
         self._refresh_session_box()
@@ -3401,6 +4228,11 @@ class MainWindow(ExtraCommands, QMainWindow):
         for view in self.all_views():
             view.hover_enabled = bool(self.config.get("hover_info", True))
             view.hover_card.ffmpeg_dir = self.config.get("ffmpeg_dir", "")
+            view.model.remote_previews = sftp.previews(self.config)
+            view.set_single_click(self.config.get("single_click") is True)
+            view.set_list_name_limit(self._list_name_limit())
+            view.set_thumbnail_size(self._thumbnail_size())
+            self._apply_previews(view)
 
     def customize_bars(self, bar: str = "", parent: QWidget | None = None) -> None:
         """Lo que hace «Personalizar…». Después de cerrarse el menú desde el que se pide."""
@@ -3504,8 +4336,9 @@ class MainWindow(ExtraCommands, QMainWindow):
         else:
             raise ValueError(tr("Favorites necesita ADD, IMPORT o MENU"))
 
-    def _add_favorite_dialog(self, view: FileView) -> None:
-        dialog = AddFavoriteDialog(view.path, self.config.get("favorites", []), self, self.config.get("favorites_autosort", False) is True)
+    def _add_favorite_dialog(self, view: FileView, path: str = "") -> None:
+        """La carpeta abierta en el panel o, desde el menú de una carpeta de la lista, esa carpeta."""
+        dialog = AddFavoriteDialog(path or view.path, self.config.get("favorites", []), self, self.config.get("favorites_autosort", False) is True)
         if dialog.exec():
             self.config["favorites"] = dialog.result_nodes()
             self._rebuild_favorites_bar()
@@ -3596,19 +4429,50 @@ class MainWindow(ExtraCommands, QMainWindow):
                           tr("<b>{APP_NAME} {version__}</b><br>Gestor de archivos de doble panel para Linux y Windows.<br>Proyecto independiente de código abierto.", APP_NAME=APP_NAME, version__=__version__))
 
     def _cmd_close(self, cmd: commands.Command) -> None:
-        if (cmd.get("PROGRAM") or "").lower() == "confirm" and not self._confirm(tr("¿Cerrar {APP_NAME}?", APP_NAME=APP_NAME)):
-            return
-        self.close()
+        """Salir. Con PROGRAM=confirm se pregunta aunque en las preferencias no se pida confirmar."""
+        self._exit_asked = "always" if (cmd.get("PROGRAM") or "").lower() == "confirm" else "default"
+        try:
+            self.close()
+        finally:
+            self._exit_asked = ""
+
+    def open_connections(self) -> list[str]:
+        """Las conexiones SSH/SFTP que se cerrarán al salir, como usuario@servidor."""
+        servers = set(remote.active_servers())
+        servers.update(terminal.server for terminal in self.terminals if terminal.server)
+        return [server.removesuffix(f":{remote.DEFAULT_PORT}") for server in sorted(servers)]
+
+    def _confirm_exit(self, always: bool = False) -> bool:
+        """Con conexiones abiertas se pregunta siempre: se van a cerrar. Lo demás, según las preferencias."""
+        connections = self.open_connections()
+        lines = []
+        if self.jobs.running:
+            lines.append(tr("Hay {running} operaciones en curso: se cancelarán.", running=self.jobs.running))
+        if connections:
+            lines.append(tr("Se cerrarán las conexiones SSH/SFTP con: {servers}.", servers=", ".join(connections)))
+        if not lines and not always and self.config.get("confirm_exit", True) is False:
+            return True
+        lines.append(tr("¿Salir de {APP_NAME}?", APP_NAME=APP_NAME))
+        return self._confirm("\n\n".join(lines), dangerous=bool(connections or self.jobs.running))
 
     # ------------------------------------------------------------------ abrir y menú contextual
     def _open_file(self, view: FileView, entry, internal: bool = False) -> None:
         """`internal` abre la imagen o el vídeo en su visor aunque lo configurado sea la aplicación del sistema."""
+        if remote.is_remote(entry.path):
+            self._open_remote_file(entry)
+            return
         self._award("double_click", view.path)
         if archive.is_archive_file(entry.path):
             # Sin un programa asociado, se explora aquí en vez de no hacer nada.
-            if self.config.get("open_archives", "system") == "browse" or not QDesktopServices.openUrl(QUrl.fromLocalFile(entry.path)):
+            if self.config.get("open_archives", "system") == "browse" or not has_default_app(entry.path) or not open_externally(entry.path):
                 view.navigate(entry.path)
             return
+        if is_markdown(entry.name) and archive.split_archive_path(entry.path) is None and (internal or self.config.get("open_markdown", "editor") == "editor"):
+            self.open_markdown_editor(entry.path)
+            return
+        if is_json(entry.name) and archive.split_archive_path(entry.path) is None and (internal or self.config.get("open_json", "viewer") == "viewer"):
+            if self.open_json_viewer(entry.path):
+                return
         image = entry.extension in IMAGE_EXTENSIONS and (internal or self.config.get("open_images", "viewer") == "viewer")
         video = entry.extension in VIDEO_EXTENSIONS and (internal or self.config.get("open_videos", "viewer") == "viewer")
         location = archive.split_archive_path(entry.path)
@@ -3617,10 +4481,11 @@ class MainWindow(ExtraCommands, QMainWindow):
                 # Con los demás archivos de ese tipo de la carpeta, para poder pasar de uno a otro.
                 kinds = IMAGE_EXTENSIONS if image else VIDEO_EXTENSIONS
                 paths = [e.path for e in view.model.entries if e.extension in kinds and os.path.isfile(e.path)]
-                start = paths.index(entry.path) if entry.path in paths else 0
-                self._show_in_viewer(paths or [entry.path], start, image, view)
+                if entry.path not in paths:  # de otra carpeta (desde el mapa de uso del disco, por ejemplo): solo ese
+                    paths = [entry.path]
+                self._show_in_viewer(paths, paths.index(entry.path), image, view)
             else:
-                QDesktopServices.openUrl(QUrl.fromLocalFile(entry.path))
+                open_externally(entry.path)
             return
         temp = tempfile.mkdtemp(prefix="directory-commander-tux-tux-")
         self._temp_dirs.append(temp)
@@ -3629,17 +4494,61 @@ class MainWindow(ExtraCommands, QMainWindow):
             if created and (image or video):
                 self._show_in_viewer(created[:1], 0, image, None)
             elif created:
-                QDesktopServices.openUrl(QUrl.fromLocalFile(created[0]))
+                open_externally(created[0])
 
         run_bg(lambda _s: archive.extract_to(*location, temp), opened,
                lambda exc: self._report(tr("No se pudo abrir {name}: {exc}", name=entry.name, exc=exc)))
+
+    def open_markdown_editor(self, path: str) -> None:
+        """Un archivo ya abierto en un editor no se abre dos veces: se trae al frente."""
+        from .markdown_editor import MarkdownEditor
+
+        for editor in self.findChildren(MarkdownEditor):
+            if os.path.normcase(editor.path) == os.path.normcase(os.path.normpath(path)):
+                editor.showNormal()
+                editor.raise_()
+                editor.activateWindow()
+                return
+        try:
+            editor = MarkdownEditor(path, self)
+        except UnicodeDecodeError:
+            self._report(tr("{name} no está en UTF-8: se abre con su programa para no estropearlo al guardar", name=os.path.basename(path)))
+            open_externally(path)
+            return
+        except OSError as exc:
+            self._report(tr("No se pudo abrir {name}: {exc}", name=os.path.basename(path), exc=exc))
+            return
+        editor.setWindowFlag(Qt.WindowType.Window)
+        editor.show()
+
+    def open_json_viewer(self, path: str) -> bool:
+        """En su ventana. Un archivo que no es un JSON válido se abre con su programa, que dirá dónde falla."""
+        from .json_viewer import JsonViewer
+
+        for viewer in self.findChildren(JsonViewer):
+            if os.path.normcase(viewer.path) == os.path.normcase(os.path.normpath(path)):
+                viewer.showNormal()
+                viewer.raise_()
+                viewer.activateWindow()
+                return True
+        try:
+            viewer = JsonViewer(path, self)
+        except ValueError as exc:
+            self._report(tr("{name} no es un JSON válido: {exc}", name=os.path.basename(path), exc=exc))
+            return False
+        except OSError as exc:
+            self._report(tr("No se pudo abrir {name}: {exc}", name=os.path.basename(path), exc=exc))
+            return False
+        viewer.setWindowFlag(Qt.WindowType.Window)
+        viewer.show()
+        return True
 
     def _show_in_viewer(self, paths: list[str], start: int, image: bool, view: FileView | None) -> None:
         viewer = self._new_image_viewer(paths, start, view) if image else self._new_video_viewer(paths, start, view)
         if viewer is not None:
             viewer.show()
         else:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(paths[start]))
+            open_externally(paths[start])
 
     def _add_command(self, menu: QMenu, label: str, command: str, enabled: bool = True, icon: str = "") -> QAction:
         action = menu.addAction(themed(icon), label, lambda: self.run_command(command))
@@ -3709,6 +4618,8 @@ class MainWindow(ExtraCommands, QMainWindow):
         if view.path == COMPUTER_PATH:
             return self._build_drive_menu(view, entries)
         in_archive = archive.split_archive_path(view.path) is not None or any(e.in_archive for e in entries)  # también si es un comprimido desplegado en la lista
+        on_server = remote.is_remote(view.path)
+        local = not in_archive and not on_server  # lo que solo se hace con archivos del equipo
         folders = [e for e in entries if e.is_dir]
         files = [e for e in entries if not e.is_dir]
         images = [e for e in files if e.extension in IMAGE_EXTENSIONS]
@@ -3717,44 +4628,56 @@ class MainWindow(ExtraCommands, QMainWindow):
         if len(entries) == 1:
             menu.addAction(themed("goforward"), tr("Abrir"), lambda: view.open_entry(entries[0]))
         if len(entries) == 1 and files:
-            self._add_open_with(menu, view, entries[0], not in_archive)
+            self._add_open_with(menu, view, entries[0], local)
+        if len(entries) == 1 and local and is_markdown(entries[0].name):
+            menu.addAction(themed("rename"), tr("Editar Markdown"), lambda: self.open_markdown_editor(entries[0].path))
+        if len(entries) == 1 and local and is_json(entries[0].name):
+            menu.addAction(themed("show"), tr("Ver JSON"), lambda: self.open_json_viewer(entries[0].path))
         if len(entries) == 1 and archive.is_archive_file(entries[0].path):
             menu.addAction(themed("folder"), tr(context_menu.BROWSE_ARCHIVE), lambda: view.navigate(entries[0].path))
         if folders:
             add(tr("Abrir en una pestaña nueva"), "Go NEWTAB FROMSEL", icon="plus")
-        if images:
+        if len(entries) == 1 and folders:
+            menu.addAction(themed("favoritesadd"), tr("Añadir a favoritos"), lambda: self._add_favorite_dialog(view, folders[0].path))
+        if images and not on_server:
             add(tr("Ver imágenes"), "Show", icon="show")
         menu.addSeparator()
-        add(tr("Copiar"), "Clipboard COPY", icon="copy")
-        add(tr("Cortar"), "Clipboard CUT", not in_archive)
+        add(tr("Copiar"), "Clipboard COPY", not on_server, "copy")
+        add(tr("Cortar"), "Clipboard CUT", local)
         menu.addSeparator()
         add(tr("Copiar a destino"), "Copy", self.dest is not None, "copy")
         add(tr("Mover a destino"), "Copy MOVE", self.dest is not None and not in_archive, "move")
         add(tr("Duplicar aquí"), "Copy HERE", not in_archive)
         menu.addSeparator()
-        add(tr("Renombrar"), "Rename" if len(entries) == 1 else "Rename ADVANCED", not in_archive, "rename")
-        add(tr("Enviar a la papelera"), "Delete", not in_archive, "delete")
+        add(tr("Renombrar"), "Rename" if len(entries) == 1 else "Rename ADVANCED", not in_archive and (len(entries) == 1 or not on_server), "rename")
+        add(tr("Enviar a la papelera"), "Delete", local, "delete")
         add(tr("Eliminar definitivamente"), "Delete NORECYCLE", not in_archive, "deletepermanent")
         menu.addSeparator()
         if any(archive.is_archive_file(e.path) for e in entries):
             add(tr("Extraer"), "Extract", icon="extract")
-        add(tr("Comprimir en ZIP…"), "Archive", not in_archive, "addtozip")
-        if images and not in_archive:
+        add(tr("Comprimir en ZIP…"), "Archive", local, "addtozip")
+        if images and local:
             tools = menu.addMenu(themed("show"), tr("Imagen"))
             self._add_command(tools, tr("Convertir…"), "Image CONVERT")
             self._add_command(tools, tr("Girar 90° a la derecha"), "Image ROTATE=90 HERE REPLACE PRESERVEDATE")
             self._add_command(tools, tr("Girar 90° a la izquierda"), "Image ROTATE=270 HERE REPLACE PRESERVEDATE")
-        if files and not in_archive:
+        if files and local:
             hashes = menu.addMenu(tr("Calcular hash"))
             for algorithm in fsops.HASH_ALGORITHMS:
                 self._add_command(hashes, algorithm, f"GetSizes HASH={algorithm}")
-        if folders and not in_archive:
+        if folders and local:
             add(tr("Calcular tamaño"), "GetSizes", icon="getsizes")
         menu.addSeparator()
         add(tr("Copiar rutas como texto"), "Clipboard COPYNAMES")
-        add(tr("Atributos…"), "SetAttr", not in_archive, "setattr")
-        add(tr("Propiedades"), "Properties", icon="properties")
-        return self._arrange_menu(menu, context_menu.FILE)
+        add(tr("Atributos…"), "SetAttr", local, "setattr")
+        add(tr("Propiedades"), "Properties", not on_server, "properties")
+        menu = self._arrange_menu(menu, context_menu.FILE)
+        if len(entries) == 1:  # la clave de la configuración sigue siendo la misma: solo cambia lo que se lee
+            single = tr("Copiar ruta de la carpeta") if entries[0].is_dir else tr("Copiar ruta del archivo")
+            for action in menu.actions():
+                if action.text() == tr("Copiar rutas como texto"):
+                    action.setText(single)
+        return menu
 
     def _arrange_menu(self, menu: QMenu, which: str) -> QMenu:
         """Deja el menú como se configuró en las preferencias. `shell_before` es la entrada delante de la que van
@@ -3796,13 +4719,15 @@ class MainWindow(ExtraCommands, QMainWindow):
     def build_folder_menu(self, view: FileView) -> QMenu:
         """Menú de la carpeta abierta: lo que se hace en ella, sin tocar lo seleccionado."""
         in_archive = view.path == COMPUTER_PATH or is_results(view.path) or archive.split_archive_path(view.path) is not None
+        on_server = remote.is_remote(view.path)
+        local = not in_archive and not on_server  # lo que solo se hace con carpetas del equipo
         menu = QMenu(self)
         add = lambda *args, **kwargs: self._add_command(menu, *args, **kwargs)
         add(tr("Pegar"), "Clipboard PASTE", bool(clipboard.read_files()[0]) and not in_archive)
         menu.addSeparator()
         add(tr("Nueva carpeta"), "CreateFolder", not in_archive, "makedir")
-        add(tr("Nuevo archivo de texto"), "FileType NEW=.txt", not in_archive, "newtextfile")
-        add(tr("Nuevo ZIP vacío"), "CreateFolder ZIP", not in_archive, "addtozip")
+        add(tr("Nuevo archivo de texto"), "CreateFile" if on_server else "FileType NEW=.txt", not in_archive, "newtextfile")
+        add(tr("Nuevo ZIP vacío"), "CreateFolder ZIP", local, "addtozip")
         menu.addSeparator()
         modes = menu.addMenu(themed("cyclemodes"), tr("Ver"))
         for label, icon, mode in ((tr("Lista"), "listmode", "list"), (tr("Detalles"), "detailsmode", "details"),
@@ -3817,7 +4742,7 @@ class MainWindow(ExtraCommands, QMainWindow):
             self._add_command(order, label, f"Set SORTBY={key}")
         order.addSeparator()
         self._add_command(order, tr("Invertir el orden"), "Set SORTREVERSE=Toggle")
-        flat = add(tr("Vista plana"), "Set FLATVIEW=Toggle", not in_archive, "flat")
+        flat = add(tr("Vista plana"), "Set FLATVIEW=Toggle", local, "flat")
         flat.setCheckable(True)
         flat.setChecked(view.flat)
         hidden = add(tr("Mostrar ocultos"), "Set HIDDEN=Toggle")
@@ -3826,7 +4751,8 @@ class MainWindow(ExtraCommands, QMainWindow):
         menu.addSeparator()
         add(tr("Seleccionar todo"), "Select ALL", bool(view.model.entries), "selectall")
         add(tr("Actualizar"), "Go REFRESH", icon="refresh")
-        add(tr("Calcular tamaños de carpetas"), "GetSizes", not in_archive, "getsizes")
+        add(tr("Calcular tamaños de carpetas"), "GetSizes", local, "getsizes")
+        add(tr("Uso del disco…"), "DiskUsage", local, "diskusage")
         menu.addSeparator()
         add(tr("Abrir en una pestaña nueva"), "Go TABNEW", icon="plus")
         can_split = styles.pane_count(self.dual) < styles.MAX_PANES
@@ -3834,11 +4760,14 @@ class MainWindow(ExtraCommands, QMainWindow):
         add(tr("Dividir panel - Vertical"), "Set SPLIT=Vertical", can_split, "dualdisplay")
         add(tr("Cerrar este panel"), "Set PANE=Close", self.dual != "Off", "close")
         add(tr("Solo la terminal en este panel"), "Set TERMINALPANE=On", len(self._file_panes()) > 1, "terminalonly")
-        add(tr("Abrir terminal aquí"), "CLI DOSPROMPT", not in_archive, "terminal")
+        add(tr("Panel remoto (SFTP)…"), "Set SFTP=Menu", not on_server, "remote")
+        if on_server:
+            add(tr("Desconectar del servidor"), "Set SFTP=Off", icon="disconnect")
+        add(tr("Abrir terminal aquí"), "CLI DOSPROMPT", not in_archive and not remote.is_remote(view.path), "terminal")
         add(tr("Añadir a favoritos"), "Favorites ADDDIALOG", icon="favoritesadd")
         menu.addAction(tr("Copiar la ruta de esta carpeta"), lambda: QApplication.clipboard().setText(view.path))
         menu.addSeparator()
-        add(tr("Propiedades de esta carpeta"), "Properties CURRENT", not in_archive, "properties")
+        add(tr("Propiedades de esta carpeta"), "Properties CURRENT", local, "properties")
         return self._arrange_menu(menu, context_menu.FOLDER)
 
     def _show_file_menu(self, view: FileView, position) -> None:
@@ -3897,7 +4826,7 @@ class MainWindow(ExtraCommands, QMainWindow):
                 self._job_error_dialog(title, result)
         else:
             detail = tr(" ({skipped} omitidos)", skipped=result.skipped) if result.skipped else ""
-            self.statusBar().showMessage(tr("{title}: terminado{detail}", title=title, detail=detail), 5000)
+            self.statusBar().showMessage(result.summary or tr("{title}: terminado{detail}", title=title, detail=detail), 8000 if result.summary else 5000)
 
     def _job_error_dialog(self, title: str, result: OpResult) -> None:
         sample = "\n".join(f"{os.path.basename(p)}: {m}" for p, m in result.errors[:5])
@@ -3925,7 +4854,7 @@ class MainWindow(ExtraCommands, QMainWindow):
             tabs = stored[side] if side < len(stored) and isinstance(stored[side], list) else []
             names = stored_names[side] if side < len(stored_names) and isinstance(stored_names[side], list) else []
             valid = [(p, names[i] if i < len(names) and isinstance(names[i], str) else "") for i, p in enumerate(tabs)
-                     if isinstance(p, str) and _location_exists(p)]
+                     if isinstance(p, str) and (_location_exists(p) or self._can_reconnect(p))]
             if not valid and side < 2:
                 valid = [(home, "")]
             for path, name in valid:
@@ -3983,6 +4912,8 @@ class MainWindow(ExtraCommands, QMainWindow):
                 self._terminal_start_folders[index] = saved["folder"]
             if isinstance(saved.get("shell"), str):
                 self._terminal_choices[index] = saved["shell"]
+                if saved["shell"].startswith(SSH_CHOICE):
+                    self._terminal_pinned.add(index)
             self._style_sizing.discard(index)  # manda el tamaño guardado, si lo hay, sobre el del estilo
             if not saved.get("visible"):
                 self._show_terminal(index, False)  # el estilo la abre, pero el usuario la cerró
@@ -4001,6 +4932,7 @@ class MainWindow(ExtraCommands, QMainWindow):
             self._restore_terminal_only(session["terminal_only"])
         if live:
             self._restore_tab_choices(session)
+        QTimer.singleShot(0, self._reconnect_remote_tabs)  # con la ventana ya a la vista: puede haber que preguntar algo
         self._orient_terminals()
         self.source.focus_list()
         self._sync_tree()
@@ -4109,7 +5041,15 @@ class MainWindow(ExtraCommands, QMainWindow):
                 group.close_tab(group.currentIndex())
                 event.ignore()
                 return
-        if self.jobs.running:
+        # Lo pide el usuario: el botón de la ventana o Salir. Cerrarla desde el propio programa, como al reiniciar, no pregunta otra vez.
+        if event.spontaneous() or self._exit_asked:
+            if not self._confirm_exit(self._exit_asked == "always"):
+                event.ignore()
+                return
+            if self.jobs.running:
+                self.jobs.cancel_all()
+                self.jobs.pool.waitForDone(5000)
+        elif self.jobs.running:
             if not self._confirm(tr("Hay {running} operaciones en curso. ¿Cancelarlas y salir?", running=self.jobs.running), True):
                 event.ignore()
                 return
@@ -4130,8 +5070,15 @@ class MainWindow(ExtraCommands, QMainWindow):
                 viewer.close()
         for temp in self._temp_dirs:
             shutil.rmtree(temp, ignore_errors=True)
+        self.remote_files.dispose()
+        remote.disconnect_all()
         QThreadPool.globalInstance().waitForDone(2000)
         event.accept()
+
+
+def _inside(path: str, folder: str) -> bool:
+    path, folder = os.path.normpath(path), os.path.normpath(folder)
+    return path == folder or path.startswith(folder.rstrip(os.sep) + os.sep)
 
 
 def _alive(widget) -> bool:

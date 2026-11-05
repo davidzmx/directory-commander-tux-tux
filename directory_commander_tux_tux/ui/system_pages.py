@@ -28,6 +28,10 @@ class GitPage(QWidget):
         self.show_user.setChecked(bool(config.get("git_show_user", True)))
         self.pane_branch = QCheckBox(tr("Mostrar la rama activa en la barra de cada panel, si su carpeta es un repositorio"))
         self.pane_branch.setChecked(bool(config.get("git_pane_branch", True)))
+        self.marks = QCheckBox(tr("Marcar en la lista de archivos su estado en el repositorio"))
+        self.marks.setToolTip(tr("M modificado, A añadido, U sin seguimiento, R renombrado, C en conflicto. Una carpeta con cambios dentro "
+                                 "lleva un punto del color del más importante; lo que git ignora se ve más tenue. Al pasar el ratón por una marca se dice qué significa"))
+        self.marks.setChecked(config.get("git_marks") is not False)
         self.run_commands = QCheckBox(tr("Ejecutar la orden al aceptar. Si no, solo se escribe en la terminal para revisarla"))
         self.run_commands.setChecked(bool(config.get("git_run_commands", True)))
         self.program = QLineEdit(config.get("git_program", ""))
@@ -53,6 +57,7 @@ class GitPage(QWidget):
         layout.addWidget(self.show_branch)
         layout.addWidget(self.show_user)
         layout.addWidget(self.pane_branch)
+        layout.addWidget(self.marks)
         layout.addWidget(self.run_commands)
         layout.addLayout(form)
         layout.addWidget(self.bar_link)
@@ -73,6 +78,7 @@ class GitPage(QWidget):
         config["git_show_branch"] = self.show_branch.isChecked()
         config["git_show_user"] = self.show_user.isChecked()
         config["git_pane_branch"] = self.pane_branch.isChecked()
+        config["git_marks"] = self.marks.isChecked()
         config["git_run_commands"] = self.run_commands.isChecked()
         config["git_program"] = self.program.text().strip()
 

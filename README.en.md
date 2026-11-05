@@ -32,9 +32,22 @@ A **multi-pane file manager with built-in terminals and git**, for **Linux (KDE 
 - Each terminal whose folder is a repository shows the active branch and the user commits will be signed with, and lets you switch branch or create one. The branch also appears on each pane's bar
 - Buttons for `status`, `add`, `unstage`, `commit`, `push`, `pull`, `fetch`, `diff` and `log`, written in that same terminal
 - `add`, `unstage` and `commit` open a window with the files and checkboxes, and show the command being built before sending it
-- The command of each button can be changed and others can be added, in Preferences → Button bars. The rest is set in Preferences → Git
+- The command of each button can be changed and others can be added, in Preferences → Button bars. The rest is set in Preferences → Git integration
 
 ![The commit window, with the files to include and the command that will run](docs/capturas/en/commit.png)
+
+### Remote panes over SFTP and terminals over SSH
+
+- Any pane can show a folder on a server: with the button on its bar, the right-click menu or File → Remote pane (SFTP)…, choose a saved profile or type a new connection. Its tab carries a server icon, its IP in brackets and a green light that blinks while the connection is alive and goes away if it is lost; that pane's folder tree shows it next to the server, and a terminal connected over SSH, on its bar. Its bar has a button to disconnect it, which takes it back to where it was. While it is connected, the connect button is disabled
+- You browse it like a local folder, and copy and move between a remote pane and a local one both ways, also by dragging. You can create folders and files, rename and delete; a server has no trash, so deleting is always permanent and always confirmed
+- The terminal of a remote pane opens on the server, over the same connection, follows its pane like the others and shows the IP on its bar. Its folder tree also shows the server's folders
+- Any terminal, also the general one or that of a local pane, can open on a server over SSH with the connect button on its bar, which offers the profiles and a new connection. While connected, its list of shells shows the profile and cannot be changed; the disconnect button takes it back to the local shell
+- SSH/SFTP profiles store server, port, user, password or key passphrase, private key or SSH agent, and start folder; they are managed in Preferences → SSH/SFTP, also reached from Settings → SSH/SFTP profiles…. When creating or editing one, «Test connection» checks the details without saving anything. The password can be given when creating the profile, and is not asked again. It goes to the system keyring (KWallet or GNOME Keyring on Linux, Credential Manager on Windows), never to the settings
+- Sessions save remote tabs and, when loaded, connect them again with their profiles
+- If the server stops answering, the window does not wait: after 20 seconds it says the connection was lost, and it reconnects when another folder is opened
+- Quitting with SSH/SFTP connections open warns that they will be closed and asks to confirm, even if confirming on quit is turned off in the preferences
+- The first time you connect to a server its fingerprint is shown and you are asked whether to trust it; accepting adds it to `~/.ssh/known_hosts`. If the key of a known server changes, it does not connect
+- In Preferences → SSH/SFTP you choose whether the server's files open with their program (they are downloaded to a temporary folder and, when a change is saved, it is uploaded asking first or without asking, as chosen; if meanwhile the file changed on the server, you are always asked, so that change is not lost. A Markdown file from the server opens in the program's editor) and whether their preview and thumbnails are shown, up to a size
 
 ## Styles: one layout for each task
 
@@ -63,10 +76,21 @@ This is a first working version. Developed for personal use.
 - Compare two files, from one pane or two: whether they are identical, the differences of a text with diff, two images side by side with what differs in red, or an external comparison tool among those installed (Kompare, Meld, KDiff3, WinMerge…). Set in Preferences → Compare files
 - System file manager, reversible, in Preferences → File manager: on Windows it replaces Explorer for folders on disk, with exceptions and Win+E, and on Linux it uses `xdg-mime`. It can also be undone with `directory-commander-tux-tux --restore-file-manager`
 - Viewer and metadata with a button each; Preferences → General sets which one goes on top when both are shown
+- The viewer highlights code in hundreds of languages (with Pygments), shows Markdown formatted or as code, and JSON sorted and highlighted, as an expandable tree (with `{ }`, `[ ]` and «key : value», like web JSON viewers) or as it is. A JSON file also opens in its own window, with search by key or value and copying the value or its path (`pages[0].nodes[1].type`)
+- Markdown editor with a split view: the text on the left and how it looks on the right, live, with buttons for bold, italic, code, links, headings, lists and quotes. Markdown files open in it (or with the system application, in Preferences → General), and also with «Edit» in the viewer or «Edit Markdown» in the right-click menu. It saves in UTF-8 with the file's own line endings
+- Disk usage (Tools, or right-click on a folder): its folders and files from largest to smallest and a treemap, one rectangle per file, sized by its size and colored by its type. What you pick in one is marked in the other, a double click on the map goes into a folder, and «Show in the pane» takes you there. A double click on a file in the list opens it with its program. From the map or the list (also with right-click) it can be sent to the trash (Del) or deleted without the trash (Shift+Del), and what is left is recalculated without analyzing again. It doesn't enter other disks mounted inside and counts hard links once
+- Git marks in the list: M modified, A added, U untracked, R renamed, C conflicted; a folder with changes inside gets a dot, and what git ignores looks dimmer. Hovering a mark tells what it means. They are turned on in Preferences → Git integration
 - Details, list, icons, tiles, thumbnails and filmstrip views
-- Expandable folders within the list, natural sorting with folders first, quick filter, content filter by several types at once and flat view
+  - In details, every column can be widened by dragging its edge, the name too, and the widths are remembered. Until it is changed by hand, the name takes the free space; right-clicking the header fits it to the pane again or fits each column to its contents
+  - In list, each column is as wide as its longest name, up to a maximum (50 characters by default, configurable in Preferences → General, or unlimited). A longer name is cut in the middle with «…» and shown in full when hovering it
+  - The thumbnail size is chosen in Preferences → General, from 64 to 256 pixels
+  - Videos show four frames spread along the video and their duration, or a single frame, or their icon (Preferences → General). FFmpeg extracts them in the background, about a second per video, and they are remembered while the program is open
+  - Folders show their first images inside, up to four (can be turned off)
+- AI-generated images and videos: a P mark if their metadata carry the prompt and a W mark if they carry the workflow, in every view: on the thumbnail or large icon, and after the name in list and details. They are hidden by default: the «AI marks» toolbar button (or View) shows and hides them, and Preferences → General chooses whether both or only one are shown. The tooltip and the hover card say which program and which model generated it, and the metadata panel shows the program, the whole prompt, the negative prompt, the model (in ComfyUI, the checkpoint loaded by the node connected to the sampler's «model» input, through the LoRAs, which are also shown), the steps, the seed and whether it carries the workflow, with its nodes. ComfyUI (PNG, WebP and video), Automatic1111, Forge, Fooocus, SwarmUI, InvokeAI, NovelAI and Midjourney are recognized
+- Expandable folders within the list, folders always first and, by default, sorted by type (chosen in Preferences → Views and thumbnails; sorting by name is natural: «photo2» before «photo10»), quick filter, content filter by several types at once and flat view
+- Each folder remembers its view and sort order (can be turned off in Preferences → General). A folder with nothing remembered keeps the tab's view, and two tabs can show the same folder differently: the last choice is remembered
 - Status per pane: selection and totals, bytes and disk meter
-- Copy, move and delete in the background, with progress, cancellation, collision detection and undo
+- Copy, move and delete in the background, with progress, cancellation, collision detection and undo. Optionally, each copy is read back from disk and compared with the original (BLAKE2b): if they differ, it is discarded and, when moving, the original is kept (Preferences → General, or «Copy to destination and check the copy» on the Copy button)
 - Image viewer in its own window, metadata panel, attributes and links
 - Convert, rotate and resize images; split and join files; copy only what's newest
 - Movable bars: drag them by their handle to another row, another edge or next to another bar, and the position is remembered. They can also be locked
@@ -74,7 +98,11 @@ This is a first working version. Developed for personal use.
 - Double-click the tab bar to open a new tab
 - Select by clicking the name; clicking elsewhere clears the selection. To go back to full-row selection: `Set FULLROWSELECT=Toggle` or the View menu
 - On Windows, the path starts at «This PC», which shows drives grouped by type (SSD, HDD, other, removable, optical and network), with capacity, free space, usage bar and file system
-- Folder tree with sections: Home, Favorites and the drives (the file system on Linux)
+- Folder tree with sections: Home, Favorites and the drives (the file system on Linux). On Linux, also Devices, like the desktop's places panel: the disks and partitions that can be opened, without the boot, Windows recovery or swap ones. Mounted ones carry a bar with the used space, like «File system», and their tooltip shows the device, the file system, where it is mounted, the size, the used and the free space; clicking one that is not mounted mounts it and opens it. It mounts like the desktop does, with UDisks over D-Bus: if the system requires the password, it asks for it in its own window. Its menu can unmount it and safely remove a USB drive. What is plugged in or mounted from another program appears by itself
+- Opening with one click, optional (Preferences → General): one click opens the file or folder, and hovering turns its icon into a + that adds it to the selection (− removes it); on thumbnails the + goes in their corner. Ctrl, Shift and the selection rectangle still work the same. With the viewer or the metadata open, they show the file under the mouse, except videos and audio, which would start playing; leaving it goes back to the selection
+- Quitting asks for confirmation; it can be turned off in Preferences → General
+- General status bar at the bottom of the window: the file under the mouse or the selection in the active pane, the free space with its percentage and the disk size, and the notices. It also shows, for the file under the mouse or the only one selected, its date and, for an image, its dimensions; for a video, its dimensions and duration; for audio, its duration; whether a filter is active or hidden files are shown, and the progress of running copies and moves. While it's shown, the free space goes only there, except in a pane with a folder on another disk, which shows its own (chosen in Preferences → General: only those, all or none). It can be removed in Preferences → General; without it, notices go to the status row of the active pane and the free space to each pane's
+- Files open with the system's default application; on Linux, with `xdg-open`, without the desktop window that asks which application to use
 - Right-click a name: menu for that file or folder. Right-click anywhere else: menu for the open folder, without changing the selection. Also with the menu key or `Shift+F10`
 - Saved layouts and tab groups, favorites bar, recent and frequent folders, navigation lock and selection checkboxes
 - System trash and clipboard compatible with Explorer, Dolphin and Nautilus
@@ -145,13 +173,18 @@ The portable version keeps its settings in the `config` folder, next to the prog
 
 ## Audio and video
 
-MP4, MOV, M4A, MKV, WebM, AVI, MP3, FLAC and WAV data is read without any dependency. To see a frame of videos and read other formats, such as OGG, FFmpeg is needed: it's looked for on the `PATH` or in the folder set in Settings → Preferences. Without FFmpeg, videos show their data with an icon instead of the frame.
+MP4, MOV, M4A, MKV, WebM, AVI, MP3, FLAC and WAV data is read without any dependency. To see video frames (in the card and in thumbnails) and read other formats, such as OGG, FFmpeg is needed: it's looked for on the `PATH` or in the folder set in Settings → Preferences. Without FFmpeg, videos show their data with an icon instead of the frame.
 
 ## Favorites and settings as JSON
 
-Favorites are exported and imported from the Favorites menu; importing adds them without duplicates. Settings, from the Settings menu: theme, preferences, button bar, styles, layouts, tab groups, rename presets and favorites. They apply immediately.
+Favorites are exported and imported from the Favorites menu; importing adds them without duplicates.
 
-The session, recent folders and the FFmpeg and ExifTool folders don't travel in the file, because they belong to each computer. Neither do the terminal program, the git commands or the external comparison tool: importing them would run whatever the file's creator chose.
+Settings, from the Settings menu. When exporting you check the groups to take, and a file name with the date and time is proposed (`configuracion_2026-11-04_09-05.json`), which you can change; when importing, which of the file's groups to apply. What you check replaces what you had and applies immediately. The groups are appearance (including the width of the general terminal), bars, context menus, favorites, recent folders, behavior, viewer and player, layouts with tab groups, sessions and the tab settings, search, rename, Git integration and SSH/SFTP.
+
+- **SSH/SFTP**: the profiles and, if checked, their servers' keys in `~/.ssh/known_hosts` and the saved passwords. Passwords go encrypted with a key (scrypt and AES-256-GCM), which is asked for when importing, or in plain text, with a warning. When imported they are saved in the system keyring. Missing server keys are added; if there is already another one for that server, the existing one is kept.
+- **Across computers and systems**: the file records the source system and home folder. When importing, paths inside that folder (favorites, sessions, layouts, a profile's key…) move to this computer's home folder, also from Windows to Linux and back.
+
+The open session, recent folders, the visits counted by smart favorites, window sizes and positions and the default file manager never travel: they belong to each computer. Neither do programs (the terminal shell and command, the FFmpeg and ExifTool folders, the git program and its commands, and the comparison tool): they would run on the other computer, and their paths depend on each system.
 
 ```json
 {
@@ -186,13 +219,14 @@ Set DUAL=Off|Vertical|Horizontal|Toggle  STYLE="Vertical doble panel"  CONTENTTY
 Set VIEW=Details|List|SmallIcons|LargeIcons|Tiles|Thumbnails|FilmStrip  VIEW=Cycle,List,Details
 Set SORTBY=name|size|type|modified|attr|sortlist  SORTREVERSE=On|Off  FRIENDLYDATES=off|today|normal
 Set FLATVIEW=Toggle  HIDDEN=Toggle  TREE=Toggle  PANETREE=Toggle  TERMINALPANE=On|Off  PANEFRAMES=Toggle  VIEWPANE=Toggle  METAPANE=Toggle  TERMINAL=Toggle  GENERALTERMINAL=Toggle  CMDLINE=Toggle  FILTER=Show
+Set SFTP=Menu|Off|"profile name"
 Set NAVLOCK=Toggle  CHECKBOXMODE=Toggle  EXPANDABLEFOLDERS=Toggle  GRIDLINESH=Toggle  STATUSBAR=Toggle  STATE=Source|Dest
 Set DELRECYCLEBIN=Toggle  DELRECYCLECONFIRM=Toggle  UTILITY=Find|Sync|Dupe|Jobs|Log|Off[,Toggle]
 Set LOCKBARS=Toggle  HOVERINFO=Toggle
 Image CONVERT[=png] [ROTATE=90] [WIDTH=n] [HEIGHT=n] [PRESERVEASPECTRATIO] [HERE] [REPLACE] [PRESERVEDATE] [ADDSUFFIX]
 Show [SLIDESHOW] [FULLSCREEN]     SetAttr [MODIFIED=now]         Split      Join      Find      Play
 Print FOLDER [TO=clip]            Recent [CLEAR]                 Close [PROGRAM=confirm]
-Prefs [LAYOUTSAVE] [LAYOUTLIST] [LAYOUTEDIT] [EXPORT] [IMPORT]
+Prefs [LAYOUTSAVE] [LAYOUTLIST] [LAYOUTEDIT] [EXPORT] [IMPORT] [SFTP]
 Toolbar NAME="Favorites Bar" TOGGLE | LIST | RESETDEFAULTS
 Clipboard COPY | CUT | PASTE | COPYNAMES[=nopaths]
 GetSizes [HASH=sha256]            Archive        Extract        Properties

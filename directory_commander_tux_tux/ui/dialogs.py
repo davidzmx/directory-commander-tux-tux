@@ -3,16 +3,19 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import Qt, QUrl, Signal
-from PySide6.QtGui import QColor, QDesktopServices
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QFrame, QGroupBox, QScrollArea,
                                QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton,
                                QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from ..core import bar_buttons, fsops, i18n, pane_colors, rename, shells, styles
-from ..core.config import config_dir
+from ..core.config import GENERATION_MARK_KINDS, THUMB_SIZES, config_dir
+from ..core.exiftool import find_exiftool
+from ..core.media_info import find_tool
 from ..core.i18n import tr
 from ..core.listing import Entry, format_size, format_time
+from .open_external import open_externally
 from .background import run_bg
 from .bar_buttons_page import BarButtonsPage
 from . import theme
@@ -22,6 +25,7 @@ from .context_menu_pages import ContextMenuPages
 from .favorites_pages import FavoritesPage, RecentPage, FrequentFoldersPage, FrequentPointsPage
 from .preference_pages import PreferencePages
 from .sessions_page import SessionsPage
+from .sftp import SftpPage
 from .system_pages import ComparePage, FileManagerPage, GitPage
 from .tab_settings_pages import TabSettingsPages
 
@@ -205,6 +209,20 @@ class SetAttrDialog(QDialog):
         return result
 
 
+def _scrolling_page(content) -> QScrollArea:
+    """Una página que, si no cabe, se desplaza hacia abajo en lugar de agrandar la ventana. A lo ancho no: se ajusta a la ventana."""
+    inner = QWidget()
+    layout = QVBoxLayout(inner)
+    layout.addLayout(content)
+    layout.addStretch(1)
+    scroll = QScrollArea()
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QFrame.Shape.NoFrame)
+    scroll.setWidget(inner)
+    return scroll
+
+
 class PreferencesDialog(QDialog):
     applied = Signal()  # se pulsó Aplicar: los cambios ya están en la configuración
 
@@ -212,7 +230,8 @@ class PreferencesDialog(QDialog):
         super().__init__(parent)
         self.config = config
         self.setWindowTitle(tr("Preferencias"))
-        self.resize(900, 640)
+        screen = self.screen().availableGeometry() if self.screen() is not None else None
+        self.resize(900, min(640, screen.height() - 80) if screen is not None else 640)  # que se vean los botones de abajo
         self.theme = QComboBox()
         for label, value in ((tr("Oscuro"), "dark"), (tr("Claro"), "light"), (tr("Según el escritorio"), "auto")):
             self.theme.addItem(label, value)
@@ -238,6 +257,69 @@ class PreferencesDialog(QDialog):
         self.dest_tint.setChecked(config.get("dest_tint", True))
         self.confirm = QCheckBox(tr("Confirmar antes de eliminar"))
         self.confirm.setChecked(config.get("confirm_delete", True))
+        self.general_status_bar = QCheckBox(tr("Mostrar la barra de estado general, abajo de la ventana"))
+        self.general_status_bar.setToolTip(tr("El archivo bajo el ratón o lo seleccionado en el panel activo, el espacio libre y los avisos. "
+                                              "Sin ella, los avisos van en la fila de estado del panel activo"))
+        self.general_status_bar.setChecked(config.get("general_status_bar", True) is not False)
+        self.pane_free_space = QComboBox()
+        for label, value in ((tr("Solo en los paneles con una carpeta de otro disco"), "other_disk"), (tr("En todos los paneles"), "always"),
+                             (tr("En ninguno: solo en la barra general"), "never")):
+            self.pane_free_space.addItem(label, value)
+        self.pane_free_space.setCurrentIndex(max(0, self.pane_free_space.findData(config.get("pane_free_space", "other_disk"))))
+        self.pane_free_space.setToolTip(tr("Con la barra de estado general, dónde más se muestra el espacio libre. Sin ella, se ve en todos los paneles"))
+        self.general_status_bar.toggled.connect(self.pane_free_space.setEnabled)
+        self.pane_free_space.setEnabled(self.general_status_bar.isChecked())
+        self.list_column_chars = QSpinBox()
+        self.list_column_chars.setRange(0, 300)
+        self.list_column_chars.setSuffix(tr(" caracteres"))
+        self.list_column_chars.setSpecialValueText(tr("Sin límite"))
+        self.list_column_chars.setToolTip(tr("Un nombre más largo se recorta por el medio, con «…», y se ve entero al pasar el ratón"))
+        chars = config.get("list_column_chars", 50)
+        self.list_column_chars.setValue(chars if isinstance(chars, int) and not isinstance(chars, bool) else 50)
+        self.thumbnail_size = QComboBox()
+        for size in THUMB_SIZES:
+            self.thumbnail_size.addItem(tr("{size} píxeles", size=size), size)
+        self.thumbnail_size.setCurrentIndex(max(0, self.thumbnail_size.findData(config.get("thumbnail_size", 128))))
+        self.video_thumbnails = QComboBox()
+        for label, value in ((tr("Cuatro fotogramas y la duración"), "four"), (tr("Un fotograma y la duración"), "one"), (tr("Ninguna: el icono"), "off")):
+            self.video_thumbnails.addItem(label, value)
+        self.video_thumbnails.setCurrentIndex(max(0, self.video_thumbnails.findData(config.get("video_thumbnails", "four"))))
+        self.video_thumbnails.setToolTip(tr("Los fotogramas los saca FFmpeg, si está instalado: cada vídeo tarda alrededor de un segundo, en segundo plano"))
+        self.folder_previews = QCheckBox(tr("En las miniaturas, mostrar en cada carpeta sus primeras imágenes"))
+        self.folder_previews.setChecked(config.get("folder_previews") is not False)
+        self.generation_marks = QCheckBox(tr("Marcar si una imagen o un vídeo lleva su prompt (P) o su workflow (W)"))
+        self.generation_marks.setToolTip(tr("También se muestran y ocultan con su botón de la barra. Se leen sus metadatos en segundo plano; "
+                                            "el prompt, el programa y sus ajustes se ven en el panel de metadatos"))
+        self.generation_marks.setChecked(config.get("show_generation_marks") is True)
+        self.generation_kinds = QComboBox()
+        for label, value in ((tr("Las dos: prompt (P) y workflow (W)"), "both"), (tr("Solo la del prompt (P)"), "prompt"), (tr("Solo la del workflow (W)"), "workflow")):
+            self.generation_kinds.addItem(label, value)
+        kinds = config.get("generation_mark_kinds", "both")
+        self.generation_kinds.setCurrentIndex(max(0, self.generation_kinds.findData(kinds if kinds in GENERATION_MARK_KINDS else "both")))
+        self.generation_marks.toggled.connect(self.generation_kinds.setEnabled)
+        self.generation_kinds.setEnabled(self.generation_marks.isChecked())
+        self.default_sort = QComboBox()
+        for label, value in ((tr("Tipo"), "type"), (tr("Nombre"), "name"), (tr("Tamaño"), "size"), (tr("Fecha de modificación"), "modified")):
+            self.default_sort.addItem(label, value)
+        self.default_sort.setCurrentIndex(max(0, self.default_sort.findData(config.get("default_sort", "type"))))
+        self.default_sort.setToolTip(tr("Con qué orden empieza cada pestaña. Las carpetas van siempre primero; dentro de cada tipo, por nombre"))
+        self.default_sort_reverse = QCheckBox(tr("Al revés"))
+        self.default_sort_reverse.setChecked(config.get("default_sort_reverse") is True)
+        self.remember_folder_views = QCheckBox(tr("Recordar la vista y el orden de cada carpeta"))
+        self.remember_folder_views.setToolTip(tr("Al volver a una carpeta se ve como la dejaste. Una carpeta sin nada recordado sigue la vista de la pestaña"))
+        self.remember_folder_views.setChecked(config.get("remember_folder_views") is not False)
+        self.verify_copies = QCheckBox(tr("Comprobar cada copia comparándola con el original (más lento)"))
+        self.verify_copies.setToolTip(tr("Al terminar cada archivo se vuelve a leer del disco y se compara su hash con el del original. Si no son iguales, "
+                                         "la copia se descarta y, al mover, el original se conserva. Para una sola copia, «Copiar a destino y comprobar la copia» "
+                                         "del botón Copiar"))
+        self.verify_copies.setChecked(config.get("verify_copies") is True)
+        self.confirm_exit = QCheckBox(tr("Confirmar antes de salir del programa"))
+        self.confirm_exit.setToolTip(tr("Con conexiones SSH/SFTP abiertas se pregunta siempre, porque se cerrarán"))
+        self.confirm_exit.setChecked(config.get("confirm_exit", True) is not False)
+        self.single_click = QCheckBox(tr("Abrir archivos y carpetas con un clic; seleccionar con la marca + de su icono"))
+        self.single_click.setToolTip(tr("Al pasar el ratón por un archivo aparece un + sobre su icono: púlsalo para seleccionarlo. "
+                                        "Ctrl y Mayús siguen seleccionando como siempre"))
+        self.single_click.setChecked(config.get("single_click") is True)
         self.hover_info = QCheckBox(tr("Mostrar información al pasar el ratón por un archivo"))
         self.hover_info.setChecked(config.get("hover_info", True))
         self.level_colors = QCheckBox(tr("Mostrar en otro color los niveles de las carpetas desplegadas"))
@@ -250,6 +332,14 @@ class PreferencesDialog(QDialog):
         for label, value in ((tr("Visor interno"), "viewer"), (tr("Aplicación predeterminada del sistema"), "system")):
             self.open_videos.addItem(label, value)
         self.open_videos.setCurrentIndex(max(0, self.open_videos.findData(config.get("open_videos", "viewer"))))
+        self.open_markdown = QComboBox()
+        for label, value in ((tr("Editor interno, con el texto y cómo se ve"), "editor"), (tr("Aplicación predeterminada del sistema"), "system")):
+            self.open_markdown.addItem(label, value)
+        self.open_markdown.setCurrentIndex(max(0, self.open_markdown.findData(config.get("open_markdown", "editor"))))
+        self.open_json = QComboBox()
+        for label, value in ((tr("Visor interno: árbol, formateado u original"), "viewer"), (tr("Aplicación predeterminada del sistema"), "system")):
+            self.open_json.addItem(label, value)
+        self.open_json.setCurrentIndex(max(0, self.open_json.findData(config.get("open_json", "viewer"))))
         self.open_archives = QComboBox()
         for label, value in ((tr("Aplicación predeterminada del sistema"), "system"), (tr("Explorarlos aquí, como una carpeta"), "browse")):
             self.open_archives.addItem(label, value)
@@ -259,26 +349,46 @@ class PreferencesDialog(QDialog):
         self.panel_order.addItem(tr("Metadatos arriba y visor abajo"), False)
         self.panel_order.setCurrentIndex(0 if config.get("viewer_above_metadata", True) else 1)
         self.ffmpeg_dir = QLineEdit(config.get("ffmpeg_dir", ""))
-        self.ffmpeg_dir.setPlaceholderText(tr("Opcional: carpeta con ffmpeg, para ver un fotograma de los vídeos"))
+        self.ffmpeg_dir.setPlaceholderText(tr("Opcional: carpeta con ffmpeg, para ver fotogramas de los vídeos"))
         browse = QPushButton(tr("Elegir…"))
         browse.clicked.connect(self._choose_ffmpeg)
         ffmpeg_row = QHBoxLayout()
         ffmpeg_row.addWidget(self.ffmpeg_dir, 1)
         ffmpeg_row.addWidget(browse)
-        form = QFormLayout()
-        form.addRow(tr("Idioma:"), language_row)
-        form.addRow(tr("Tema:"), self.theme)
-        form.addRow("", self.dest_tint)
-        form.addRow("", self.confirm)
-        form.addRow("", self.hover_info)
-        form.addRow("", self.level_colors)
-        form.addRow(tr("Abrir las imágenes con:"), self.open_images)
-        form.addRow(tr("Abrir los vídeos con:"), self.open_videos)
-        form.addRow(tr("Abrir los comprimidos con:"), self.open_archives)
+        basics, opening, colors, programs = (QFormLayout() for _ in range(4))
+        # Vistas y miniaturas, en grupos: sin ellos, lo de debajo de «Marcas de IA:» parecía parte de ellas.
+        in_list, in_thumbnails, marks, browsing = (QFormLayout() for _ in range(4))
+        basics.addRow(tr("Idioma:"), language_row)
+        basics.addRow(tr("Tema:"), self.theme)
+        colors.addRow("", self.dest_tint)
+        basics.addRow("", self.confirm)
+        basics.addRow("", self.confirm_exit)
+        basics.addRow("", self.verify_copies)
+        basics.addRow("", self.general_status_bar)
+        basics.addRow(tr("Espacio libre en los paneles:"), self.pane_free_space)
+        in_list.addRow(tr("Ancho máximo de las columnas de la lista:"), self.list_column_chars)
+        in_list.addRow(self.level_colors)
+        sort_row = QHBoxLayout()
+        sort_row.addWidget(self.default_sort, 1)
+        sort_row.addWidget(self.default_sort_reverse)
+        in_list.addRow(tr("Orden al abrir una pestaña:"), sort_row)
+        in_list.addRow(self.remember_folder_views)
+        in_thumbnails.addRow(tr("Tamaño:"), self.thumbnail_size)
+        in_thumbnails.addRow(tr("De los vídeos:"), self.video_thumbnails)
+        in_thumbnails.addRow(self.folder_previews)
+        marks.addRow(self.generation_marks)  # las de git, en Integración con Git
+        marks.addRow(tr("Cuáles:"), self.generation_kinds)
+        browsing.addRow(self.single_click)
+        browsing.addRow(self.hover_info)
+        opening.addRow(tr("Abrir las imágenes con:"), self.open_images)
+        opening.addRow(tr("Abrir los vídeos con:"), self.open_videos)
+        opening.addRow(tr("Abrir los Markdown con:"), self.open_markdown)
+        opening.addRow(tr("Abrir los JSON con:"), self.open_json)
+        opening.addRow(tr("Abrir los comprimidos con:"), self.open_archives)
         self.unfold_archives = QCheckBox(tr("Desplegar los comprimidos en la lista, como las carpetas"))
         self.unfold_archives.setChecked(bool(config.get("unfold_archives", True)))
-        form.addRow("", self.unfold_archives)
-        form.addRow(tr("Con el visor y los metadatos a la vez:"), self.panel_order)
+        opening.addRow("", self.unfold_archives)
+        opening.addRow(tr("Con el visor y los metadatos a la vez:"), self.panel_order)
         self._custom_schemes = pane_colors.clean_customs(config.get("pane_color_customs"))
         self.pane_scheme = QComboBox()
         for key, (label, _colors) in pane_colors.BUILTIN_SCHEMES.items():
@@ -295,7 +405,7 @@ class PreferencesDialog(QDialog):
         scheme_row.addWidget(self.pane_scheme, 1)
         scheme_row.addWidget(new_scheme)
         scheme_row.addWidget(self.delete_scheme)
-        form.addRow(tr("Colores de los paneles:"), scheme_row)
+        colors.addRow(tr("Colores de los paneles:"), scheme_row)
         self.pane_colors = {role: ColorButton(title, "", "#000000") for role, title in (("source", tr("Panel activo")), ("dest", tr("Panel de destino")), ("other", tr("Otros paneles")))}
         colors_row = QHBoxLayout()
         for role, button in self.pane_colors.items():
@@ -303,7 +413,7 @@ class PreferencesDialog(QDialog):
             colors_row.addWidget(button)
             button.chosen.connect(lambda r=role: self._scheme_color_chosen(r))
         colors_row.addStretch(1)
-        form.addRow("", colors_row)
+        colors.addRow("", colors_row)
         self.path_pale_light = QCheckBox(tr("En el tema claro"))
         self.path_pale_light.setChecked(bool(config.get("pane_path_pale_light", False)))
         self.path_pale_dark = QCheckBox(tr("En el tema oscuro"))
@@ -312,7 +422,7 @@ class PreferencesDialog(QDialog):
         pale_row.addWidget(self.path_pale_light)
         pale_row.addWidget(self.path_pale_dark)
         pale_row.addStretch(1)
-        form.addRow(tr("Ruta más tenue que la barra:"), pale_row)
+        colors.addRow(tr("Ruta más tenue que la barra:"), pale_row)
         self.frames_on = QCheckBox(tr("Mostrar"))
         self.frames_on.setChecked(config.get("pane_frames_on", True) is not False)
         self.frames_on.setToolTip(tr("Un borde de color alrededor de cada panel, su terminal y su árbol, para ver qué va con qué. "
@@ -329,7 +439,7 @@ class PreferencesDialog(QDialog):
         for widget in (self.frames_on, self.frame_mode, self.frames_after, self.frames_after_label):
             frame_row.addWidget(widget)
         frame_row.addStretch(1)
-        form.addRow(tr("Marco de color de cada panel:"), frame_row)
+        colors.addRow(tr("Marco de color de cada panel:"), frame_row)
         self.frame_width = self._frame_spin(1, pane_colors.MAX_FRAME_WIDTH, " px", pane_colors.frame_width(config.get("pane_frame_width")))
         self.frame_active_width = self._frame_spin(1, pane_colors.MAX_FRAME_WIDTH, " px",
                                                    pane_colors.frame_width(config.get("pane_frame_active_width"), pane_colors.DEFAULT_ACTIVE_FRAME_WIDTH))
@@ -344,7 +454,7 @@ class PreferencesDialog(QDialog):
         sizes_row.addWidget(self.frame_dim_on)
         sizes_row.addWidget(self.frame_dim)
         sizes_row.addStretch(1)
-        form.addRow("", sizes_row)
+        colors.addRow("", sizes_row)
         chosen = pane_colors.clean_frame_colors(config.get("pane_frame_colors"))
         self.frame_colors = [ColorButton(tr("Panel {number}", number=index + 1), chosen[index], default) for index, default in enumerate(pane_colors.FRAME_COLORS)]
         self.reset_frame_colors = QPushButton(tr("Restablecer"))
@@ -355,18 +465,26 @@ class PreferencesDialog(QDialog):
             frame_colors_row.addWidget(button)
         frame_colors_row.addWidget(self.reset_frame_colors)
         frame_colors_row.addStretch(1)
-        form.addRow("", frame_colors_row)
+        colors.addRow("", frame_colors_row)
         self.frame_mode.currentIndexChanged.connect(self._show_frame_options)
         self.frames_on.toggled.connect(self._show_frame_options)
         self.frame_dim_on.toggled.connect(self._show_frame_options)
         self._show_frame_options()
         self.path_folder_menus = QCheckBox(tr("Mostrar las subcarpetas al pulsar el › de la ruta"))
         self.path_folder_menus.setChecked(bool(config.get("path_folder_menus", False)))
-        form.addRow("", self.path_folder_menus)
+        browsing.addRow(self.path_folder_menus)
+        views = QVBoxLayout()
+        for title, form in ((tr("Lista y detalles"), in_list), (tr("Miniaturas"), in_thumbnails), (tr("Marcas de IA"), marks),
+                            (tr("Ratón y ruta"), browsing)):
+            box = QGroupBox(title)
+            box.setLayout(form)
+            views.addWidget(box)
         self.theme.currentIndexChanged.connect(self._show_pane_scheme)
         self.pane_scheme.currentIndexChanged.connect(self._show_pane_scheme)
         self._show_pane_scheme()
-        form.addRow("FFmpeg:", ffmpeg_row)
+        programs.addRow("FFmpeg:", ffmpeg_row)
+        self.ffmpeg_found = self._program_status(self.ffmpeg_dir, lambda folder: find_tool("ffmpeg", folder), "ffmpeg")
+        programs.addRow("", self.ffmpeg_found)
         self.exiftool_dir = QLineEdit(config.get("exiftool_dir", ""))
         self.exiftool_dir.setPlaceholderText(tr("Carpeta con exiftool, para el panel de metadatos. Vacío: se busca en el PATH"))
         browse_exiftool = QPushButton(tr("Elegir…"))
@@ -374,7 +492,9 @@ class PreferencesDialog(QDialog):
         exiftool_row = QHBoxLayout()
         exiftool_row.addWidget(self.exiftool_dir, 1)
         exiftool_row.addWidget(browse_exiftool)
-        form.addRow("ExifTool:", exiftool_row)
+        programs.addRow("ExifTool:", exiftool_row)
+        self.exiftool_found = self._program_status(self.exiftool_dir, find_exiftool, "exiftool")
+        programs.addRow("", self.exiftool_found)
         self.terminal_shell = QComboBox()
         for shell in shells.available_shells():
             self.terminal_shell.addItem(shell.label, shell.key)
@@ -388,25 +508,24 @@ class PreferencesDialog(QDialog):
         terminal_row.addWidget(self.terminal_shell)
         terminal_row.addWidget(self.terminal_command, 1)
         terminal_row.addWidget(self.browse_terminal)
-        form.addRow(tr("Terminal:"), terminal_row)
-        form.addRow("", QLabel(tr("Con esta se abren las terminales. Cada una se puede cambiar después con la lista de su barra de título.")))
+        programs.addRow(tr("Terminal:"), terminal_row)
+        programs.addRow("", QLabel(tr("Con esta se abren las terminales. Cada una se puede cambiar después con la lista de su barra de título.")))
         self.general_terminal_full_width = QCheckBox(tr("Con los paneles en vertical, la terminal general ocupa todo el ancho de la ventana, también bajo el árbol de carpetas"))
         self.general_terminal_full_width.setChecked(bool(config.get("general_terminal_full_width", False)))
-        form.addRow("", self.general_terminal_full_width)
+        programs.addRow("", self.general_terminal_full_width)
         self.find_place = QComboBox()
         self.find_place.addItem(tr("En una ventana aparte"), "window")
         self.find_place.addItem(tr("Abajo, en la ventana principal"), "bottom")
         self.find_place.setCurrentIndex(max(0, self.find_place.findData(config.get("find_panel_place", "window"))))
-        form.addRow(tr("Panel de buscar:"), self.find_place)
+        basics.addRow(tr("Panel de buscar:"), self.find_place)
         self.terminal_shell.currentIndexChanged.connect(self._terminal_choice_changed)
         self._terminal_choice_changed()
-        general = QWidget()
-        general_layout = QVBoxLayout(general)
-        general_layout.addLayout(form)
-        general_layout.addStretch(1)
         self.tabs = TabSettingsPages(config.get("folder_tabs"))
         self.pages = PreferencePages()
-        self.pages.addTab(general, tr("General"))
+        # General, en varias páginas: en una sola no cabía en una pantalla normal.
+        for title, form in ((tr("Idioma y avisos"), basics), (tr("Vistas y miniaturas"), views), (tr("Abrir archivos"), opening),
+                            (tr("Colores y marcos"), colors), (tr("Programas"), programs)):
+            self.pages.addTab(_scrolling_page(form), title, tr("General"))
         for title, page in self.tabs.pages:
             self.pages.addTab(page, title, tr("Pestañas"))
         self.menus = ContextMenuPages(config, sample_folder, sample_items)
@@ -427,9 +546,11 @@ class PreferencesDialog(QDialog):
         self.pages.addTab(self.points_page, tr("Puntaje"), tr("Rutas frecuentes"))
         self.sessions_page = SessionsPage(config)
         self.pages.addTab(self.sessions_page, tr("Sesiones"))
+        self.sftp_page = SftpPage(config)
+        self.pages.addTab(self.sftp_page, tr("SSH/SFTP"))
         self.git_page = GitPage(config)
         self.git_page.barRequested.connect(lambda: self.show_bars(bar_buttons.GIT))
-        self.pages.addTab(self.git_page, tr("Git"))
+        self.pages.addTab(self.git_page, tr("Integración con Git"))
         self.compare_page = ComparePage(config)
         self.pages.addTab(self.compare_page, tr("Comparar archivos"))
         self.file_manager_page = FileManagerPage(config)
@@ -472,13 +593,16 @@ class PreferencesDialog(QDialog):
     def show_sessions(self) -> None:
         self.pages.setCurrentWidget(self.sessions_page)
 
+    def show_sftp(self) -> None:
+        self.pages.setCurrentWidget(self.sftp_page)
+
     def _page_changed(self, _index: int) -> None:
         if self.pages.currentWidget() is self.menus.shell_page:
             self.menus.load_shell_options()
 
     def _open_language_folder(self) -> None:
         os.makedirs(self.language_folder, exist_ok=True)
-        QDesktopServices.openUrl(QUrl.fromLocalFile(self.language_folder))
+        open_externally(self.language_folder)
 
     def _create_translation(self) -> None:
         try:
@@ -489,7 +613,29 @@ class PreferencesDialog(QDialog):
         QMessageBox.information(self, tr("Crear traducción"), tr(
             "Se creó {name}.\nCambia su nombre y su código, escribe las traducciones y vuelve a abrir las preferencias. "
             "Lo que dejes vacío se mostrará en español.", name=os.path.basename(path)))
-        QDesktopServices.openUrl(QUrl.fromLocalFile(self.language_folder))
+        open_externally(self.language_folder)
+
+    @staticmethod
+    def _program_status(field: QLineEdit, finder, name: str) -> QLabel:
+        """Debajo de la carpeta de un programa, cuál se está usando: el de esa carpeta o, si está vacía, el que se encontró en el sistema."""
+        label = QLabel()
+        label.setWordWrap(True)
+        label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+
+        def update() -> None:
+            folder = field.text().strip()
+            found = finder(folder)
+            if found is None:
+                label.setText(tr("No se encontró {name} en el sistema", name=name) if not folder else
+                              tr("No se encontró {name} en esa carpeta ni en el sistema", name=name))
+            elif folder and os.path.dirname(found) == os.path.normpath(folder):
+                label.setText(tr("Se usa {path}", path=found))
+            else:
+                label.setText(tr("Se usa el del sistema: {path}", path=found))
+
+        field.textChanged.connect(update)
+        update()
+        return label
 
     def _choose_ffmpeg(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, tr("Carpeta que contiene ffmpeg"), self.ffmpeg_dir.text())
@@ -569,10 +715,26 @@ class PreferencesDialog(QDialog):
         config["theme"] = self.theme.currentData()
         config["dest_tint"] = self.dest_tint.isChecked()
         config["confirm_delete"] = self.confirm.isChecked()
+        config["confirm_exit"] = self.confirm_exit.isChecked()
+        config["verify_copies"] = self.verify_copies.isChecked()
+        config["general_status_bar"] = self.general_status_bar.isChecked()
+        config["pane_free_space"] = self.pane_free_space.currentData()
+        config["list_column_chars"] = self.list_column_chars.value()
+        config["thumbnail_size"] = self.thumbnail_size.currentData()
+        config["video_thumbnails"] = self.video_thumbnails.currentData()
+        config["folder_previews"] = self.folder_previews.isChecked()
+        config["show_generation_marks"] = self.generation_marks.isChecked()
+        config["generation_mark_kinds"] = self.generation_kinds.currentData()
+        config["remember_folder_views"] = self.remember_folder_views.isChecked()
+        config["default_sort"] = self.default_sort.currentData()
+        config["default_sort_reverse"] = self.default_sort_reverse.isChecked()
+        config["single_click"] = self.single_click.isChecked()
         config["hover_info"] = self.hover_info.isChecked()
         config["open_images"] = self.open_images.currentData()
         config["open_videos"] = self.open_videos.currentData()
         config["open_archives"] = self.open_archives.currentData()
+        config["open_markdown"] = self.open_markdown.currentData()
+        config["open_json"] = self.open_json.currentData()
         config["tree_level_colors"] = self.level_colors.isChecked()
         config["viewer_above_metadata"] = bool(self.panel_order.currentData())
         config["shell_menu_items"] = self.shell_items.isChecked()
@@ -596,6 +758,7 @@ class PreferencesDialog(QDialog):
         config["find_panel_place"] = self.find_place.currentData()
         self.compare_page.apply_to(config)
         self.git_page.apply_to(config)
+        self.sftp_page.apply_to(config)
         self.file_manager_page.apply_to(config)
         config["unfold_archives"] = self.unfold_archives.isChecked()
         config["path_folder_menus"] = self.path_folder_menus.isChecked()

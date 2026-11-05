@@ -1297,4 +1297,4 @@ def test_an_old_toolbar_gets_the_frames_button_next_to_the_general_terminal(tmp_
     toolbar = [{"label": "Otro", "commands": ["Go UP"]}, {"label": "Terminal general", "commands": ["Set GENERALTERMINAL=Toggle"]}, {"label": "Último", "commands": ["Go BACK"]}]
     (tmp_path / "config.json").write_text(json.dumps({"config_version": 17, "toolbar": toolbar}), encoding="utf-8")
     config = Config(str(tmp_path))
-    assert [item["commands"][0] for item in config["toolbar"]] == ["Go UP", "Set GENERALTERMINAL=Toggle", "Set PANEFRAMES=Toggle", "Go BACK"]
+    assert [item["commands"][0] for item in config["toolbar"]] == ["Go UP", "Set GENERALTERMINAL=Toggle", "Set PANEFRAMES=Toggle", "Go BACK", "Set GENERATIONMARKS=Toggle"]

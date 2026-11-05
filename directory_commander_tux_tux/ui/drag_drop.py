@@ -7,14 +7,37 @@ from PySide6.QtCore import QMimeData, QPoint, Qt, QUrl
 from PySide6.QtGui import QColor, QDrag, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QWidget
 
-from ..core import fsops
+from ..core import fsops, remote
 
 DRAG_ICON = 32
 _own_drag_with_right_button = False
 
 
+def path_url(path: str) -> QUrl:
+    """La dirección de un elemento para arrastrarlo: un archivo del equipo o, de un panel remoto, una sftp://."""
+    if not remote.is_remote(path):
+        return QUrl.fromLocalFile(path)
+    user, host, port = remote.server_parts(remote.server_of(path))
+    url = QUrl()
+    url.setScheme("sftp")
+    url.setUserName(user)
+    url.setHost(host)
+    url.setPort(port)
+    url.setPath(remote.inner_of(path), QUrl.ParsingMode.DecodedMode)
+    return url
+
+
+def url_path(url: QUrl) -> str | None:
+    if url.isLocalFile():
+        return os.path.normpath(url.toLocalFile())
+    if url.scheme() == "sftp" and url.host():
+        server = remote.server_key(url.userName(), url.host(), url.port(remote.DEFAULT_PORT))
+        return remote.make_path(server, url.path(QUrl.ComponentFormattingOption.FullyDecoded) or "/")
+    return None
+
+
 def dropped_paths(mime) -> list[str]:
-    return [os.path.normpath(url.toLocalFile()) for url in mime.urls() if url.isLocalFile()] if mime.hasUrls() else []
+    return [path for path in (url_path(url) for url in mime.urls()) if path] if mime.hasUrls() else []
 
 
 class DropDecider:
@@ -116,5 +139,5 @@ def start_drag(source: QWidget, mime: QMimeData, icon: QIcon = QIcon()) -> None:
 
 def folder_mime(path: str) -> QMimeData:
     mime = QMimeData()
-    mime.setUrls([QUrl.fromLocalFile(path)])
+    mime.setUrls([path_url(path)])
     return mime

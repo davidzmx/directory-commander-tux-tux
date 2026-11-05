@@ -3,20 +3,23 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import QPoint, Qt, QTimer
+from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QFont, QFontDatabase, QGuiApplication, QPixmap
-from PySide6.QtWidgets import (QFormLayout, QHeaderView, QLabel, QMenu, QPlainTextEdit, QSizePolicy, QStackedWidget, QTreeWidget, QTreeWidgetItem,
+from PySide6.QtWidgets import (QButtonGroup, QFormLayout, QHBoxLayout, QHeaderView, QLabel, QMenu, QPlainTextEdit, QSizePolicy, QStackedWidget, QStyledItemDelegate,
+                               QTextBrowser, QToolButton, QTreeWidget, QTreeWidgetItem,
                                QVBoxLayout, QWidget)
 
-from ..core import archive, media_info
+from ..core import ai_metadata, archive, media_info
 from ..core.exiftool import DOWNLOAD_URL, find_exiftool, language_for, read_metadata
 from ..core.listing import Entry, format_size, format_time
 from .background import run_bg
+from .code_view import CodeHighlighter, JsonTree, MarkdownView, is_json, is_markdown, json_lexer, lexer_for, pretty_json
 from .icons import themed
 from .model import IMAGE_EXTENSIONS, image_reader
 from ..core.i18n import current_language, tr
 
 TEXT_LIMIT = 256 * 1024
+JSON_LIMIT = 16 * 1024 * 1024  # para verlo ordenado o en árbol hay que leerlo entero
 WRAP_ANYWHERE_FROM = 24  # un nombre sin espacios más largo no cabría en un visor estrecho
 MEDIA_DELAY_MS = 150  # al recorrer la lista con el teclado no se abre cada archivo por el que se pasa
 METADATA_DELAY_MS = 120
@@ -30,6 +33,9 @@ def shrink_freely(label: QLabel) -> None:
 
 
 class PreviewPane(QWidget):
+    editRequested = Signal(str)  # abrir el Markdown que se ve en su editor
+    jsonRequested = Signal(str)  # abrir el JSON que se ve en su ventana
+
     def __init__(self, config=None, parent=None) -> None:
         super().__init__(parent)
         self.config = {} if config is None else config
@@ -51,15 +57,50 @@ class PreviewPane(QWidget):
         self.image.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.text = QPlainTextEdit(readOnly=True)
         self.text.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        self.highlighter = CodeHighlighter(self.text.document())
+        self.markdown = MarkdownView()
+        self.json_tree = JsonTree()
+        self._source_text = ""  # el texto tal como está en el archivo: «Original» y «Código»
+        self._json_data = None
+        self._json_text = ""
+        self._entry_path = ""
+        # Formas de ver un Markdown o un JSON: se muestran solo con ellos.
+        self.modes = QWidget()
+        modes_row = QHBoxLayout(self.modes)
+        modes_row.setContentsMargins(6, 0, 6, 2)
+        modes_row.setSpacing(2)
+        self.mode_group = QButtonGroup(self)
+        self.mode_buttons: dict[str, QToolButton] = {}
+        for key, label in (("formatted", tr("Formateado")), ("tree", tr("Árbol")), ("source", tr("Original"))):
+            button = QToolButton(text=label, checkable=True, autoRaise=True)
+            self.mode_group.addButton(button)
+            self.mode_buttons[key] = button
+            modes_row.addWidget(button)
+            button.clicked.connect(lambda _checked=False, k=key: self._show_mode(k))
+        modes_row.addStretch(1)
+        self.edit_button = QToolButton(text=tr("Editar"), autoRaise=True)
+        self.edit_button.setIcon(themed("rename"))
+        self.edit_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.edit_button.setToolTip(tr("Abrir en el editor de Markdown, con el texto a la izquierda y cómo se ve a la derecha"))
+        self.edit_button.clicked.connect(lambda: self.editRequested.emit(self._entry_path))
+        modes_row.addWidget(self.edit_button)
+        self.window_button = QToolButton(text=tr("Abrir en ventana"), autoRaise=True)
+        self.window_button.setIcon(themed("show"))
+        self.window_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.window_button.setToolTip(tr("Ver el JSON en su propia ventana, más grande, con búsqueda"))
+        self.window_button.clicked.connect(lambda: self.jsonRequested.emit(self._entry_path))
+        modes_row.addWidget(self.window_button)
+        self.modes.hide()
         self.info = QLabel(alignment=Qt.AlignmentFlag.AlignCenter)
         self.info.setWordWrap(True)
         shrink_freely(self.info)
         self.stack = QStackedWidget()
-        for widget in (self.info, self.image, self.text):
+        for widget in (self.info, self.image, self.text, self.markdown, self.json_tree):
             self.stack.addWidget(widget)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.title)
+        layout.addWidget(self.modes)
         layout.addWidget(self.stack, 1)
         self.show_entry(None)
 
@@ -69,6 +110,7 @@ class PreviewPane(QWidget):
         self._generation += 1
         generation = self._generation
         self._pixmap = None
+        self.modes.hide()
         self._stop_media()
         if entry is None:
             self.title.setText("")
@@ -94,7 +136,8 @@ class PreviewPane(QWidget):
             self.stack.setCurrentWidget(self.info)
             run_bg(lambda _s: _read_image(entry.path), lambda img: self._show_image(generation, img, entry))
             return
-        run_bg(lambda _s: _read_text(entry.path), lambda txt: self._show_text(generation, txt, entry),
+        limit = JSON_LIMIT if is_json(entry.name) else TEXT_LIMIT
+        run_bg(lambda _s: _read_text(entry.path, limit), lambda txt: self._show_text(generation, txt, entry),
                lambda exc: self._show_info(generation, str(exc)))
 
     def _show_member(self, generation: int, entry: Entry) -> None:
@@ -182,7 +225,42 @@ class PreviewPane(QWidget):
         if text is None:
             self._show_info(generation, tr("{type_label}\nSin vista previa para este tipo de archivo", type_label=entry.type_label))
             return
+        self._source_text, self._entry_path = text, entry.path
+        self._json_data, self._json_text = None, ""
+        if is_json(entry.name):
+            try:
+                self._json_data, self._json_text = pretty_json(text)
+            except ValueError as exc:
+                self._json_text = ""
+                self.title.setText(self.title.text() + "<br>" + _escape(tr("No es un JSON válido: {error}", error=exc)))
+        markdown, json_ok = is_markdown(entry.name), bool(self._json_text)
+        self.mode_buttons["formatted"].setVisible(markdown or json_ok)
+        self.mode_buttons["tree"].setVisible(json_ok)
+        self.mode_buttons["source"].setText(tr("Código") if markdown else tr("Original"))
+        self.mode_buttons["source"].setVisible(markdown or json_ok)
+        self.edit_button.setVisible(markdown and not entry.in_archive and os.path.isfile(entry.path))
+        self.window_button.setVisible(json_ok and not entry.in_archive and os.path.isfile(entry.path))
+        self.modes.setVisible(markdown or json_ok)
+        self._show_mode("formatted" if markdown or json_ok else "source")
+
+    def _show_mode(self, key: str) -> None:
+        """Formateado: el Markdown dibujado, o el JSON ordenado y con colores. Árbol: el JSON desplegable. Original o código: el archivo tal cual, con colores."""
+        self.mode_buttons[key].setChecked(True)
+        name = os.path.basename(self._entry_path)
+        if key == "formatted" and is_markdown(name):
+            self.stack.setCurrentWidget(self.markdown)  # antes de dibujarlo: las imágenes se ajustan a su ancho
+            self.markdown.path = self._entry_path
+            self.markdown.show_markdown(self._source_text, os.path.dirname(self._entry_path))
+            return
+        if key == "tree" and self._json_data is not None:
+            self.json_tree.show_data(self._json_data)
+            self.stack.setCurrentWidget(self.json_tree)
+            return
+        formatted_json = key == "formatted" and bool(self._json_text)
+        text = self._json_text if formatted_json else self._source_text
+        self.highlighter.set_lexer(None)  # sin colores viejos mientras se divide el nuevo
         self.text.setPlainText(text)
+        self.highlighter.set_lexer(json_lexer() if formatted_json else lexer_for(name, text))
         self.stack.setCurrentWidget(self.text)
 
     def _show_info(self, generation: int, message: str) -> None:
@@ -200,6 +278,20 @@ class PreviewPane(QWidget):
         self._fit_image()
 
 
+class _WrappedValues(QStyledItemDelegate):
+    """El valor ocupa las líneas que necesite al ancho de su columna: un prompt largo o una ruta se leen enteros, no recortados."""
+
+    def sizeHint(self, option, index) -> QSize:
+        size = super().sizeHint(option, index)
+        text = index.data() or ""
+        if index.column() != 1 or not text:
+            return size
+        width = max(40, self.parent().header().sectionSize(1) - 10)
+        flags = Qt.TextFlag.TextWordWrap | Qt.TextFlag.TextWrapAnywhere
+        height = option.fontMetrics.boundingRect(QRect(0, 0, width, 1_000_000), flags, text).height()
+        return QSize(size.width(), max(size.height(), height + 6))
+
+
 class MetadataPanel(QWidget):
     """Datos del elemento seleccionado. De un archivo los lee ExifTool, en segundo plano. Sin ExifTool, o en
     carpetas y dentro de comprimidos, se muestra lo que da el sistema de archivos."""
@@ -214,6 +306,7 @@ class MetadataPanel(QWidget):
         self.tree.setUniformRowHeights(False)
         self.tree.setTextElideMode(Qt.TextElideMode.ElideNone)
         self.tree.setIndentation(12)
+        self.tree.setItemDelegate(_WrappedValues(self.tree))
         self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.tree.header().setStretchLastSection(True)
         self.tree.header().sectionResized.connect(lambda *_sizes: self.tree.doItemsLayout())  # la altura de cada fila depende del ancho
@@ -259,7 +352,10 @@ class MetadataPanel(QWidget):
             top.setFont(0, font)
             top.setFirstColumnSpanned(True)
             for tag, value in rows:
-                QTreeWidgetItem(top, [tag, value]).setToolTip(1, value)
+                row = QTreeWidgetItem(top, [tag, value])
+                row.setToolTip(1, value if len(value) <= 1500 else value[:1500] + "…")
+                for column in (0, 1):  # con un valor de varias líneas, el dato va arriba, a su altura
+                    row.setTextAlignment(column, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
             top.setExpanded(True)
         self.tree.doItemsLayout()
 
@@ -270,6 +366,19 @@ class MetadataPanel(QWidget):
             rows.append((tr("Tamaño"), format_size(entry.effective_size)))
         rows += [(tr("Modificación"), format_time(entry.mtime)), (tr("Atributos"), entry.attrs)]
         return [(tr("Archivo"), [(tag, value) for tag, value in rows if value])]
+
+    @staticmethod
+    def generation_groups(path: str, extension: str) -> list[tuple[str, list[tuple[str, str]]]]:
+        """Lo que dejó el programa de IA con que se generó la imagen o el vídeo: el programa, el prompt, sus ajustes y si lleva el flujo."""
+        if extension not in ai_metadata.IMAGE_EXTENSIONS | ai_metadata.VIDEO_EXTENSIONS:
+            return []
+        found = ai_metadata.read_generation(path, extension)
+        if found is None or not (found.has_prompt or found.workflow):
+            return []
+        rows = [(tr("Programa"), found.tool or tr("No se sabe")), (tr("Prompt"), found.prompt), (tr("Prompt negativo"), found.negative), *found.settings]
+        if found.workflow:
+            rows.append((tr("Workflow"), tr("Sí, con {count} nodos", count=found.nodes) if found.nodes else tr("Sí")))
+        return [(tr("Generación con IA"), [(tag, value) for tag, value in rows if value])]
 
     def show_entry(self, entry: Entry | None) -> None:
         self._timer.stop()
@@ -282,6 +391,9 @@ class MetadataPanel(QWidget):
         elif find_exiftool(self.exiftool_dir) is None:
             self._show_groups(self._basic_groups(entry))
             self._show_note(tr('No se encontró ExifTool, que es quien lee los metadatos. <a href="{url}">Descárgalo de su web</a> e indica su carpeta en Preferencias → General.', url=DOWNLOAD_URL))
+            path, extension = entry.path, entry.extension
+            run_bg(lambda _sink: self.generation_groups(path, extension),
+                   lambda groups: self._entry is entry and groups and self._show_groups(groups + self._basic_groups(entry)))
         else:
             self._timer.start()
 
@@ -295,9 +407,10 @@ class MetadataPanel(QWidget):
             return
         path, language = entry.path, language_for(current_language())
 
-        def done(groups) -> None:
+        def done(value) -> None:
+            generated, groups = value
             if self._entry is entry:
-                self._show_groups(groups or self._basic_groups(entry))
+                self._show_groups(generated + (groups or self._basic_groups(entry)))
                 if not groups:
                     self._show_note(tr("ExifTool no encontró datos en este archivo."))
 
@@ -306,7 +419,8 @@ class MetadataPanel(QWidget):
                 self._show_groups(self._basic_groups(entry))
                 self._show_note(_escape(str(exc)))
 
-        run_bg(lambda _sink: read_metadata(path, tool, language), done, failed)
+        extension = entry.extension
+        run_bg(lambda _sink: (self.generation_groups(path, extension), read_metadata(path, tool, language)), done, failed)
 
 
 def _wrappable(text: str) -> str:
@@ -324,10 +438,10 @@ def _read_image(path: str, in_archive: bool = False):
     return reader.read()
 
 
-def _read_text(path: str) -> str | None:
+def _read_text(path: str, limit: int = TEXT_LIMIT) -> str | None:
     """Texto inicial del archivo, o None si parece binario."""
     with open(path, "rb") as fin:
-        return _decode_text(fin.read(TEXT_LIMIT))
+        return _decode_text(fin.read(limit))
 
 
 def _decode_text(raw: bytes) -> str | None:

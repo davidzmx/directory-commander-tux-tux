@@ -1,4 +1,4 @@
-"""Árbol de carpetas con secciones: Inicio (Home en Linux), Favoritos y las unidades.
+"""Árbol de carpetas con secciones: Inicio (Home en Linux), Favoritos y las unidades. En Linux, además, los dispositivos.
 
 Las carpetas se leen al desplegarlas y siempre en segundo plano: una unidad lenta o de red
 no debe congelar la ventana.
@@ -9,21 +9,28 @@ import os
 from pathlib import PurePath
 
 import shiboken6
-from PySide6.QtCore import QFileInfo, QFileSystemWatcher, QStandardPaths, Qt, QTimer, Signal
-from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QFileIconProvider, QFrame, QHeaderView, QTreeWidget, QTreeWidgetItem, QTreeWidgetItemIterator
+from PySide6.QtCore import QEvent, QFileInfo, QFileSystemWatcher, QPoint, QRect, QRectF, QSize, QStandardPaths, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
+from PySide6.QtWidgets import (QFileIconProvider, QFrame, QHeaderView, QStyle, QStyledItemDelegate, QToolTip, QTreeWidget, QTreeWidgetItem,
+                               QTreeWidgetItemIterator)
 
-from ..core import favorites as favorites_tree
-from ..core.listing import COMPUTER_LABEL, COMPUTER_PATH, _is_hidden, has_computer_view, is_results, list_dir
+from ..core import devices as storage, favorites as favorites_tree, remote
+from ..core.listing import COMPUTER_LABEL, COMPUTER_PATH, _is_hidden, format_size, has_computer_view, is_results, list_dir
 from ..core.platform_utils import home_dir
 from . import theme
 from .background import run_bg
+from .connection_led import LED_SIZE, paint_led
 from .drag_drop import DropDecider, accept_drop, folder_mime, show_operation, start_drag
 from .icons import themed
 from ..core.i18n import tr
 
 PATH_ROLE = Qt.ItemDataRole.UserRole
 LOADED_ROLE = Qt.ItemDataRole.UserRole + 1
+DEVICE_ROLE = Qt.ItemDataRole.UserRole + 2  # el dispositivo (/dev/…) de un elemento de «Dispositivos»
+ICON_KEY_ROLE = Qt.ItemDataRole.UserRole + 4  # de qué es el icono que lleva: no se vuelve a poner si no cambia
+USAGE_ROLE = Qt.ItemDataRole.UserRole + 3  # la parte ocupada de un dispositivo montado, de 0 a 1
+USAGE_BAR_HEIGHT = 4
+DISK_FULL = 0.9
 SUBFOLDER_CHECK_LIMIT = 400   # a partir de aquí se supone que tiene subcarpetas, sin comprobarlo
 SCAN_LIMIT = 2000
 MAX_WATCHED = 256
@@ -41,12 +48,110 @@ KNOWN_FOLDERS = (
 _icons = QFileIconProvider()
 
 
+def _update(item: QTreeWidgetItem, role, value) -> None:
+    old = item.data(0, role)
+    if old != value:
+        if role == Qt.ItemDataRole.ToolTipRole and old and QToolTip.isVisible() and QToolTip.text() == old:
+            QToolTip.hideText()  # la que se ve ya no es cierta: al mover el ratón se abre la nueva
+        item.setData(0, role, value)
+
+
+def usage_tooltip(name: str, lines: list[str], total: int | None, free: int | None) -> str:
+    rows = [name, *lines]
+    if total:
+        rows.append(tr("Tamaño: {total}", total=format_size(total)))
+        if free is not None:
+            rows.append(tr("Ocupado: {used} ({percent} %)", used=format_size(total - free), percent=round((total - free) * 100 / total)))
+            rows.append(tr("Libre: {free} ({percent} %)", free=format_size(free), percent=round(free * 100 / total)))
+    return "\n".join(rows)
+
+
+def device_tooltip(device: storage.Device) -> str:
+    where = [device.path + (f" · {device.fstype}" if device.fstype else "")]
+    if device.mounted:
+        return usage_tooltip(device.name, where + [tr("Montado en {point}", point=device.mount_point)], device.total or device.size, device.free)
+    return usage_tooltip(device.name, where + [tr("Sin montar: un clic lo monta")], device.size, None)
+
+
+def device_icon(device: storage.Device) -> QIcon:
+    """El del tema del escritorio. Sin montar, con su emblema, como en el panel de lugares del sistema."""
+    base = QIcon.fromTheme(device.icon_name, QIcon.fromTheme("drive-harddisk", themed("drive")))
+    emblem = QIcon.fromTheme("emblem-unmounted")
+    if device.mounted or emblem.isNull():
+        return base
+    icon = QIcon()
+    for size in (16, 22, 32):
+        pixmap = QPixmap(base.pixmap(size, size))
+        painter = QPainter(pixmap)
+        painter.drawPixmap(QRect(size // 2, size // 2, size // 2, size // 2), emblem.pixmap(size // 2, size // 2))
+        painter.end()
+        icon.addPixmap(pixmap)
+    return icon
+
+
+class _TreeDelegate(QStyledItemDelegate):
+    """Lo que el árbol dibuja además del nombre: la barra de ocupación de un dispositivo y el foquito de un servidor conectado."""
+
+    def sizeHint(self, option, index) -> QSize:
+        size = super().sizeHint(option, index)
+        if index.data(USAGE_ROLE) is not None:
+            size.setHeight(size.height() + USAGE_BAR_HEIGHT + 2)
+        if self._has_led(index):
+            size.setWidth(size.width() + LED_SIZE + 6)
+        return size
+
+    def _has_led(self, index) -> bool:
+        tree = self.parent()
+        item = tree.itemFromIndex(index)
+        return tree.led_lit is not None and item is not None and item is tree.remote_item
+
+    def _text_rect(self, option, index) -> tuple[QRect, int]:
+        """Dónde va el nombre, como lo coloca el estilo, y lo que mide."""
+        filled = option.__class__(option)
+        self.initStyleOption(filled, index)
+        tree = self.parent()
+        return tree.style().subElementRect(QStyle.SubElement.SE_ItemViewItemText, filled, tree), filled.fontMetrics.horizontalAdvance(filled.text)
+
+    def paint(self, painter, option, index) -> None:
+        usage = index.data(USAGE_ROLE)
+        if usage is None:
+            super().paint(painter, option, index)
+        else:
+            # El nombre sube lo que ocupa la barra, que va debajo de él, como en el panel de lugares del sistema.
+            raised = option.__class__(option)
+            raised.rect = option.rect.adjusted(0, 0, 0, -(USAGE_BAR_HEIGHT + 2))
+            painter.save()
+            super().paint(painter, raised, index)
+            painter.restore()
+            colors = theme.current()
+            text_left = self._text_rect(raised, index)[0].left()
+            bar = QRect(text_left, option.rect.bottom() - USAGE_BAR_HEIGHT - 1, max(0, option.rect.right() - text_left - 6), USAGE_BAR_HEIGHT)
+            painter.fillRect(bar, QColor(colors.border))
+            painter.fillRect(bar.left(), bar.top(), int(bar.width() * usage), bar.height(),
+                             QColor(colors.meter_low if usage >= DISK_FULL else colors.meter_ok))
+        if self._has_led(index):
+            text, width = self._text_rect(option, index)
+            left = text.left() + width + 8
+            top = option.rect.center().y() - LED_SIZE / 2
+            paint_led(painter, QRectF(left, top, LED_SIZE, LED_SIZE).adjusted(1, 1, -1, -1), self.parent().led_lit)
+
+
 def _same_path(a: str, b: str) -> bool:
+    if remote.is_remote(a) or remote.is_remote(b):
+        return remote.is_remote(a) and remote.is_remote(b) and remote.normalize(a) == remote.normalize(b)
     return os.path.normcase(os.path.normpath(a)) == os.path.normcase(os.path.normpath(b))
+
+
+def _inside(path: str, base: str) -> bool:
+    """`path` está dentro de `base`, a cualquier profundidad."""
+    path, base = (os.path.normcase(os.path.normpath(p)) for p in (path, base))
+    return path.startswith(base.rstrip(os.sep) + os.sep)
 
 
 def _has_subfolder(path: str, show_hidden: bool) -> bool:
     """Si la carpeta tiene alguna subcarpeta visible. Una carpeta enorme se da por positiva."""
+    if remote.is_remote(path):
+        return True  # preguntarlo al servidor por cada carpeta haría muy lento desplegar
     try:
         with os.scandir(path) as it:
             for position, item in enumerate(it):
@@ -82,6 +187,8 @@ class FolderTree(QTreeWidget):
     pathActivated = Signal(str)
     filesDropped = Signal(list, str, bool)  # rutas, carpeta de destino, mover
     filesDroppedMenu = Signal(list, str, bool)  # igual, soltando con el botón derecho: se pregunta qué hacer
+    deviceActivated = Signal(str)  # un dispositivo sin montar: hay que montarlo antes de mostrarlo
+    deviceMenuRequested = Signal(str, QPoint)  # el dispositivo y dónde va su menú
 
     def __init__(self, show_hidden: bool = False, parent=None) -> None:
         super().__init__(parent)
@@ -90,10 +197,14 @@ class FolderTree(QTreeWidget):
         self._calls: set = set()
         self._waiting: dict[int, list] = {}
         self._sync_token = 0
+        self.remote_item: QTreeWidgetItem | None = None  # con el panel en un servidor, sus carpetas en lugar de las del equipo
+        self.devices_item: QTreeWidgetItem | None = None
+        self._devices_shown = False
+        self.led_lit: bool | None = None  # el foquito del servidor: None sin conexión viva; si no, en qué mitad del parpadeo está
         self.setHeaderHidden(True)
         self.setColumnCount(1)
         self.setIndentation(12)
-        self.setUniformRowHeights(True)
+        self.setItemDelegate(_TreeDelegate(self))  # las filas de los dispositivos montados son más altas: no todas miden lo mismo
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setMinimumWidth(90)
         # Con el ancho justo al contenido, los nombres se ven enteros y el árbol se desplaza en horizontal.
@@ -152,8 +263,67 @@ class FolderTree(QTreeWidget):
             self.root_item = self._node(self, COMPUTER_LABEL, COMPUTER_PATH, _icons.icon(QFileIconProvider.IconType.Computer))
         else:
             self.root_item = self._node(self, tr("Sistema de archivos"), os.sep, themed("drive"))
+            self.devices_item = self._node(self, tr("Dispositivos"), "", themed("drive"), has_children=False)
+            self.devices_item.setData(0, LOADED_ROLE, True)
+            self.devices_item.setHidden(True)  # hasta saber qué dispositivos hay
         for item in (self.home_item, self.favorites_item, self.root_item):
             item.setExpanded(True)
+
+    def _sections(self) -> list[QTreeWidgetItem]:
+        return [item for item in (self.home_item, self.favorites_item, self.root_item, self.devices_item) if item is not None]
+
+    def set_devices(self, found: list[storage.Device]) -> None:
+        """Los dispositivos, conservando los elementos que siguen ahí: así no se pliega lo que se había desplegado."""
+        section = self.devices_item
+        if section is None:
+            return
+        existing = {section.child(i).data(0, DEVICE_ROLE): section.child(i) for i in range(section.childCount())}
+        wanted = {device.path for device in found}
+        for path, item in existing.items():
+            if path not in wanted:
+                section.removeChild(item)
+        for position, device in enumerate(found):
+            item = existing.get(device.path)
+            if item is None:
+                item = QTreeWidgetItem([device.name])
+                item.setData(0, DEVICE_ROLE, device.path)
+                section.insertChild(position, item)
+            elif section.indexOfChild(item) != position:
+                section.removeChild(item)
+                section.insertChild(position, item)
+            was_mounted = bool(item.data(0, PATH_ROLE))
+            # Solo lo que ha cambiado: se repasa cada pocos segundos, y tocar una fila mientras se ve su descripción emergente la cierra.
+            _update(item, Qt.ItemDataRole.DisplayRole, device.name)
+            if item.data(0, ICON_KEY_ROLE) != (device.icon_name, device.mounted):
+                item.setData(0, ICON_KEY_ROLE, (device.icon_name, device.mounted))
+                item.setIcon(0, device_icon(device))
+            _update(item, Qt.ItemDataRole.ToolTipRole, device_tooltip(device))
+            usage = device.used_fraction
+            _update(item, USAGE_ROLE, None if usage is None else round(usage, 3))
+            _update(item, PATH_ROLE, device.mount_point)
+            if was_mounted != device.mounted:
+                item.takeChildren()
+                item.setData(0, LOADED_ROLE, False)
+            self._set_indicator(item, device.mounted)
+        hidden = not found or self.remote_item is not None
+        section.setHidden(hidden)
+        if found and not self._devices_shown:
+            self._devices_shown = True  # se despliega la primera vez; luego, como lo deje el usuario
+            section.setExpanded(True)
+
+    def set_root_usage(self, total: int | None, free: int | None) -> None:
+        """La barra y la descripción de «Sistema de archivos», como las de los dispositivos."""
+        if self.devices_item is None or not total or free is None:
+            return
+        _update(self.root_item, USAGE_ROLE, round((total - free) / total, 3))
+        _update(self.root_item, Qt.ItemDataRole.ToolTipRole, usage_tooltip(tr("Sistema de archivos"), [os.sep], total, free))
+
+    def set_led(self, lit: bool | None) -> None:
+        if lit == self.led_lit:
+            return
+        self.led_lit = lit
+        if self.remote_item is not None:
+            self.remote_item.emitDataChanged()  # vuelve a medir y dibujar la fila, con o sin foquito
 
     def apply_icons(self) -> None:
         self.home_item.setIcon(0, themed("home"))
@@ -273,13 +443,14 @@ class FolderTree(QTreeWidget):
 
     # ---------------------------------------------------------------- arrastrar
     def _can_drag(self, item: QTreeWidgetItem | None) -> bool:
-        """Solo las carpetas de verdad de la sección de unidades: no los accesos ni las propias unidades."""
-        if item is None or item is self.root_item or item.parent() is self.root_item and has_computer_view():
+        """Solo las carpetas de verdad de las secciones de unidades y de dispositivos: no los accesos ni las propias unidades o dispositivos."""
+        if item is None or item is self.root_item or item.parent() is self.root_item and has_computer_view() or item.data(0, DEVICE_ROLE):
             return False
+        sections = {id(section) for section in (self.root_item, self.devices_item) if section is not None}
         ancestor = item.parent()
-        while ancestor is not None and ancestor is not self.root_item:
+        while ancestor is not None and id(ancestor) not in sections:
             ancestor = ancestor.parent()
-        return ancestor is self.root_item and os.path.isdir(item.data(0, PATH_ROLE) or "")
+        return ancestor is not None and os.path.isdir(item.data(0, PATH_ROLE) or "")
 
     def startDrag(self, _actions) -> None:
         item = self.currentItem()
@@ -337,10 +508,35 @@ class FolderTree(QTreeWidget):
     # ---------------------------------------------------------------- selección
     def _item_clicked(self, item: QTreeWidgetItem, _column: int) -> None:
         path = item.data(0, PATH_ROLE)
-        if path:
+        if item.data(0, DEVICE_ROLE) and not path:
+            self.deviceActivated.emit(item.data(0, DEVICE_ROLE))
+        elif path:
             self.pathActivated.emit(path)
         else:
             item.setExpanded(not item.isExpanded())
+
+    def viewportEvent(self, event) -> bool:
+        """Una descripción con otro texto se abre de nuevo en lugar de reutilizar la que está a la vista: al reutilizarla,
+        la ventana conservaba a veces el alto del texto anterior, y la de un dispositivo, más larga, salía cortada."""
+        if event.type() == QEvent.Type.ToolTip:
+            item = self.itemAt(event.pos())
+            text = item.toolTip(0) if item is not None else ""
+            if not text:
+                QToolTip.hideText()
+                event.ignore()
+                return True
+            if QToolTip.isVisible() and QToolTip.text() != text:
+                QToolTip.hideText()
+            QToolTip.showText(event.globalPos(), text, self.viewport(), self.visualItemRect(item))
+            return True
+        return super().viewportEvent(event)
+
+    def contextMenuEvent(self, event) -> None:
+        item = self.itemAt(event.pos())
+        if item is not None and item.data(0, DEVICE_ROLE):
+            self.deviceMenuRequested.emit(item.data(0, DEVICE_ROLE), event.globalPos())
+        else:
+            super().contextMenuEvent(event)
 
     def keyPressEvent(self, event) -> None:
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and self.currentItem() is not None:
@@ -358,8 +554,24 @@ class FolderTree(QTreeWidget):
         self._sync_token += 1
         if is_results(path):
             return  # no es una carpeta: el árbol se queda donde estaba
+        if remote.is_remote(path):
+            self._show_server(remote.root(path))
+            self._descend(self.remote_item, [target for _label, target in remote.crumbs(path)[1:]], self._sync_token)
+            return
+        self._show_server("")
         if path == COMPUTER_PATH:
             self._select(self.root_item)
+            return
+        anchor = self._anchor_for(path)
+        if anchor is not None:
+            # Dentro de lo que está marcado (lo pulsado en Inicio, en Favoritos o en un dispositivo, o una carpeta suya): se sigue ahí,
+            # sin saltar a la misma carpeta dentro de «Sistema de archivos».
+            item, base = anchor
+            chain, accumulated = [], base
+            for part in PurePath(os.path.relpath(path, base)).parts if not _same_path(path, base) else ():
+                accumulated = os.path.join(accumulated, part)
+                chain.append(accumulated)
+            self._descend(item, chain, self._sync_token)
             return
         chain, accumulated = [], None
         for part in PurePath(path).parts:
@@ -368,6 +580,36 @@ class FolderTree(QTreeWidget):
         if not has_computer_view():
             chain = chain[1:]  # la raíz ya es la propia sección
         self._descend(self.root_item, chain, self._sync_token)
+
+    def _anchor_for(self, path: str) -> tuple[QTreeWidgetItem, str] | None:
+        """La carpeta marcada, o una de las que la contienen, si `path` es ella misma o está dentro."""
+        item = self.currentItem()
+        while item is not None:
+            base = item.data(0, PATH_ROLE)
+            if isinstance(base, str) and base and base != COMPUTER_PATH and not item.isHidden() and not remote.is_remote(base):
+                if _same_path(path, base) or _inside(path, base):
+                    return item, base
+            item = item.parent()
+        return None
+
+    def _show_server(self, root: str) -> None:
+        """Las carpetas del servidor de esa raíz, o con "", las del equipo."""
+        current = self.remote_item.data(0, PATH_ROLE) if self.remote_item is not None else ""
+        if current == root:
+            return
+        if self.remote_item is not None:
+            self.takeTopLevelItem(self.indexOfTopLevelItem(self.remote_item))
+            self.remote_item = None
+            self.led_lit = None
+        for item in self._sections():
+            item.setHidden(bool(root) or (item is self.devices_item and item.childCount() == 0))
+        if root:
+            server = remote.server_of(root)
+            user, host, port = remote.server_parts(server)
+            label = f"{user}@{host}" + ("" if port == remote.DEFAULT_PORT else f":{port}")
+            self.remote_item = self._node(self, label, root, themed("remote"))
+            self.remote_item.setToolTip(0, tr("En el servidor {server}", server=server))
+            self.remote_item.setExpanded(True)
 
     def _descend(self, item: QTreeWidgetItem, chain: list[str], token: int) -> None:
         if token != self._sync_token or self._disposed or not shiboken6.isValid(item):

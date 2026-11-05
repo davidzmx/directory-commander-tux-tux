@@ -186,7 +186,7 @@ def test_upgrade_puts_the_metadata_button_before_the_viewer_button(tmp_path):
     toolbar = [{"label": "Visor", "commands": ["Set VIEWPANE=Toggle"]}, {"label": "Otro", "commands": ["Go UP"]}]
     (tmp_path / "config.json").write_text(json.dumps({"config_version": 5, "toolbar": toolbar}), encoding="utf-8")
     labels = [item["commands"][0] for item in Config(str(tmp_path))["toolbar"]]
-    assert labels == [METADATA_TOGGLE_COMMAND, "Set VIEWPANE=Toggle", "Go UP", "Set GENERALTERMINAL=Toggle", "Set PANEFRAMES=Toggle", "Compare FILES"]
+    assert labels == [METADATA_TOGGLE_COMMAND, "Set VIEWPANE=Toggle", "Go UP", "Set GENERALTERMINAL=Toggle", "Set PANEFRAMES=Toggle", "Compare FILES", "Set GENERATIONMARKS=Toggle"]
 
 
 def test_settings_validate_recents_and_smart_favorites_on_import(tmp_path):
@@ -856,7 +856,7 @@ def test_double_click_on_a_folder_and_on_a_file_award_points(window, tmp_path, m
     sub = listing.entry_from_path(os.path.normpath(str(tmp_path / "izquierda" / "sub")))
     view.open_entry(sub)
     assert window.config["smart_points"] == {sub.path: 3}
-    monkeypatch.setattr("directory_commander_tux_tux.ui.main_window.QDesktopServices.openUrl", lambda _url: True)
+    monkeypatch.setattr("PySide6.QtGui.QDesktopServices.openUrl", lambda _url: True)
     window.config["smart_points"] = {}
     window._open_file(view, listing.entry_from_path(os.path.normpath(str(tmp_path / "izquierda" / "a.txt"))))
     assert window.config["smart_points"] == {view.path: 3}
@@ -893,7 +893,39 @@ def test_folder_check_does_not_wait_for_a_slow_folder(monkeypatch, tmp_path):
 
 
 # ------------------------------------------------------------------ avisos
-def test_status_bar_never_shows_and_the_notice_goes_to_the_active_pane(window):
+def test_the_general_status_bar_shows_the_active_pane_and_the_notices(window):
+    bar = window.statusBar()
+    assert not bar.isHidden()  # de serie se ve
+    view = window.source
+    assert "carpetas y" in window.general_info.text() and "Seleccionados" not in window.general_info.text()
+    bar.showMessage("Aviso de prueba", 5000)
+    assert bar.currentMessage() == "Aviso de prueba" and view.status.notice.isHidden()  # el aviso va abajo, no en el panel
+    bar.clearMessage()
+    entries = [entry for entry in view.model.entries if not entry.is_dir]
+    if entries:
+        view.select_paths([entries[0].path])
+        view._update_status()
+        assert window.general_info.text().startswith("Seleccionados:")
+        window._hover_preview(view, entries[0])
+        assert window.general_info.text().startswith(entries[0].display_name)
+        window._hover_preview(view, None)
+    _without_general_status(window)
+    assert bar.isHidden()
+    window.config["general_status_bar"] = True
+    window._apply_general_status()
+    QApplication.processEvents()
+    assert not bar.isHidden()
+
+
+
+def _without_general_status(window):
+    window.config["general_status_bar"] = False
+    window._apply_general_status()
+    QApplication.processEvents()
+
+
+def test_without_the_general_status_bar_the_notice_goes_to_the_active_pane(window):
+    _without_general_status(window)
     geometry = window.source.geometry()
     window.statusBar().showMessage("Aviso de prueba", 5000)
     QApplication.processEvents()
@@ -904,12 +936,14 @@ def test_status_bar_never_shows_and_the_notice_goes_to_the_active_pane(window):
 
 
 def test_notice_goes_away_with_the_message(window):
+    _without_general_status(window)
     window.statusBar().showMessage("Aviso", 5000)
     window.statusBar().clearMessage()
     assert window.source.status.notice.text() == "" and window.source.status.notice.isHidden()
 
 
 def test_notice_takes_the_place_of_the_counters_and_gives_it_back(window):
+    _without_general_status(window)
     status = window.source.status
     window.statusBar().showMessage("Aviso", 5000)
     assert status.dirs.isHidden() and status.files.isHidden() and status.size.isHidden()
@@ -1177,3 +1211,24 @@ def test_exiftool_folder_is_saved_and_reaches_the_panel(window, tmp_path):
     dialog.exiftool_dir.setText(" ")
     dialog.apply_to(window.config)
     assert window.config["exiftool_dir"] == ""
+
+
+def test_upgrade_puts_the_marks_button_before_the_image_viewer(tmp_path):
+    from directory_commander_tux_tux.core.config import GENERATION_MARKS_COMMAND
+
+    toolbar = [{"label": "Arriba", "commands": ["Go UP"]}, {"label": "Mostrar imágenes", "commands": ["Show"]}]
+    (tmp_path / "config.json").write_text(json.dumps({"config_version": 18, "toolbar": toolbar}), encoding="utf-8")
+    assert [item["commands"][0] for item in Config(str(tmp_path))["toolbar"]] == ["Go UP", GENERATION_MARKS_COMMAND, "Show"]
+
+
+def test_upgrade_turns_the_folder_sizes_button_into_disk_usage(tmp_path):
+    from directory_commander_tux_tux.core.config import DISK_USAGE_COMMAND
+
+    toolbar = [{"label": "Arriba", "commands": ["Go UP"]}, {"label": "Tamaños de carpeta", "icon": "getsizes", "commands": ["GetSizes"], "children": []},
+               {"label": "Mío", "commands": ["GetSizes"], "children": []}]
+    (tmp_path / "config.json").write_text(json.dumps({"config_version": 20, "toolbar": toolbar, "bar_order": {"toolbar": ["Tamaños de carpeta", "Arriba"]}}),
+                                          encoding="utf-8")
+    config = Config(str(tmp_path))
+    assert [item["commands"][0] for item in config["toolbar"]] == ["Go UP", DISK_USAGE_COMMAND, "GetSizes"]  # en su sitio; el del usuario, intacto
+    assert [child["commands"][0] for child in config["toolbar"][1]["children"]] == [DISK_USAGE_COMMAND, "GetSizes"]  # calcular, en su menú
+    assert config["bar_order"]["toolbar"] == ["Uso del disco", "Arriba"]

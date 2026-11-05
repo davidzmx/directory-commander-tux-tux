@@ -1619,9 +1619,9 @@ def test_the_find_options_of_the_preferences(qapp, tmp_path):
     config = Config(str(tmp_path))
     dialog = PreferencesDialog(config)
     assert dialog.find_place.currentData() == "window" and not hasattr(dialog, "find_columns")
-    form = dialog.general_terminal_full_width.parentWidget().layout().itemAt(0).layout()
-    row_of = lambda widget: form.getWidgetPosition(widget)[0]
-    assert row_of(dialog.find_place) > row_of(dialog.general_terminal_full_width)
+    page_of = lambda widget: next(index for index in range(dialog.pages.count()) if dialog.pages.widget(index).isAncestorOf(widget))
+    assert dialog.pages.tabText(page_of(dialog.find_place)) == "Idioma y avisos"  # General, repartida en páginas
+    assert dialog.pages.tabText(page_of(dialog.general_terminal_full_width)) == "Programas"
     dialog.find_place.setCurrentIndex(dialog.find_place.findData("bottom"))
     dialog.apply_to(config)
     assert config["find_panel_place"] == "bottom" and config["find_window_columns"] == 1
@@ -1706,7 +1706,7 @@ def test_old_configs_get_the_compare_button(tmp_path):
 
     (tmp_path / "config.json").write_text(json.dumps({"config_version": 13, "toolbar": [{"label": "Duplicados", "commands": ["Set UTILITY=Dupe"]}, {"label": "Otro", "commands": ["Go UP"]}]}), encoding="utf-8")
     labels = [item["label"] for item in Config(str(tmp_path))["toolbar"]]
-    assert labels == ["Duplicados", "Comparar archivos", "Otro", "Marcos de los paneles"]
+    assert labels == ["Duplicados", "Comparar archivos", "Otro", "Marcos de los paneles", "Marcas de IA"]
 
 
 def test_identical_files(tmp_path):

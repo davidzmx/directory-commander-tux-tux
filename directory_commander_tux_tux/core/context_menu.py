@@ -15,17 +15,27 @@ DEFAULT_LAYOUTS: dict[str, list[str]] = {
     FOLDER: [N_("Pegar"), SEPARATOR,
              N_("Nueva carpeta"), N_("Nuevo archivo de texto"), N_("Nuevo ZIP vacío"), SEPARATOR,
              N_("Ver"), N_("Ordenar por"), N_("Vista plana"), N_("Mostrar ocultos"), SEPARATOR,
-             N_("Seleccionar todo"), N_("Actualizar"), N_("Calcular tamaños de carpetas"), SEPARATOR,
-             N_("Abrir en una pestaña nueva"), N_("Dividir panel - Horizontal"), N_("Dividir panel - Vertical"), N_("Cerrar este panel"), N_("Solo la terminal en este panel"), N_("Abrir terminal aquí"), N_("Añadir a favoritos"), N_("Copiar la ruta de esta carpeta"), SEPARATOR,
+             N_("Seleccionar todo"), N_("Actualizar"), N_("Calcular tamaños de carpetas"), N_("Uso del disco…"), SEPARATOR,
+             N_("Abrir en una pestaña nueva"), N_("Dividir panel - Horizontal"), N_("Dividir panel - Vertical"), N_("Cerrar este panel"), N_("Solo la terminal en este panel"), N_("Panel remoto (SFTP)…"), N_("Desconectar del servidor"), N_("Abrir terminal aquí"), N_("Añadir a favoritos"), N_("Copiar la ruta de esta carpeta"), SEPARATOR,
              SHELL_ITEMS, SEPARATOR,
              N_("Propiedades de esta carpeta")],
-    FILE: [N_("Abrir"), OPEN_WITH, BROWSE_ARCHIVE, N_("Abrir en una pestaña nueva"), N_("Ver imágenes"), SEPARATOR,
-           N_("Copiar"), N_("Cortar"), SEPARATOR,
+    FILE: [N_("Abrir"), OPEN_WITH, N_("Editar Markdown"), N_("Ver JSON"), BROWSE_ARCHIVE, N_("Abrir en una pestaña nueva"), N_("Añadir a favoritos"), N_("Ver imágenes"), SEPARATOR,
+           N_("Copiar"), N_("Copiar rutas como texto"), N_("Cortar"), SEPARATOR,
            N_("Copiar a destino"), N_("Mover a destino"), N_("Duplicar aquí"), SEPARATOR,
            N_("Renombrar"), N_("Enviar a la papelera"), N_("Eliminar definitivamente"), SEPARATOR,
            N_("Extraer"), N_("Comprimir en ZIP…"), N_("Imagen"), N_("Calcular hash"), N_("Calcular tamaño"), SEPARATOR,
            SHELL_ITEMS, SEPARATOR,
-           N_("Copiar rutas como texto"), N_("Atributos…"), N_("Propiedades")],
+           N_("Atributos…"), N_("Propiedades")],
+}
+
+
+# Los menús de serie de versiones anteriores. Preferencias guarda el menú entero aunque no se haya cambiado nada: uno que es
+# exactamente uno de estos se toma como el de serie de ahora, para que reciba las opciones nuevas en su sitio.
+_PREVIOUS_DEFAULTS: dict[str, list[list[str]]] = {
+    FILE: [["Abrir", OPEN_WITH, BROWSE_ARCHIVE, "Abrir en una pestaña nueva", "Ver imágenes", SEPARATOR, "Copiar", "Cortar", SEPARATOR,
+            "Copiar a destino", "Mover a destino", "Duplicar aquí", SEPARATOR, "Renombrar", "Enviar a la papelera", "Eliminar definitivamente", SEPARATOR,
+            "Extraer", "Comprimir en ZIP…", "Imagen", "Calcular hash", "Calcular tamaño", SEPARATOR, SHELL_ITEMS, SEPARATOR,
+            "Copiar rutas como texto", "Atributos…", "Propiedades"]],
 }
 
 
@@ -40,7 +50,10 @@ def normalize_layout(raw, which: str) -> dict:
     defaults = DEFAULT_LAYOUTS[which]
     known = set(defaults) - {SEPARATOR}
     order: list[str] = []
-    for key in _strings(source.get("order")):
+    stored = _strings(source.get("order"))
+    if stored in _PREVIOUS_DEFAULTS.get(which, []):
+        stored = list(defaults)
+    for key in stored:
         if key == SEPARATOR or (key in known and key not in order):
             order.append(key)
     if not order:

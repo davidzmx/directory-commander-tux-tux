@@ -752,6 +752,8 @@ def test_a_normal_window_only_creates_tabs_for_its_two_panes(window):
 
 @pytest.mark.parametrize("mode", ["3-Vertical", "3-Horizontal", "3-Left", "3-Top", "4-Vertical", "4-Horizontal", "4-Grid"])
 def test_every_arrangement_shows_its_panes_without_overlapping(window, mode):
+    window.resize(1500, 900)  # cuatro paneles uno encima de otro, con las barras y la de estado general, necesitan algo más de 800 de alto
+    settle()
     apply_panes(window, mode)
     count = styles.pane_count(mode)
     assert all(window.groups[side].isVisible() and window.groups[side].current is not None for side in range(count))

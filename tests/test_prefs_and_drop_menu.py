@@ -118,7 +118,7 @@ def test_theme_button_from_following_the_desktop(window, monkeypatch):
     assert window.config["theme"] == "dark"
 
 
-@pytest.mark.parametrize("stored,expected_extra", [([{"label": "Mío", "commands": ["Go UP"], "children": []}], 6), ([{"label": "x", "commands": [THEME_TOGGLE_COMMAND]}], 4)])
+@pytest.mark.parametrize("stored,expected_extra", [([{"label": "Mío", "commands": ["Go UP"], "children": []}], 7), ([{"label": "x", "commands": [THEME_TOGGLE_COMMAND]}], 5)])
 def test_old_configuration_gets_the_theme_button(tmp_path, stored, expected_extra):
     # Los botones de metadatos, de la terminal, de comparar y de los marcos también se añaden a las barras anteriores a la v6.
     (tmp_path / "config.json").write_text(json.dumps({"config_version": 3, "toolbar": stored}), encoding="utf-8")
@@ -194,9 +194,9 @@ def test_tab_bar_offers_customize(window, monkeypatch):
 
 def test_customize_tabs_opens_the_tab_page(window, monkeypatch):
     seen = []
-    monkeypatch.setattr(PreferencesDialog, "exec", lambda dialog: seen.append(dialog.pages.currentIndex()) or 0)
+    monkeypatch.setattr(PreferencesDialog, "exec", lambda dialog: seen.append(dialog.pages.currentWidget() is dialog.tabs.pages[0][1]) or 0)
     window.open_preferences(tabs=True)
-    assert seen == [1]
+    assert seen == [True]
 
 
 def test_image_viewer_bar_offers_customize(window, viewer, monkeypatch):
@@ -500,3 +500,18 @@ def test_shortcut_failure_is_reported(window, tree, monkeypatch):
     monkeypatch.setattr(windows_shell, "create_shortcut", fail, raising=False)
     window._create_shortcuts([str(left / "a.txt")], str(right))
     assert os.listdir(right) == []
+
+
+def test_video_window_shows_the_size_of_a_turned_video(video_window, monkeypatch):
+    """El giro se lee del fotograma: el de los metadatos es un tipo que PySide6 no sabe convertir, y lanzaba una excepción en cada fotograma."""
+    from PySide6.QtCore import QSize
+    from PySide6.QtMultimedia import QtVideo, QVideoFrame, QVideoFrameFormat
+
+    frame = QVideoFrame(QVideoFrameFormat(QSize(1920, 1080), QVideoFrameFormat.PixelFormat.Format_RGBA8888))
+    monkeypatch.setattr(video_window.media, "current_frame", lambda: frame)
+    monkeypatch.setattr(video_window.media, "frame_interval_us", lambda: 40000)
+    video_window._show_format()
+    assert video_window.status_labels["format"].text() == "1920 x 1080 · 25 fps"
+    frame.setRotation(QtVideo.Rotation.Clockwise90)
+    video_window._show_format()
+    assert video_window.status_labels["format"].text() == "1080 x 1920 · 25 fps"

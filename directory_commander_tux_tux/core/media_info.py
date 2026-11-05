@@ -674,3 +674,31 @@ def video_frame(path: str, ffmpeg_dir: str = "", duration: float = 0.0, width: i
     moment = min(duration * 0.1, 30.0) if duration else 1.0
     return _run_tool([tool, "-nostdin", "-v", "error", "-ss", f"{moment:.2f}", "-i", path, "-frames:v", "1", "-vf",
                       f"scale={width}:-2", "-f", "image2pipe", "-vcodec", "png", "-"]) or None
+
+
+GRID_TIMEOUT = 20  # cuatro saltos en un vídeo largo, quizá en un disco lento
+
+
+def video_thumbnail(path: str, ffmpeg_dir: str = "", duration: float = 0.0, side: int = 128, frames: int = 4) -> bytes | None:
+    """La miniatura de un vídeo en PNG: cuatro fotogramas repartidos a lo largo del vídeo, en una cuadrícula de 2×2, o uno solo.
+    Lo hace FFmpeg de una vez, saltando a cada momento sin decodificar lo de antes. None si no hay FFmpeg o no se pudo."""
+    tool = find_tool("ffmpeg", ffmpeg_dir)
+    if tool is None:
+        return None
+    if frames < 4 or duration < 4:
+        return video_frame(path, ffmpeg_dir, duration, side)
+    cell = max(2, side // 2 // 2 * 2)
+    args = [tool, "-nostdin", "-v", "error"]
+    for part in range(4):
+        args += ["-ss", f"{duration * (2 * part + 1) / 8:.2f}", "-i", path]
+    scaled = ";".join(f"[{part}:v]scale={cell}:-2,setsar=1[v{part}]" for part in range(4))
+    graph = f"{scaled};[v0][v1][v2][v3]xstack=inputs=4:layout=0_0|w0_0|0_h0|w0_h0[out]"
+    args += ["-filter_complex", graph, "-map", "[out]", "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"]
+    flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    try:
+        done = subprocess.run(args, capture_output=True, timeout=GRID_TIMEOUT, creationflags=flags, stdin=subprocess.DEVNULL, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if done.returncode == 0 and done.stdout:
+        return done.stdout
+    return video_frame(path, ffmpeg_dir, duration, side)  # un FFmpeg sin `xstack`, anterior a la 4.1

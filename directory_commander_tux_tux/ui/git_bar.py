@@ -292,7 +292,7 @@ class GitBar(QWidget):
     def check(self) -> None:
         """Mira en segundo plano si git sigue instalado y si la carpeta es un repositorio. Se repite porque también se puede cambiar de rama escribiendo."""
         terminal = self.terminal
-        if terminal.session is None or terminal.family == OTHER or not self.config.get("git_enabled", True):
+        if terminal.session is None or terminal.family == OTHER or terminal.server or not self.config.get("git_enabled", True):  # git se ejecuta en este equipo
             self._show_branch(None)
             return
         if self._checking or not terminal.isVisible():

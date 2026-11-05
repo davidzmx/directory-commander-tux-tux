@@ -560,7 +560,7 @@ def test_pages_are_vertical_and_grouped(window):
     dialog = PreferencesDialog(window.config)
     assert not isinstance(dialog.pages, QTabWidget)
     tree = dict(navigation_tree(dialog))
-    assert tree["General"] == []
+    assert tree["General"] == ["Idioma y avisos", "Vistas y miniaturas", "Abrir archivos", "Colores y marcos", "Programas"]
     assert tree["Pestañas"] == ["Barra", "Dimensiones", "Opciones"]
     assert tree["Barras y estilos"] == ["Barras de botones", "Estilos"]
     assert tree["Rutas frecuentes"] == ["Lista de Favoritos", "Lista de Recientes", "Favoritos inteligentes", "Puntaje"]

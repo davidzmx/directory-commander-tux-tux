@@ -22,7 +22,9 @@ classifiers = [
     "Topic :: Desktop Environment :: File Managers",
 ]
 # PySide6-Addons aporta Qt Multimedia, con el que el visor reproduce vídeo y audio.
-dependencies = ["PySide6-Essentials>=6.8,<7", "PySide6-Addons>=6.8,<7"]
+# paramiko conecta los paneles remotos por SFTP, y keyring guarda sus contraseñas en el llavero del sistema.
+# Pygments colorea el código en el visor y en el editor de Markdown.
+dependencies = ["PySide6-Essentials>=6.8,<7", "PySide6-Addons>=6.8,<7", "paramiko>=3.4", "keyring>=24", "pygments>=2.15"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pyinstaller>=6"]

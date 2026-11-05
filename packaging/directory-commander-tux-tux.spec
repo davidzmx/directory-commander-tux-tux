@@ -7,7 +7,9 @@ ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
 analysis = Analysis(
     [os.path.join(SPECPATH, "run_directory_commander_tux_tux.py")],
     pathex=[ROOT],
-    hiddenimports=["PySide6.QtMultimedia", "PySide6.QtMultimediaWidgets"],  # se importan al abrir el primer archivo
+    # Qt Multimedia se importa al abrir el primer archivo; los llaveros de keyring, según el sistema, al guardar una contraseña SFTP.
+    hiddenimports=["PySide6.QtMultimedia", "PySide6.QtMultimediaWidgets", "keyring.backends.SecretService", "keyring.backends.kwallet",
+                   "keyring.backends.Windows", "keyring.backends.chainer", "keyring.backends.fail"],
     datas=[(os.path.join(ROOT, "directory_commander_tux_tux", "resources"), "directory_commander_tux_tux/resources"),
            (os.path.join(ROOT, "directory_commander_tux_tux", "languages"), "directory_commander_tux_tux/languages")],
     excludes=["tkinter", "PySide6.QtQml", "PySide6.QtQuick"],

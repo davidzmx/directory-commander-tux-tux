@@ -6,9 +6,9 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import QEvent, Qt, QUrl
-from PySide6.QtGui import QAction, QDesktopServices
-from PySide6.QtMultimedia import QMediaMetaData, QMediaPlayer, QVideoFrame
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QAction
+from PySide6.QtMultimedia import QMediaPlayer, QtVideo, QVideoFrame
 from PySide6.QtWidgets import (QFileDialog, QFrame, QLabel, QMainWindow, QMenu, QMessageBox, QPushButton, QStackedWidget, QToolBar,
                                QToolButton, QVBoxLayout, QWidget)
 
@@ -16,6 +16,7 @@ from .. import APP_NAME
 from ..core import bar_buttons
 from ..core.listing import format_size
 from . import image_ops, theme
+from .open_external import open_externally
 from .background import run_bg
 from .icons import app_icon, themed
 from .media_player import MediaPlayer, format_position
@@ -23,10 +24,6 @@ from .shell_menu import tidy_separators
 from ..core.i18n import tr
 
 SEEK_STEP_MS = 5000
-
-
-def format_exact_position(milliseconds: int) -> str:
-    return f"{format_position(milliseconds)}.{max(0, milliseconds) % 1000:03}"
 
 
 class VideoViewer(QMainWindow):
@@ -221,12 +218,13 @@ class VideoViewer(QMainWindow):
         rate = 1000000 / self.media.frame_interval_us()
         speed = tr(" · {rate:.4g} fps", rate=rate)
         width, height = frame.width(), frame.height()
-        if self.media.player.metaData().value(QMediaMetaData.Key.Orientation) in (90, 270):  # el vídeo se ve girado
+        # El giro, del fotograma: el de los metadatos (`QMediaMetaData.Key.Orientation`) es un tipo que PySide6 no sabe convertir y lanza una excepción.
+        if frame.rotation() in (QtVideo.Rotation.Clockwise90, QtVideo.Rotation.Clockwise270):  # el vídeo se ve girado
             width, height = height, width
         self.status_labels["format"].setText(f"{width} x {height}{speed}")
 
     def _position_changed(self, position: int) -> None:
-        self.status_labels["time"].setText(format_exact_position(position))
+        self.status_labels["time"].setText(format_position(position))  # hasta los segundos: los milisegundos cambiaban sin parar
 
     def seek_by(self, milliseconds: int) -> None:
         player = self.media.player
@@ -260,7 +258,7 @@ class VideoViewer(QMainWindow):
     def open_with_system(self) -> None:
         if self.current_path:
             self.media.player.pause()
-            QDesktopServices.openUrl(QUrl.fromLocalFile(self.current_path))
+            open_externally(self.current_path)
 
     def reveal_current(self) -> None:
         if self.host is not None and self.current_path:

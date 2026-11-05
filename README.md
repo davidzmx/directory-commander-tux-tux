@@ -32,9 +32,22 @@ Gestor de archivos **multipanel, con terminales integradas y git**, para **Linux
 - Cada terminal cuya carpeta sea un repositorio muestra la rama activa y el usuario con el que se firmarán los commits, y permite cambiar de rama o crear otra. La rama también se ve en la barra de cada panel
 - Botones para `status`, `add`, `unstage`, `commit`, `push`, `pull`, `fetch`, `diff` y `log`, que se escriben en esa misma terminal
 - `add`, `unstage` y `commit` abren una ventana con los archivos y casillas, y muestran la orden que se va armando antes de enviarla
-- La orden de cada botón se puede cambiar y se pueden añadir otras, en Preferencias → Barras de botones. El resto se configura en Preferencias → Git
+- La orden de cada botón se puede cambiar y se pueden añadir otras, en Preferencias → Barras de botones. El resto se configura en Preferencias → Integración con Git
 
 ![La ventana de commit, con los archivos que se incluyen y la orden que se va a ejecutar](docs/capturas/es/commit.png)
+
+### Paneles remotos por SFTP y terminales por SSH
+
+- Cualquier panel puede mostrar una carpeta de un servidor: con el botón de su barra, el clic derecho o Archivo → Panel remoto (SFTP)…, se elige un perfil guardado o se escribe una conexión nueva. Su pestaña lleva el icono de un servidor, su IP entre paréntesis y un foquito verde que parpadea mientras la conexión sigue viva y desaparece si se pierde; el árbol de carpetas de ese panel lo lleva junto al servidor, y una terminal conectada por SSH, en su barra. Su barra tiene un botón para desconectarlo, que lo devuelve a donde estaba. Mientras está conectado, el de conectar se desactiva
+- Se navega como en una carpeta del equipo, y se copia y mueve entre un panel remoto y uno local en los dos sentidos, también arrastrando. Se crean carpetas y archivos, se renombra y se borra; en un servidor no hay papelera, así que borrar siempre es definitivo y siempre se confirma
+- La terminal de un panel remoto se abre en el servidor, por la misma conexión, sigue a su panel como las demás y lleva la IP en su barra. Su árbol de carpetas también muestra las del servidor
+- Cualquier terminal, también la general o la de un panel del equipo, puede abrirse en un servidor por SSH con el botón de conectar de su barra, que ofrece los perfiles y una conexión nueva. Conectada, su lista de intérpretes muestra el perfil y no se puede cambiar; para volver al intérprete del equipo está el botón de desconectar
+- Los perfiles SSH/SFTP guardan servidor, puerto, usuario, contraseña o frase de la clave, clave privada o agente SSH, y carpeta inicial; se administran en Preferencias → SSH/SFTP, a la que lleva también Ajustes → Perfiles SSH/SFTP…. Al crear o editar uno, «Probar conexión» comprueba los datos sin guardar nada. La contraseña se puede dar al crear el perfil, y no se vuelve a pedir. Va al llavero del sistema (KWallet o GNOME Keyring en Linux, el Administrador de credenciales en Windows), nunca a la configuración
+- Las sesiones guardan las pestañas remotas y, al cargarlas, vuelven a conectar con sus perfiles
+- Si el servidor deja de responder, la ventana no se queda esperando: tras 20 segundos se avisa de que se ha perdido la conexión, y se vuelve a conectar al abrir otra carpeta
+- Al salir con conexiones SSH/SFTP abiertas se avisa de que se cerrarán y se pide confirmarlo, aunque en las preferencias no se pida confirmar al salir
+- La primera vez que se conecta a un servidor se muestra su huella y se pregunta si se confía en él; al aceptarla se añade a `~/.ssh/known_hosts`. Si la clave de un servidor conocido cambia, no se conecta
+- En Preferencias → SSH/SFTP se elige si los archivos del servidor se abren con su programa (se descargan a una carpeta temporal y, al guardar un cambio, se sube preguntando antes o sin preguntar, según se elija; si mientras tanto el archivo cambió en el servidor, se pregunta siempre, para no perder ese cambio. Un Markdown del servidor se abre en el editor del programa) y si se muestran su vista previa y sus miniaturas, hasta un tamaño
 
 ## Estilos: una disposición para cada tarea
 
@@ -64,18 +77,33 @@ Es una primera versión funcional. Desarrollado para uso personal.
 - Comparar dos archivos, de un panel o de dos: si son idénticos, las diferencias de un texto con diff, dos imágenes lado a lado con lo distinto en rojo o un comparador externo de los que haya instalados (Kompare, Meld, KDiff3, WinMerge…). Se configura en Preferencias → Comparar archivos
 - Administrador de archivos del sistema, reversible, en Preferencias → Administrador de archivos: en Windows sustituye al Explorador para las carpetas del disco, con excepciones y Win+E, y en Linux usa `xdg-mime`. También se deshace con `directory-commander-tux-tux --restore-file-manager`
 - Visor y metadatos con su botón cada uno; en Preferencias → General se elige cuál va arriba cuando se ven los dos
+- El visor colorea el código de cientos de lenguajes (con Pygments), muestra un Markdown formateado o su código, y un JSON ordenado y coloreado, como árbol desplegable (con `{ }`, `[ ]` y «clave : valor», como los visores de JSON de la web) o tal cual. Un JSON también se abre en su propia ventana, con búsqueda por clave o valor y copiar el valor o su ruta (`pages[0].nodes[1].type`)
+- Editor de Markdown con doble vista: el texto a la izquierda y cómo queda a la derecha, al momento, con botones para negrita, cursiva, código, enlaces, títulos, listas y citas. Los Markdown se abren en él (o con la aplicación del sistema, en Preferencias → General), y también con «Editar» en el visor o «Editar Markdown» en el clic derecho. Guarda en UTF-8 con los saltos de línea que tenía el archivo
+- Uso del disco (Herramientas, o el clic derecho en una carpeta): sus carpetas y archivos de mayor a menor y un mapa de cuadros, uno por archivo, de área proporcional a su tamaño y de color según su tipo. Lo elegido en uno se marca en el otro, un doble clic en el mapa entra en una carpeta, y «Mostrar en el panel» lleva hasta él. Un doble clic en un archivo de la lista lo abre con su programa. Desde el mapa o la lista (también con su clic derecho) se envía a la papelera (Supr) o se elimina sin papelera (Mayús+Supr), y lo que queda se recalcula sin volver a analizar. No entra en otros discos montados dentro y cuenta una vez los enlaces duros
+- Marcas de git en la lista: M modificado, A añadido, U sin seguimiento, R renombrado, C en conflicto; una carpeta con cambios dentro lleva un punto, y lo que git ignora se ve más tenue. Al pasar el ratón por una marca se dice qué significa. Se activan en Preferencias → Integración con Git
 - Vistas de detalles, lista, iconos, mosaicos, miniaturas y tira de fotogramas
-- Carpetas desplegables dentro de la lista, orden natural con carpetas primero, filtro rápido, filtro de contenido por varios tipos a la vez y vista plana
+  - En detalles, todas las columnas se ensanchan arrastrando su borde, también el nombre, y los anchos se recuerdan. Mientras no se cambie a mano, el nombre ocupa el espacio libre; el clic derecho en la cabecera lo vuelve a ajustar al panel o ajusta cada columna a su contenido
+  - En lista, cada columna mide lo que su nombre más largo, hasta un máximo (50 caracteres de serie, configurable en Preferencias → General, o sin límite). Un nombre más largo se recorta por el medio con «…» y se ve entero al pasar el ratón
+  - El tamaño de las miniaturas se elige en Preferencias → General, de 64 a 256 píxeles
+  - Los vídeos muestran cuatro fotogramas repartidos a lo largo del vídeo y su duración, o uno solo, o su icono (Preferencias → General). Los saca FFmpeg, en segundo plano, alrededor de un segundo por vídeo, y se recuerdan mientras el programa está abierto
+  - Las carpetas muestran dentro sus primeras imágenes, hasta cuatro (se puede desactivar)
+- Imágenes y vídeos generados con IA: una marca P si llevan en sus metadatos el prompt y otra W si llevan el flujo (workflow), en todas las vistas: sobre la miniatura o el icono grande, y detrás del nombre en lista y detalles. Están ocultas de serie: se muestran y ocultan con el botón «Marcas de IA» de la barra (o en Ver), y en Preferencias → General se elige si se ven las dos o solo una. La descripción emergente y la tarjeta al pasar el ratón dicen con qué programa y qué modelo se generó, y el panel de metadatos muestra el programa, el prompt entero, el negativo, el modelo (en ComfyUI, el checkpoint que carga el nodo conectado a la entrada «model» del muestreador, pasando por los LoRA, que también se muestran), los pasos, la semilla y si lleva el flujo, con sus nodos. Se reconocen ComfyUI (PNG, WebP y vídeo), Automatic1111, Forge, Fooocus, SwarmUI, InvokeAI, NovelAI y Midjourney
+- Carpetas desplegables dentro de la lista, carpetas siempre primero y, de serie, por tipo (se elige en Preferencias → Vistas y miniaturas; el orden por nombre es natural: «foto2» antes que «foto10»), filtro rápido, filtro de contenido por varios tipos a la vez y vista plana
+- Cada carpeta recuerda su vista y su orden (se puede desactivar en Preferencias → General). Una carpeta sin nada recordado sigue la vista de la pestaña, y dos pestañas pueden mostrar la misma carpeta de forma distinta: se recuerda lo último que se eligió
 - Estado por panel: selección y totales, bytes y medidor de disco
-- Copiar, mover y eliminar en segundo plano, con progreso, cancelación, detección de colisiones y deshacer
+- Copiar, mover y eliminar en segundo plano, con progreso, cancelación, detección de colisiones y deshacer. Opcionalmente, cada copia se vuelve a leer del disco y se compara con el original (BLAKE2b): si no son iguales, se descarta y, al mover, el original se conserva (Preferencias → General, o «Copiar a destino y comprobar la copia» en el botón Copiar)
 - Visor de imágenes en ventana propia, panel de metadatos, atributos y enlaces
 - Convertir, girar y redimensionar imágenes; dividir y unir archivos; copiar solo lo más reciente
 - Barras que se pueden mover: se arrastran por su asa a otra fila, a otro borde o junto a otra barra, y la posición se recuerda. También se pueden bloquear
 - Tarjeta al dejar el ratón sobre un archivo: miniatura, dimensiones, duración, códecs, etiquetas y portada
 - Doble clic en la barra de pestañas para abrir una nueva
 - Se selecciona pulsando el nombre; pulsar fuera quita la selección. Para volver a la fila completa: `Set FULLROWSELECT=Toggle` o el menú Ver
+- Abrir con un clic, opcional (Preferencias → General): un clic abre el archivo o la carpeta, y al pasar el ratón su icono se convierte en un + que lo añade a la selección (− lo quita); en las miniaturas, el + va en su esquina. Ctrl, Mayús y el rectángulo de selección siguen funcionando igual. Con el visor o los metadatos abiertos, muestran el archivo bajo el ratón, salvo vídeos y audio, que empezarían a sonar; al salir vuelven a lo seleccionado
+- Salir pide confirmación; se puede desactivar en Preferencias → General
+- Barra de estado general abajo de la ventana: el archivo bajo el ratón o lo seleccionado en el panel activo, el espacio libre con su porcentaje y el tamaño del disco, y los avisos. También dice, del archivo bajo el ratón o del único seleccionado, su fecha y, de una imagen, sus dimensiones; de un vídeo, sus dimensiones y su duración; de un audio, su duración; si hay un filtro activo o se ven los ocultos, y el avance de las copias y movimientos en curso. Mientras se ve, el espacio libre va solo en ella, salvo en un panel con una carpeta de otro disco, que muestra el suyo (se elige en Preferencias → General: solo esos, todos o ninguno). Se quita en Preferencias → General; sin ella, los avisos van en la fila de estado del panel activo y el espacio libre en la de cada panel
+- Los archivos se abren con la aplicación predeterminada del sistema; en Linux, con `xdg-open`, sin la ventana del escritorio que pregunta con qué aplicación abrirlos
 - En Windows, la ruta empieza por «Este equipo», que muestra las unidades agrupadas por tipo (SSD, HDD, otras, extraíbles, ópticas y de red), con capacidad, espacio libre, barra de uso y sistema de archivos
-- Árbol de carpetas con secciones: Inicio (Home en Linux), Favoritos y las unidades (el sistema de archivos en Linux)
+- Árbol de carpetas con secciones: Inicio (Home en Linux), Favoritos y las unidades (el sistema de archivos en Linux). En Linux, además, Dispositivos, como en el panel de lugares del escritorio: los discos y particiones que se pueden abrir, sin las del arranque, la recuperación de Windows ni el intercambio. Los montados llevan una barra con lo ocupado, igual que «Sistema de archivos», y su descripción emergente dice el dispositivo, el sistema de archivos, dónde está montado, el tamaño, lo ocupado y lo libre; un clic en uno sin montar lo monta y lo abre. Se monta como lo hace el escritorio, con UDisks por D-Bus: si el sistema exige la contraseña, la pide él en su propia ventana. Su menú permite desmontarlo y quitar con seguridad un USB. Lo que se conecta o se monta desde otro programa aparece solo
 - Clic derecho sobre un nombre: menú de ese archivo o carpeta. Clic derecho en cualquier otro sitio: menú de la carpeta abierta, sin cambiar la selección. También con la tecla de menú o `Mayús+F10`
 - Diseños y grupos de pestañas guardados, barra de favoritos, carpetas recientes y frecuentes, bloqueo de navegación y casillas de selección
 - Papelera del sistema y portapapeles compatible con Explorer, Dolphin y Nautilus
@@ -146,13 +174,18 @@ La versión portable guarda su configuración en la carpeta `config`, junto al p
 
 ## Audio y vídeo
 
-Los datos de MP4, MOV, M4A, MKV, WebM, AVI, MP3, FLAC y WAV se leen sin ninguna dependencia. Para ver un fotograma de los vídeos y leer otros formatos, como OGG, hace falta FFmpeg: se busca en el `PATH` o en la carpeta indicada en Ajustes → Preferencias. Sin FFmpeg, los vídeos muestran sus datos con un icono en lugar del fotograma.
+Los datos de MP4, MOV, M4A, MKV, WebM, AVI, MP3, FLAC y WAV se leen sin ninguna dependencia. Para ver fotogramas de los vídeos (en la tarjeta y en las miniaturas) y leer otros formatos, como OGG, hace falta FFmpeg: se busca en el `PATH` o en la carpeta indicada en Ajustes → Preferencias. Sin FFmpeg, los vídeos muestran sus datos con un icono en lugar del fotograma.
 
 ## Favoritos y configuración en JSON
 
-Los favoritos se exportan e importan desde el menú Favoritos; al importar se añaden sin duplicar. La configuración, desde el menú Ajustes: tema, preferencias, barra de botones, estilos, diseños, grupos de pestañas, presets de renombrado y favoritos. Se aplica al momento.
+Los favoritos se exportan e importan desde el menú Favoritos; al importar se añaden sin duplicar.
 
-La sesión, las carpetas recientes y las carpetas de FFmpeg y ExifTool no viajan en el archivo, porque son propias de cada equipo. Tampoco el programa de la terminal, las órdenes de git ni el comparador externo: importarlos haría que se ejecutase lo que eligió quien creó el archivo.
+La configuración, desde el menú Ajustes. Al exportar se marcan los grupos que se quieren llevar, y se propone un nombre de archivo con la fecha y la hora (`configuracion_2026-11-04_09-05.json`), que se puede cambiar; al importar, cuáles de los que trae el archivo se aplican. Lo marcado sustituye a lo que había y se aplica al momento. Los grupos son aspecto (también el ancho de la terminal general), barras, menús contextuales, favoritos, recientes, comportamiento, visor y reproductor, diseños con grupos de pestañas, sesiones y los ajustes de las pestañas, búsqueda, renombrar, integración Git y SSH/SFTP.
+
+- **SSH/SFTP**: los perfiles y, si se marcan, las claves de sus servidores en `~/.ssh/known_hosts` y las contraseñas guardadas. Las contraseñas van cifradas con una clave (scrypt y AES-256-GCM), que se pide al importar, o en texto plano, con un aviso. Al importarlas se guardan en el llavero del sistema. De las claves de los servidores se añaden las que falten; si ya hay otra para ese servidor, se deja la que había.
+- **Entre equipos y sistemas**: el archivo guarda el sistema y la carpeta personal de origen. Al importar, las rutas dentro de esa carpeta (favoritos, sesiones, diseños, la clave de un perfil…) pasan a la carpeta personal de este equipo, también de Windows a Linux y al revés.
+
+No viajan nunca la sesión abierta, las carpetas recientes, las visitas que cuentan los favoritos inteligentes, el tamaño y la posición de las ventanas ni el administrador de archivos predeterminado: son de cada equipo. Tampoco los programas (el intérprete y la orden de la terminal, las carpetas de FFmpeg y ExifTool, el programa git y sus órdenes y el comparador): se ejecutarían en el otro equipo, y sus rutas dependen de cada sistema.
 
 ```json
 {
@@ -185,13 +218,14 @@ Set DUAL=Off|Vertical|Horizontal|Toggle  STYLE="Vertical doble panel"  CONTENTTY
 Set VIEW=Details|List|SmallIcons|LargeIcons|Tiles|Thumbnails|FilmStrip  VIEW=Cycle,List,Details
 Set SORTBY=name|size|type|modified|attr|sortlist  SORTREVERSE=On|Off  FRIENDLYDATES=off|today|normal
 Set FLATVIEW=Toggle  HIDDEN=Toggle  TREE=Toggle  PANETREE=Toggle  TERMINALPANE=On|Off  PANEFRAMES=Toggle  VIEWPANE=Toggle  METAPANE=Toggle  TERMINAL=Toggle  GENERALTERMINAL=Toggle  CMDLINE=Toggle  FILTER=Show
+Set SFTP=Menu|Off|"nombre del perfil"
 Set NAVLOCK=Toggle  CHECKBOXMODE=Toggle  EXPANDABLEFOLDERS=Toggle  GRIDLINESH=Toggle  STATUSBAR=Toggle  STATE=Source|Dest
 Set DELRECYCLEBIN=Toggle  DELRECYCLECONFIRM=Toggle  UTILITY=Find|Sync|Dupe|Jobs|Log|Off[,Toggle]
 Set LOCKBARS=Toggle  HOVERINFO=Toggle
 Image CONVERT[=png] [ROTATE=90] [WIDTH=n] [HEIGHT=n] [PRESERVEASPECTRATIO] [HERE] [REPLACE] [PRESERVEDATE] [ADDSUFFIX]
 Show [SLIDESHOW] [FULLSCREEN]     SetAttr [MODIFIED=now]         Split      Join      Find      Play
 Print FOLDER [TO=clip]            Recent [CLEAR]                 Close [PROGRAM=confirm]
-Prefs [LAYOUTSAVE] [LAYOUTLIST] [LAYOUTEDIT] [EXPORT] [IMPORT]
+Prefs [LAYOUTSAVE] [LAYOUTLIST] [LAYOUTEDIT] [EXPORT] [IMPORT] [SFTP]
 Toolbar NAME="Favorites Bar" TOGGLE | LIST | RESETDEFAULTS
 Clipboard COPY | CUT | PASTE | COPYNAMES[=nopaths]
 GetSizes [HASH=sha256]            Archive        Extract        Properties

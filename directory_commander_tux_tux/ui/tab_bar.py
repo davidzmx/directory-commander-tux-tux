@@ -77,8 +77,9 @@ class PaneTabBar(QTabBar):
     def _row_layout(self) -> tuple[list[QRect], QPoint, int]:
         """Rectángulo de cada pestaña, punto donde acaba la última fila y altura de una fila.
         Qt lo pregunta muchas veces seguidas al colocar la ventana, y medir cada pestaña cuesta: se recuerda mientras nada cambie."""
-        # El ancho de una pestaña depende de su texto y de si lleva botón de cerrar, que puede ir solo en la activa.
-        tabs = [(self.tabText(index), self.tabButton(index, self.ButtonPosition.RightSide) is not None) for index in range(self.count())]
+        # El ancho de una pestaña depende de su texto, de si lleva botón de cerrar, que puede ir solo en la activa, y del foquito de una conexión.
+        tabs = [(self.tabText(index), self.tabButton(index, self.ButtonPosition.RightSide) is not None,
+                 self.tabButton(index, self.ButtonPosition.LeftSide) is not None) for index in range(self.count())]
         key = (self.group.width(), self.settings, self.iconSize(), tabs)
         if key != self._rows_key:
             self._rows_key, self._rows = key, self._measure_rows()
@@ -205,6 +206,11 @@ class PaneTabBar(QTabBar):
                 target = (rect.right() - button.width() - 3, rect.center().y() - button.height() // 2)
                 if (button.x(), button.y()) != target:  # Qt lo colocaría según su propia disposición
                     button.move(*target)
+            led = self.tabButton(index, self.ButtonPosition.LeftSide)
+            if led is not None:
+                target = (rect.left() + 4, rect.center().y() - led.height() // 2)
+                if (led.x(), led.y()) != target:
+                    led.move(*target)
             if not event.rect().intersects(rect):
                 continue
             option = QStyleOptionTab()
@@ -215,7 +221,7 @@ class PaneTabBar(QTabBar):
                 if index == self._row_hover:
                     option.state |= QStyle.StateFlag.State_MouseOver
             painter.drawControl(QStyle.ControlElement.CE_TabBarTabShape, option)
-            left = rect.left() + 6
+            left = rect.left() + 6 + (led.width() + 2 if led is not None else 0)
             icon = self.tabIcon(index)
             if not icon.isNull():
                 painter.drawPixmap(left, rect.center().y() - 8, icon.pixmap(16, 16))

@@ -3,37 +3,120 @@ from __future__ import annotations
 
 import os
 import shutil
+from collections import OrderedDict
 
-from PySide6.QtCore import QAbstractTableModel, QBuffer, QFileInfo, QIODevice, QMimeData, QModelIndex, QSize, Qt, QThreadPool, QUrl, Signal
-from PySide6.QtGui import QColor, QIcon, QImageReader, QPixmap
+from PySide6.QtCore import QAbstractTableModel, QBuffer, QFileInfo, QIODevice, QMimeData, QModelIndex, QPointF, QRect, QRectF, QSize, Qt, QThreadPool, Signal
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QImage, QImageReader, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QFileIconProvider
 
-from ..core import archive, fsops
+from ..core import ai_metadata, archive, fsops, git_tools, media_info, remote
 from ..core.drives import DRIVE_GROUPS
 from ..core.listing import (COMPUTER_PATH, Entry, format_size, format_time, has_visible_entries, is_results, list_dir, matches_content_type, matches_filter,
                             sort_entries)
 from . import theme
 from .background import run_bg
+from .drag_drop import path_url
 from ..core.i18n import tr
 
 EntryRole = Qt.ItemDataRole.UserRole + 1
+GenerationRole = Qt.ItemDataRole.UserRole + 2  # (prompt, workflow, programa) de una imagen o un vídeo generado con IA, o None
+GitRole = Qt.ItemDataRole.UserRole + 3  # (estado de git, si es el de lo que contiene una carpeta), o None
 COLUMNS = (("name", tr("Nombre")), ("size", tr("Tamaño")), ("type", tr("Tipo")), ("modified", tr("Modificación")), ("attrs", tr("Atrib")),
            ("free", tr("Espacio Libre")), ("used", tr("Porcentaje Usado")), ("filesystem", tr("Sistema de Archivos")), ("location", tr("Ubicación")))
 IMAGE_EXTENSIONS = {bytes(f).decode().lower() for f in QImageReader.supportedImageFormats()}
 THUMB_SIZE = 128
 MAX_THUMB_FILE = 200 * 1024 * 1024
+MAX_REMEMBERED_MARKS = 100_000
+FOLDER_PREVIEW_IMAGES = 4
+MAX_FOLDER_SCAN = 2000  # en una carpeta enorme no se recorre todo para encontrar sus imágenes
+MAX_CACHED_PREVIEWS = 2000
 
 _icons = QFileIconProvider()
 _ext_cache: dict[str, QIcon] = {}
 _thumb_pool = QThreadPool()
 _thumb_pool.setMaxThreadCount(max(2, (os.cpu_count() or 4) // 2))
+_video_pool = QThreadPool()  # aparte: cada vídeo tarda un segundo, y las imágenes no deben esperar a que terminen
+_video_pool.setMaxThreadCount(2)
+# Se conservan al volver a leer la carpeta y al cambiar de pestaña: los de los vídeos cuestan, y los de las carpetas leen varias imágenes.
+_video_thumbs: OrderedDict = OrderedDict()
+_folder_thumbs: OrderedDict = OrderedDict()
+_pending_previews: set = set()
+
+
+def _remember(cache: OrderedDict, key, value) -> None:
+    cache[key] = value
+    cache.move_to_end(key)
+    while len(cache) > MAX_CACHED_PREVIEWS:
+        cache.popitem(last=False)
+
+
+def generation_text(marks) -> str:
+    """«ComfyUI · prompt y workflow»: lo que dicen las marcas, para la descripción emergente."""
+    if not marks:
+        return ""
+    has_prompt, workflow, tool, model = (tuple(marks) + ("",))[:4]
+    carries = tr("prompt y workflow") if has_prompt and workflow else tr("prompt") if has_prompt else tr("workflow")
+    text = tr("Generada con IA ({tool}): lleva {carries}", tool=tool, carries=carries) if tool else tr("Generada con IA: lleva {carries}", carries=carries)
+    return text + ("\n" + tr("Modelo: {model}", model=model) if model else "")
+
+
+def decorate_video(image: QImage, duration: float, frames: int) -> QImage:
+    """Las líneas entre los cuatro fotogramas y la duración en la esquina de abajo, sobre un fondo oscuro."""
+    image = image.convertToFormat(QImage.Format.Format_ARGB32_Premultiplied)
+    painter = QPainter(image)
+    if frames == 4:
+        painter.setPen(QPen(QColor(255, 255, 255, 200), 1))
+        painter.drawLine(image.width() // 2, 0, image.width() // 2, image.height())
+        painter.drawLine(0, image.height() // 2, image.width(), image.height() // 2)
+    if duration > 0:
+        font = QFont()
+        font.setPixelSize(max(9, min(13, image.height() // 7)))
+        font.setBold(True)
+        metrics = QFontMetrics(font)
+        text = media_info.format_duration(duration)
+        badge = QRectF(2, image.height() - metrics.height() - 3, metrics.horizontalAdvance(text) + 8, metrics.height() + 1)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(0, 0, 0, 170))
+        painter.drawRoundedRect(badge, 3, 3)
+        painter.setPen(QColor("#ffffff"))
+        painter.setFont(font)
+        painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, text)
+    painter.end()
+    return image
+
+
+def folder_with_images(folder: QIcon, images: list[QImage], side: int) -> QIcon:
+    """El icono de la carpeta con sus primeras imágenes dentro, de una a cuatro, en una cuadrícula sobre el cuerpo de la carpeta."""
+    canvas = QPixmap(side, side)
+    canvas.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(canvas)
+    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+    folder.paint(painter, QRect(0, 0, side, side))
+    body = QRectF(side * 0.13, side * 0.33, side * 0.74, side * 0.5)
+    columns = 1 if len(images) == 1 else 2
+    rows = 1 if len(images) <= 2 else 2
+    gap = max(2.0, side / 40)
+    cell_width, cell_height = (body.width() - gap * (columns - 1)) / columns, (body.height() - gap * (rows - 1)) / rows
+    for number, image in enumerate(images[:FOLDER_PREVIEW_IMAGES]):
+        cell = QRectF(body.left() + (number % columns) * (cell_width + gap), body.top() + (number // columns) * (cell_height + gap), cell_width, cell_height)
+        size = image.size().scaled(int(cell.width()) - 2, int(cell.height()) - 2, Qt.AspectRatioMode.KeepAspectRatio)
+        target = QRectF(0, 0, size.width(), size.height())
+        target.moveCenter(cell.center())
+        painter.fillRect(target.adjusted(-1, -1, 1, 1), QColor(255, 255, 255, 230))
+        painter.drawImage(target, image)
+    painter.end()
+    return QIcon(canvas)
 
 
 def image_reader(path: str, in_archive: bool = False) -> QImageReader:
-    """El lector de una imagen, del disco o de dentro de un comprimido. Si es demasiado grande, no da imagen."""
-    if not in_archive:
+    """El lector de una imagen, del disco, de dentro de un comprimido o de un servidor. Si es demasiado grande, no da imagen."""
+    if not in_archive and not remote.is_remote(path):
         return QImageReader(path)
-    data = archive.read_member(path, MAX_THUMB_FILE)
+    try:
+        data = remote.read_bytes(path, MAX_THUMB_FILE) if remote.is_remote(path) else archive.read_member(path, MAX_THUMB_FILE)
+    except OSError:
+        data = None
     if data is None:
         return QImageReader()
     buffer = QBuffer()
@@ -92,9 +175,20 @@ class FileModel(QAbstractTableModel):
         self.can_expand = True
         self.show_hidden = False
         self.free_space: int | None = None
+        self.device: int | None = None  # el disco de la carpeta: el espacio libre de otro disco se ve en su panel
         self.total_space: int | None = None
         self._thumbs: dict[str, QIcon] = {}
         self._thumb_pending: set[str] = set()
+        self.thumb_size = THUMB_SIZE
+        self.video_thumbnails = "four"  # four, one u off
+        self.folder_previews = True
+        self.generation_marks = False  # se muestran con su botón de la barra
+        self.git_marks = True
+        self._git_states: tuple = ({}, {}, ())  # archivos, carpetas con cambios dentro, carpetas ignoradas
+        self.generation_kinds = "both"  # both, prompt o workflow
+        self.ffmpeg_dir = ""
+        self._generated: dict[tuple, bool] = {}  # por (ruta, fecha de modificación): sigue valiendo al volver a leer la carpeta
+        self._generated_pending: set[tuple] = set()
         self._dir_sizes: dict[str, int] = {}
         self._expanded: set[str] = set()
         self._children: dict[str, list[Entry]] = {}
@@ -103,6 +197,7 @@ class FileModel(QAbstractTableModel):
         self._in_archive = False
         self.expandable = True
         self.unfold_archives = True
+        self.remote_previews = False  # miniaturas de un servidor: descargan cada imagen
         self.check_mode = False
         self.checked: set[str] = set()
         self.friendly_dates = "off"
@@ -165,7 +260,8 @@ class FileModel(QAbstractTableModel):
                 except OSError:
                     continue  # la carpeta ya no existe: deja de estar desplegada
             try:
-                disk = None if archive.split_archive_path(path) else shutil.disk_usage(path)
+                local = not (remote.is_remote(path) or archive.split_archive_path(path))
+                disk = (shutil.disk_usage(path), os.stat(path).st_dev) if local else None
             except OSError:
                 disk = None
             return entries, children, disk
@@ -182,7 +278,8 @@ class FileModel(QAbstractTableModel):
         if generation != self._generation:
             return
         entries, children, disk = value
-        self.free_space, self.total_space = (disk.free, disk.total) if disk else (None, None)
+        self.free_space, self.total_space = (disk[0].free, disk[0].total) if disk else (None, None)
+        self.device = disk[1] if disk else None
         self._loading = None
         self._thumbs.clear()
         self._thumb_pending.clear()
@@ -238,7 +335,7 @@ class FileModel(QAbstractTableModel):
         self.beginResetModel()
         self._all, self._rows, self._entries = [], [], []
         self.endResetModel()
-        self.free_space = self.total_space = None
+        self.free_space = self.total_space = self.device = None
         self.loadFinished.emit(str(exc) or exc.__class__.__name__)
 
     # --- filas visibles ---
@@ -435,15 +532,18 @@ class FileModel(QAbstractTableModel):
             return entry.attrs
         if role == Qt.ItemDataRole.CheckStateRole and column == "name" and self.check_mode:
             return Qt.CheckState.Checked if entry.path in self.checked else Qt.CheckState.Unchecked
+        if role == GenerationRole and column == "name":
+            return self._shown_marks(self._generation_mark(entry))
+        if role == GitRole and column == "name":
+            return self.git_state(entry)
         if role == Qt.ItemDataRole.DecorationRole and column == "name":
-            if self.show_thumbnails and entry.extension in IMAGE_EXTENSIONS:
-                thumb = self._thumbs.get(entry.path)
+            if self.show_thumbnails:
+                thumb = self._thumbnail(entry)
                 if thumb is not None:
                     return thumb
-                self._request_thumb(entry)
             return icon_for(entry)
         if role == Qt.ItemDataRole.ForegroundRole:
-            if entry.hidden:
+            if entry.hidden or (column == "name" and (self.git_state(entry) or ("",))[0] == "!"):  # lo que git ignora, más tenue
                 return QColor(theme.current().dim)
             if entry.is_dir and column == "name":
                 return QColor(theme.current().dir_text)
@@ -452,7 +552,8 @@ class FileModel(QAbstractTableModel):
             return Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         if role == Qt.ItemDataRole.ToolTipRole:
             if column == "name":
-                return entry.path
+                marks = self._generated.get((entry.path, entry.mtime)) if self.generation_marks else None
+                return entry.path + ("\n" + generation_text(marks) if marks else "")
             if column == "used" and entry.used_fraction is not None:
                 return tr("{value:.1f} % usado", value=entry.used_fraction * 100)
         return None
@@ -478,6 +579,9 @@ class FileModel(QAbstractTableModel):
             return True
         if role != Qt.ItemDataRole.EditRole or entry is None or value == entry.name:
             return False
+        if remote.is_remote(entry.path):
+            self._rename_on_server(entry, str(value))
+            return True
         try:
             old = entry.path
             self.aboutToRename.emit()
@@ -491,6 +595,21 @@ class FileModel(QAbstractTableModel):
         self.renamed.emit(old, target)
         return True
 
+    def _rename_on_server(self, entry: Entry, name: str) -> None:
+        """En segundo plano: con el servidor colgado, la lista no debe quedarse esperando."""
+        old, generation = entry.path, self._generation
+
+        def renamed(target: str) -> None:
+            row = self.row_of(old)
+            if generation == self._generation and row >= 0:
+                entry.path, entry.name = target, remote.name_of(target)
+                entry.display_name = entry.name
+                index = self.index(row, 0)
+                self.dataChanged.emit(index, index)
+            self.renamed.emit(old, target)
+
+        run_bg(lambda _sink: fsops.rename_one(old, name), on_done=renamed, on_error=lambda exc: self.renameFailed.emit(str(exc)))
+
     def supportedDragActions(self):
         return Qt.DropAction.CopyAction | Qt.DropAction.MoveAction
 
@@ -500,27 +619,202 @@ class FileModel(QAbstractTableModel):
     def mimeData(self, indexes) -> QMimeData:
         rows = sorted({i.row() for i in indexes})
         mime = QMimeData()
-        mime.setUrls([QUrl.fromLocalFile(self._rows[r].path) for r in rows])
+        mime.setUrls([path_url(self._rows[r].path) for r in rows])
         return mime
 
     # --- miniaturas ---
+    def _thumbnail(self, entry: Entry) -> QIcon | None:
+        if entry.extension in IMAGE_EXTENSIONS and not entry.is_dir:
+            thumb = self._thumbs.get(entry.path)
+            if thumb is None:
+                self._request_thumb(entry)
+            return thumb
+        local = not (entry.in_archive or self._in_archive or remote.is_remote(entry.path))
+        if entry.is_dir and self.folder_previews and local and not entry.is_drive:
+            return self._folder_preview(entry)
+        if entry.extension in media_info.VIDEO_EXTENSIONS and self.video_thumbnails != "off" and local:
+            return self._video_preview(entry)
+        return None
+
+    def _repaint_path(self, path: str) -> None:
+        row = self.row_of(path)
+        if row >= 0:
+            index = self.index(row, 0)
+            self.dataChanged.emit(index, index, [Qt.ItemDataRole.DecorationRole])
+
+    def _video_preview(self, entry: Entry) -> QIcon | None:
+        """Cuatro fotogramas repartidos a lo largo del vídeo, o uno, con su duración. Los saca FFmpeg: sin él, el icono."""
+        path, side, ffmpeg_dir = entry.path, self.thumb_size, self.ffmpeg_dir
+        frames = 4 if self.video_thumbnails == "four" else 1
+        key = ("video", path, entry.mtime, entry.size, side, frames, ffmpeg_dir)
+        if key in _video_thumbs:
+            _video_thumbs.move_to_end(key)
+            return _video_thumbs[key] or None
+        if key in _pending_previews or entry.size <= 0:
+            return None
+        _pending_previews.add(key)
+
+        def work(_sink):
+            info = media_info.read_media_info(path, ffmpeg_dir)
+            duration = info.duration if info is not None else 0.0
+            data = media_info.video_thumbnail(path, ffmpeg_dir, duration, side, frames)
+            return (QImage.fromData(data) if data else QImage()), duration
+
+        def done(value) -> None:
+            image, duration = value
+            _pending_previews.discard(key)
+            _remember(_video_thumbs, key, QIcon(QPixmap.fromImage(decorate_video(image, duration, frames))) if not image.isNull() else False)
+            self._repaint_path(path)
+
+        def failed(_exc) -> None:
+            _pending_previews.discard(key)
+            _remember(_video_thumbs, key, False)
+
+        run_bg(work, on_done=done, on_error=failed, pool=_video_pool)
+        return None
+
+    def _folder_preview(self, entry: Entry) -> QIcon | None:
+        """La carpeta con sus primeras imágenes dentro. Sin imágenes, el icono de siempre."""
+        path, side = entry.path, self.thumb_size
+        key = ("folder", path, entry.mtime, side)
+        if key in _folder_thumbs:
+            _folder_thumbs.move_to_end(key)
+            return _folder_thumbs[key] or None
+        if key in _pending_previews:
+            return None
+        _pending_previews.add(key)
+        cell = max(16, side // 2)
+
+        def work(_sink):
+            names = []
+            with os.scandir(path) as found:
+                for number, item in enumerate(found):
+                    if number >= MAX_FOLDER_SCAN:
+                        break
+                    extension = os.path.splitext(item.name)[1][1:].lower()
+                    if extension in IMAGE_EXTENSIONS and not item.name.startswith(".") and item.is_file() and item.stat().st_size <= MAX_THUMB_FILE:
+                        names.append(item.name)
+            images = []
+            for name in sorted(names, key=str.lower):
+                reader = QImageReader(os.path.join(path, name))
+                reader.setAutoTransform(True)
+                size = reader.size()
+                if size.isValid():
+                    reader.setScaledSize(size.scaled(QSize(cell, cell), Qt.AspectRatioMode.KeepAspectRatio))
+                image = reader.read()
+                if not image.isNull():
+                    images.append(image)
+                    if len(images) == FOLDER_PREVIEW_IMAGES:
+                        break
+            return images
+
+        def done(images) -> None:
+            _pending_previews.discard(key)
+            _remember(_folder_thumbs, key, folder_with_images(icon_for(entry), images, side) if images else False)
+            if images:
+                self._repaint_path(path)
+
+        def failed(_exc) -> None:
+            _pending_previews.discard(key)
+            _remember(_folder_thumbs, key, False)
+
+        run_bg(work, on_done=done, on_error=failed, pool=_thumb_pool)
+        return None
+
+    def set_previews(self, video_thumbnails: str, folder_previews: bool, ffmpeg_dir: str) -> None:
+        if (video_thumbnails, folder_previews, ffmpeg_dir) == (self.video_thumbnails, self.folder_previews, self.ffmpeg_dir):
+            return
+        self.video_thumbnails, self.folder_previews, self.ffmpeg_dir = video_thumbnails, folder_previews, ffmpeg_dir
+        if self.rowCount():
+            self.dataChanged.emit(self.index(0, 0), self.index(self.rowCount() - 1, 0), [Qt.ItemDataRole.DecorationRole])
+
+    def set_generation_marks(self, enabled: bool, kinds: str = "both") -> None:
+        if (enabled, kinds) != (self.generation_marks, self.generation_kinds):
+            self.generation_marks, self.generation_kinds = enabled, kinds
+            if self.rowCount():
+                self.dataChanged.emit(self.index(0, 0), self.index(self.rowCount() - 1, 0), [GenerationRole])
+
     def _request_thumb(self, entry: Entry) -> None:
         path = entry.path
         in_archive = entry.in_archive
-        if path in self._thumb_pending or entry.size > MAX_THUMB_FILE or not (in_archive or os.path.isfile(path)):
+        on_server = remote.is_remote(path)
+        if on_server and not self.remote_previews:
+            return  # se descargarían todas las imágenes de la carpeta: solo si se ha pedido
+        if path in self._thumb_pending or entry.size > MAX_THUMB_FILE or not (in_archive or on_server or os.path.isfile(path)):
             return
         self._thumb_pending.add(path)
         generation = self._generation
+
+        side = self.thumb_size
 
         def work(_sink):
             reader = image_reader(path, in_archive)
             reader.setAutoTransform(True)
             size = reader.size()
             if size.isValid():
-                reader.setScaledSize(size.scaled(QSize(THUMB_SIZE, THUMB_SIZE), Qt.AspectRatioMode.KeepAspectRatio))
+                reader.setScaledSize(size.scaled(QSize(side, side), Qt.AspectRatioMode.KeepAspectRatio))
             return reader.read()
 
         run_bg(work, on_done=lambda image: self._thumb_ready(generation, path, image), pool=_thumb_pool)
+
+    def set_thumb_size(self, size: int) -> None:
+        """Las miniaturas ya hechas eran de otro tamaño: se vuelven a hacer al pedirlas."""
+        if size == self.thumb_size:
+            return
+        self.thumb_size = size
+        self._thumbs.clear()
+        self._thumb_pending.clear()
+        if self.rowCount():
+            self.dataChanged.emit(self.index(0, 0), self.index(self.rowCount() - 1, 0), [Qt.ItemDataRole.DecorationRole])
+
+    def git_state(self, entry: Entry):
+        if not self.git_marks or not any(self._git_states):
+            return None
+        return git_tools.state_of(entry.path, *self._git_states)
+
+    def set_git_states(self, states) -> None:
+        self._git_states = states or ({}, {}, ())
+        if self.rowCount():
+            self.dataChanged.emit(self.index(0, 0), self.index(self.rowCount() - 1, 0), [GitRole, Qt.ItemDataRole.ForegroundRole])
+
+    def set_git_marks(self, enabled: bool) -> None:
+        if enabled != self.git_marks:
+            self.git_marks = enabled
+            if self.rowCount():
+                self.dataChanged.emit(self.index(0, 0), self.index(self.rowCount() - 1, 0), [GitRole, Qt.ItemDataRole.ForegroundRole])
+
+    def _shown_marks(self, marks):
+        """Las marcas que se han elegido mostrar: las dos, solo la del prompt o solo la del flujo."""
+        if not marks:
+            return None
+        has_prompt, workflow, tool = marks[:3]
+        has_prompt, workflow = has_prompt and self.generation_kinds != "workflow", workflow and self.generation_kinds != "prompt"
+        return (has_prompt, workflow, tool) if has_prompt or workflow else None
+
+    def _generation_mark(self, entry: Entry):
+        """(prompt, workflow, programa), o None. Solo de los archivos del equipo: hay que leer sus metadatos, y se hace en segundo plano."""
+        path = entry.path
+        key = (path, entry.mtime)
+        if key in self._generated:
+            return self._generated[key] if self.generation_marks else None
+        extension = entry.extension
+        if (not self.generation_marks or entry.is_dir or entry.in_archive or remote.is_remote(path) or key in self._generated_pending
+                or extension not in ai_metadata.IMAGE_EXTENSIONS | ai_metadata.VIDEO_EXTENSIONS):
+            return None
+        self._generated_pending.add(key)
+        if len(self._generated) > MAX_REMEMBERED_MARKS:
+            self._generated.clear()
+
+        def found(generation) -> None:
+            self._generated_pending.discard(key)
+            marks = generation.marks if generation is not None and (generation.has_prompt or generation.workflow) else None
+            self._generated[key] = marks
+            row = self.row_of(path)
+            if marks and row >= 0:
+                self.dataChanged.emit(self.index(row, 0), self.index(row, 0), [GenerationRole, Qt.ItemDataRole.ToolTipRole])
+
+        run_bg(lambda _sink: ai_metadata.read_generation(path, extension), on_done=found, pool=_thumb_pool)
+        return None
 
     def _thumb_ready(self, generation: int, path: str, image) -> None:
         if generation != self._generation or image.isNull():

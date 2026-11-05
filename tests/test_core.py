@@ -1128,4 +1128,29 @@ def test_is_inside_archive(zip_file):
 
 def test_open_with_and_browse_are_in_the_file_menu_of_an_older_configuration():
     layout = context_menu.normalize_layout({"order": ["Abrir", "Copiar"], "hidden": []}, context_menu.FILE)
-    assert layout["order"].index(context_menu.OPEN_WITH) == 1 and layout["order"].index(context_menu.BROWSE_ARCHIVE) == 2
+    assert layout["order"].index(context_menu.OPEN_WITH) == 1 and layout["order"].index(context_menu.BROWSE_ARCHIVE) == 4  # detrás de «Editar Markdown» y «Ver JSON»
+
+
+def test_verified_copy_keeps_good_copies_and_drops_bad_ones(tmp_path, monkeypatch):
+    from directory_commander_tux_tux.core import fsops as module
+
+    source, target = tmp_path / "origen", tmp_path / "destino"
+    source.mkdir()
+    target.mkdir()
+    (source / "bueno.bin").write_bytes(os.urandom(3 * 1024 * 1024 + 7))
+    result = module.transfer([str(source / "bueno.bin")], str(target), verify=True)
+    assert result.ok and (target / "bueno.bin").read_bytes() == (source / "bueno.bin").read_bytes()
+    monkeypatch.setattr(module, "_written_hash", lambda path, sink: b"otro")  # el disco devolvió algo distinto de lo escrito
+    (source / "malo.bin").write_bytes(b"datos")
+
+    def other_disk(*_args):
+        raise OSError("otro disco")  # mover a otro disco es copiar y después borrar el original
+
+    monkeypatch.setattr(module.os, "rename", other_disk)
+    result = module.transfer([str(source / "malo.bin")], str(target), move=True, verify=True)
+    monkeypatch.undo()
+    assert result.errors and "no es igual" in result.errors[0][1]
+    assert not (target / "malo.bin").exists() and not list(target.glob("*" + module.PART_SUFFIX))
+    assert (source / "malo.bin").exists()  # al mover, el original se queda
+    result = module.transfer([str(source / "malo.bin")], str(target))  # sin comprobar, ni se mira
+    assert result.ok and (target / "malo.bin").exists()

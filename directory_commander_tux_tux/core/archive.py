@@ -68,6 +68,8 @@ def is_archive_file(path: str) -> bool:
 
 def split_archive_path(path: str) -> tuple[str, str] | None:
     """Separa `dir/a.zip/x/y` en (`dir/a.zip`, `x/y`). None si no pasa por un comprimido."""
+    if path.startswith("sftp://"):
+        return None  # una carpeta de un servidor: los comprimidos de allí no se abren como carpetas
     current = os.path.normpath(path)
     inner: list[str] = []
     while True:

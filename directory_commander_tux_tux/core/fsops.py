@@ -11,7 +11,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 
-from . import archive
+from . import archive, remote
 from .i18n import tr
 
 CHUNK = 1024 * 1024
@@ -147,6 +147,7 @@ class OpResult:
     placed: list[tuple[str, str, bool]] = field(default_factory=list)
     # (nombre que tenía, nombre que tiene): archivos existentes apartados para dejar sitio al nuevo.
     renamed: list[tuple[str, str]] = field(default_factory=list)
+    summary: str = ""  # lo que se dice al terminar, en lugar de «terminado»
 
     @property
     def ok(self) -> bool:
@@ -159,6 +160,9 @@ def _is_real_dir(path: str) -> bool:
 
 def tree_size(path: str, sink: ProgressSink | None = None) -> tuple[int, int]:
     """(bytes, archivos) de un elemento. No sigue enlaces y omite lo que no se puede leer."""
+    if remote.is_remote(path):
+        from . import remote_ops
+        return remote_ops.tree_size(path, sink)
     location = archive.split_archive_path(path)
     if location is not None:
         members = [m for m in archive.members_under(*location) if not m.is_dir]
@@ -246,12 +250,16 @@ def same_volume(path: str, folder: str) -> bool:
 
 def can_move(paths: list[str]) -> bool:
     """De dentro de un comprimido solo se puede copiar, y la raíz de una unidad no se mueve."""
-    return not any(archive.is_inside_archive(path) or is_filesystem_root(path) for path in paths)
+    return not any(not remote.is_remote(path) and (archive.is_inside_archive(path) or is_filesystem_root(path)) for path in paths)
 
 
 def drop_operation(paths: list[str], dest_dir: str, force_move: bool = False, force_copy: bool = False) -> str | None:
     """Qué hace soltar esos elementos en una carpeta: "move", "copy" o None si no hay nada que hacer.
     Como en cualquier explorador: en la misma unidad se mueve y a otra unidad se copia, salvo que se pida lo contrario."""
+    if remote.is_remote(dest_dir) or any(remote.is_remote(path) for path in paths):
+        from . import remote_ops
+        operation = remote_ops.drop_operation(paths, dest_dir, force_move)
+        return "copy" if operation and force_copy else operation
     if not paths or not os.path.isdir(dest_dir) or archive.split_archive_path(dest_dir) is not None:
         return None
     if all(_same_path(os.path.dirname(path.rstrip("/\\")), dest_dir) for path in paths):
@@ -267,8 +275,9 @@ def drop_operation(paths: list[str], dest_dir: str, force_move: bool = False, fo
 
 class _Transfer:
     def __init__(self, move: bool, policy: Collision, sink: ProgressSink, total: int, result: OpResult,
-                 state: TransferState | None = None, ask=None) -> None:
+                 state: TransferState | None = None, ask=None, verify: bool = False) -> None:
         self.move, self.policy, self.sink, self.total, self.result = move, policy, sink, total, result
+        self.verify = verify
         self.ask = ask
         self.skip_identical = False
         self.state = state or TransferState()
@@ -492,6 +501,7 @@ class _Transfer:
             return
         tmp = dest + PART_SUFFIX
         self._begin_item(os.path.basename(src), os.path.getsize(src))
+        original = hashlib.blake2b() if self.verify else None
         try:
             with open(src, "rb") as fin, open(tmp, "wb") as fout:
                 while chunk := fin.read(CHUNK):
@@ -499,7 +509,14 @@ class _Transfer:
                     if self.state.skip_requested:
                         raise _SkipFile()
                     fout.write(chunk)
+                    if original is not None:
+                        original.update(chunk)
                     self.add(len(chunk))
+                if original is not None:
+                    fout.flush()
+                    os.fsync(fout.fileno())  # que esté en el disco, para releer lo que de verdad quedó escrito
+            if original is not None and _written_hash(tmp, self.sink) != original.digest():
+                raise OSError(tr("La copia no es igual al original: se ha descartado"))
             try:
                 shutil.copystat(src, tmp)
             except OSError:
@@ -509,6 +526,19 @@ class _Transfer:
             if os.path.exists(tmp):
                 os.unlink(tmp)
             raise
+
+
+def _written_hash(path: str, sink: ProgressSink) -> bytes:
+    """El hash de lo escrito, leído del disco: en Linux se descarta antes la copia que guarda el sistema en memoria, que daría
+    siempre lo que se acaba de escribir aunque el disco hubiera fallado."""
+    digest = hashlib.blake2b()
+    with open(path, "rb") as fin:
+        if hasattr(os, "posix_fadvise"):
+            os.posix_fadvise(fin.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
+        while chunk := fin.read(CHUNK):
+            sink.check()
+            digest.update(chunk)
+    return digest.digest()
 
 
 def restore_renamed(pairs: list[tuple[str, str]], result: OpResult) -> None:
@@ -523,22 +553,36 @@ def restore_renamed(pairs: list[tuple[str, str]], result: OpResult) -> None:
 
 def transfer(sources: list[str], dest_dir: str, move: bool = False,
              policy: Collision = Collision.RENAME, sink: ProgressSink | None = None,
-             new_name: str | None = None, ask=None) -> OpResult:
+             new_name: str | None = None, ask=None, verify: bool = False) -> OpResult:
     """Copia o mueve. Un archivo se publica en el destino solo cuando está completo.
+
+    `verify` relee cada copia y la compara con el original (BLAKE2b): si no son iguales, la copia se descarta y, al mover, el
+    original se conserva. No se aplica con un servidor por medio ni al extraer de un comprimido.
 
     `new_name` da otro nombre en el destino y exige un único origen.
     `ask(origen, destino)`, con Collision.ASK, se llama desde este hilo y devuelve un Answer, o None para cancelar.
     """
+    if remote.is_remote(dest_dir) or any(remote.is_remote(src) for src in sources):
+        from . import remote_ops
+        return remote_ops.transfer(sources, dest_dir, move, policy, sink, new_name, ask)
     if new_name is not None and len(sources) != 1:
         raise ValueError(tr("Solo se puede dar otro nombre a un elemento cada vez"))
     sink = sink or ProgressSink()
     result = OpResult()
     state = sink.transfer = TransferState()
+    if move:
+        # Se rechaza antes de medir: medir la raíz recorrería el disco entero, y todo lo montado en él, para nada.
+        roots = [src for src in sources if is_filesystem_root(src)]
+        result.errors.extend((src, tr("No se puede mover la raíz de una unidad")) for src in roots)
+        sources = [src for src in sources if src not in roots]
+        if not sources:
+            state.ready = True
+            return result
     try:
         sizes = [tree_size(s, sink) for s in sources]
         total = sum(size for size, _count in sizes)
         state.total_bytes, state.total_items, state.ready = total, sum(count for _size, count in sizes), True
-        job = _Transfer(move, policy, sink, total, result, state, ask)
+        job = _Transfer(move, policy, sink, total, result, state, ask, verify)
         for src in sources:
             try:
                 job.run_source(src, dest_dir, new_name)
@@ -575,6 +619,11 @@ def remove_tree(path: str) -> None:
 
 def delete_paths(paths: list[str], permanent: bool = False, trash=None, sink: ProgressSink | None = None) -> OpResult:
     """Borra rutas. Si la papelera falla informa del error; nunca borra en definitiva por su cuenta."""
+    if any(remote.is_remote(path) for path in paths):
+        if not permanent:
+            raise OSError(tr("En un servidor no hay papelera: solo se puede eliminar definitivamente"))
+        from . import remote_ops
+        return remote_ops.delete_paths(paths, sink)
     sink = sink or ProgressSink()
     result = OpResult()
     for index, path in enumerate(paths):
@@ -783,6 +832,9 @@ def create_folder(parent: str, name: str) -> str:
     reason = validate_name(name)
     if reason:
         raise ValueError(reason)
+    if remote.is_remote(parent):
+        from . import remote_ops
+        return remote_ops.create_folder(parent, name)
     path = os.path.join(parent, name)
     os.mkdir(path)
     return path
@@ -792,6 +844,9 @@ def create_file(parent: str, name: str) -> str:
     reason = validate_name(name)
     if reason:
         raise ValueError(reason)
+    if remote.is_remote(parent):
+        from . import remote_ops
+        return remote_ops.create_file(parent, name)
     path = os.path.join(parent, name)
     with open(path, "x", encoding="utf-8"):
         pass
@@ -802,6 +857,9 @@ def rename_one(path: str, new_name: str) -> str:
     reason = validate_name(new_name)
     if reason:
         raise ValueError(reason)
+    if remote.is_remote(path):
+        from . import remote_ops
+        return remote_ops.rename_one(path, new_name)
     target = os.path.join(os.path.dirname(path), new_name)
     # En Windows y macOS solo cambiar mayúsculas apunta al mismo archivo.
     if os.path.lexists(target) and not (os.path.exists(path) and os.path.samefile(path, target)):

@@ -71,7 +71,7 @@ def normalize_smart(raw) -> dict:
 
 
 def is_virtual(path: str) -> bool:
-    return path == COMPUTER_PATH or is_results(path) or archive.is_inside_archive(path)
+    return path == COMPUTER_PATH or is_results(path) or path.startswith("sftp://") or archive.is_inside_archive(path)
 
 
 def is_excluded(path: str, exclude: list[dict]) -> bool:

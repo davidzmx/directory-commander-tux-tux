@@ -3,26 +3,28 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import time
 from pathlib import PurePath
 
-from PySide6.QtCore import (QEvent, QFileSystemWatcher, QItemSelection, QItemSelectionModel, QModelIndex, QObject, QPoint, QRect,
+from PySide6.QtCore import (QEvent, QFileSystemWatcher, QItemSelection, QItemSelectionModel, QModelIndex, QObject, QPoint, QPointF, QRect, QRectF,
                             QSize, Qt, QTimer, Signal)
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPalette
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter, QPalette, QPen
 from PySide6.QtWidgets import (QAbstractItemView, QAbstractSlider, QApplication, QFrame, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
                                QListView, QMenu, QRubberBand, QSizePolicy, QStackedLayout, QStackedWidget, QStyle,
-                               QStyleOptionViewItem, QStyledItemDelegate, QTableView, QToolButton, QVBoxLayout,
+                               QStyleOptionViewItem, QStyledItemDelegate, QTableView, QToolButton, QToolTip, QVBoxLayout,
                                QWidget)
 
-from ..core import archive
+from ..core import archive, git_tools, remote
 from ..core.bar_buttons import PATH
 from ..core.listing import COMPUTER_LABEL, COMPUTER_PATH, format_size, has_computer_view, is_results, list_dir, location_label, results_name, sort_entries
 from ..core.platform_utils import home_dir, root_of
 from . import theme
+from .background import run_bg
 from .drag_drop import DropDecider, accept_drop, show_operation, start_drag
 from .hover_card import HoverCard
 from .icons import pixmap, themed
-from .model import COLUMNS, EntryRole, FileModel, folder_icon
-from ..core.i18n import tr
+from .model import COLUMNS, EntryRole, FileModel, GenerationRole, GitRole, folder_icon
+from ..core.i18n import N_, tr
 
 COLUMN_INDEX = {key: index for index, (key, _label) in enumerate(COLUMNS)}
 INDENT = 14
@@ -32,6 +34,11 @@ DISK_FULL = 0.9
 GROUP_ROW_EXTRA = 12
 MIN_DRIVE_NAME_WIDTH = 190
 MIN_BREADCRUMB_WIDTH = 60
+MIN_NAME_COLUMN = 120
+MAX_FOLDER_VIEWS = 2000
+PROMPT_MARK_COLOR = "#8e44ad"
+WORKFLOW_MARK_COLOR = "#16a085"
+LONG_MARKS_FROM = 120  # en miniaturas desde este tamaño, «Prompt» y «Workflow»; en las más pequeñas y en la lista, «P» y «W»
 DRIVE_COLUMN_WIDTHS = {"filesystem": 130, "type": 190, "used": 150, "free": 92}  # en el orden en que se ocultan
 SIZE_COLUMN_WIDTH = 72
 CHECKBOX_WIDTH = 20
@@ -68,6 +75,170 @@ def paint_find_match(painter, view, option, text: str, text_rect: QRect, margin:
     painter.setFont(option.font)
     painter.drawText(area, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, found)
     painter.restore()
+
+
+MARKER_WHOLE_ICON = 48  # hasta este tamaño la marca ocupa todo el icono; en las miniaturas, solo su esquina, para que se siga viendo la imagen
+
+
+def marker_rect(icon: QRect) -> QRect:
+    """La marca para seleccionar en el modo de un clic: el icono entero o, en las miniaturas, su esquina de arriba a la izquierda."""
+    if icon.width() <= MARKER_WHOLE_ICON:
+        return QRect(icon)
+    size = max(24, icon.width() // 4)
+    return QRect(icon.left(), icon.top(), size, size)
+
+
+def paint_select_marker(painter, view, index, icon: QRect) -> None:
+    """Un + para añadir el archivo a la selección, o un − para quitarlo. Solo en el modo de un clic y sobre el archivo que está bajo el ratón."""
+    if not view.single_click or view.hover_row != index.row():
+        return
+    rect = QRectF(marker_rect(icon)).adjusted(0.5, 0.5, -0.5, -0.5)
+    selected = view.selectionModel().isRowSelected(index.row(), QModelIndex()) if view.selectionModel() else False
+    colors = theme.current()
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(QPen(QColor(colors.accent).darker(130), 1))
+    painter.setBrush(QColor(colors.accent))
+    radius = max(2.0, rect.width() / 7)
+    painter.drawRoundedRect(rect, radius, radius)
+    painter.setPen(QPen(QColor("#ffffff"), max(1.6, rect.width() / 7), Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+    middle, reach = rect.center(), rect.width() * 0.28
+    painter.drawLine(QPointF(middle.x() - reach, middle.y()), QPointF(middle.x() + reach, middle.y()))
+    if not selected:
+        painter.drawLine(QPointF(middle.x(), middle.y() - reach), QPointF(middle.x(), middle.y() + reach))
+    painter.restore()
+
+
+def generation_badges(marks, long: bool = False) -> list[tuple[str, str]]:
+    """Las marcas de una imagen o un vídeo generado con IA: una si lleva el prompt y otra si lleva el flujo (workflow)."""
+    if not marks:
+        return []
+    has_prompt, workflow, _tool = marks
+    badges = [(tr("Prompt") if long else "P", PROMPT_MARK_COLOR)] if has_prompt else []
+    return badges + ([(tr("Workflow") if long else "W", WORKFLOW_MARK_COLOR)] if workflow else [])
+
+
+def _badge_font(base: QFont, pixels: int) -> QFont:
+    font = QFont(base)
+    font.setBold(True)
+    font.setPixelSize(max(8, pixels))
+    return font
+
+
+def _badge_widths(badges, font: QFont) -> list[int]:
+    metrics = QFontMetrics(font)
+    return [metrics.horizontalAdvance(text) + 6 for text, _color in badges]
+
+
+def paint_badges(painter, badges, font: QFont, left: float, top: float, height: float) -> list[QRectF]:
+    """Las pinta en fila y devuelve dónde quedó cada una, para su descripción emergente."""
+    places = []
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setFont(font)
+    for (text, color), width in zip(badges, _badge_widths(badges, font)):
+        rect = QRectF(left, top, width, height)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(color))
+        painter.drawRoundedRect(rect, 3, 3)
+        painter.setPen(QColor("#ffffff"))
+        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
+        places.append(rect)
+        left += width + 2
+    painter.restore()
+    return places
+
+
+# Estado de git: modificado, añadido, renombrado, borrado, nuevo sin seguimiento y en conflicto. Lo ignorado no lleva marca: se ve más tenue.
+GIT_MARKS = {"M": ("M", "#d9822b"), "A": ("A", "#2ea043"), "R": ("R", "#3b82c4"), "D": ("D", "#cf222e"), "?": ("U", "#3fa36b"), "U": ("C", "#cf222e")}
+
+
+def git_badges(state) -> list[tuple[str, str]]:
+    """La de un archivo, con su letra; la de una carpeta con cambios dentro, un punto del color del más importante."""
+    if not state or state[0] not in GIT_MARKS:
+        return []
+    letter, color = GIT_MARKS[state[0]]
+    return [("•" if state[1] else letter, color)]
+
+
+def row_badges(index) -> list[tuple[str, str]]:
+    """Las marcas cortas de una fila: las de IA y la de git."""
+    return generation_badges(index.data(GenerationRole)) + git_badges(index.data(GitRole))
+
+
+_GIT_MEANINGS = {"M": N_("Modificado"), "A": N_("Añadido"), "R": N_("Renombrado"), "D": N_("Borrado"), "?": N_("Sin seguimiento: nuevo, git aún no lo guarda"),
+                 "U": N_("En conflicto: hay que resolverlo antes del commit")}
+
+
+def badge_meanings(index) -> list[str]:
+    """Qué significa cada marca de la fila, en el mismo orden en que se pintan. Solo las de git lo dicen: las de IA, vacío."""
+    marks = index.data(GenerationRole)
+    found = [""] * (bool(marks and marks[0]) + bool(marks and marks[1]))
+    state = index.data(GitRole)
+    if state and state[0] in _GIT_MEANINGS:
+        meaning = tr(_GIT_MEANINGS[state[0]])
+        found.append(tr("Git: hay cambios dentro. El más importante: {meaning}", meaning=meaning) if state[1] else tr("Git: {meaning}", meaning=meaning))
+    return found
+
+
+def remember_badges(view, index, places: list[QRectF]) -> None:
+    """Dónde quedaron las marcas de esa fila, para decir qué significan al pasar el ratón por encima."""
+    spots = view.__dict__.setdefault("badge_spots", {})
+    if places:
+        spots[index.row()] = list(zip(places, badge_meanings(index)))
+    else:
+        spots.pop(index.row(), None)
+
+
+def badge_at(view, row: int, point) -> tuple[str, QRect]:
+    """Qué significa la marca que hay en ese punto y dónde está; nada si no hay ninguna."""
+    return next(((meaning, place.toAlignedRect()) for place, meaning in view.__dict__.get("badge_spots", {}).get(row, ())
+                 if meaning and place.contains(QPointF(point))), ("", QRect()))
+
+
+def badge_meaning_at(view, row: int, point) -> str:
+    return badge_at(view, row, point)[0]
+
+
+def paint_generation_mark(painter, index, icon: QRect) -> list[QRectF]:
+    """Las marcas de IA en la esquina de arriba a la derecha de la miniatura o del icono grande, y la de git abajo a la izquierda."""
+    font = _badge_font(painter.font(), min(12, icon.height() // 8))
+    height = QFontMetrics(font).height() + 1
+    places = []
+    badges = generation_badges(index.data(GenerationRole), icon.width() >= LONG_MARKS_FROM)
+    if badges:
+        widths = _badge_widths(badges, font)
+        places += paint_badges(painter, badges, font, icon.right() - 1 - sum(widths) - 2 * (len(widths) - 1), icon.top() + 1, height)
+    git = git_badges(index.data(GitRole))
+    if git:
+        places += paint_badges(painter, git, font, icon.left() + 1, icon.bottom() - height, height)
+    return places
+
+
+def inline_marks_width(badges, font: QFont) -> int:
+    """Lo que ocupan las marcas detrás del nombre, en la lista y en detalles, con su separación."""
+    if not badges:
+        return 0
+    widths = _badge_widths(badges, _badge_font(font, QFontMetrics(font).height() - 4))
+    return sum(widths) + 2 * (len(widths) - 1) + 6
+
+
+def paint_inline_marks(painter, badges, font: QFont, left: int, cell: QRect) -> list[QRectF]:
+    if not badges:
+        return []
+    badge_font = _badge_font(font, QFontMetrics(font).height() - 4)
+    height = QFontMetrics(badge_font).height()
+    return paint_badges(painter, badges, badge_font, left + 4, cell.center().y() - height / 2 + 0.5, height)
+
+
+def text_end(view, delegate, option, index) -> int:
+    """Dónde acaba el nombre pintado por el estilo, recortado o no."""
+    filled = QStyleOptionViewItem(option)
+    delegate.initStyleOption(filled, index)
+    style = view.style()
+    rect = style.subElementRect(QStyle.SubElement.SE_ItemViewItemText, filled, view)
+    margin = style.pixelMetric(QStyle.PixelMetric.PM_FocusFrameHMargin, filled, view) + 1
+    return rect.left() + margin + min(filled.fontMetrics.horizontalAdvance(filled.text), max(0, rect.width() - 2 * margin))
 
 
 def paint_style_option_match(painter, view, delegate, option, index) -> None:
@@ -166,13 +337,21 @@ class NameDelegate(QStyledItemDelegate):
             painter.fillRect(area, view.selection_color())
         elif view.hover_row == index.row():
             painter.fillRect(area, QColor(theme.current().hover))
+        marks = row_badges(index)
         shifted = option.__class__(option)
-        shifted.rect = option.rect.adjusted(offset, 0, 0, 0)
+        shifted.rect = option.rect.adjusted(offset, 0, -inline_marks_width(marks, option.font), 0)  # el nombre se recorta antes que las marcas
         shifted.state &= ~(QStyle.StateFlag.State_MouseOver | QStyle.StateFlag.State_Selected)
         self._selected_now = selected
         super().paint(painter, shifted, index)
         self._selected_now = False
+        remember_badges(view, index, paint_inline_marks(painter, marks, option.font, text_end(view, self, shifted, index), option.rect) if marks else [])
         paint_style_option_match(painter, view, self, shifted, index)
+        paint_select_marker(painter, view, index, self.icon_rect(view, shifted, index))
+
+    def icon_rect(self, view, option, index) -> QRect:
+        filled = QStyleOptionViewItem(option)
+        self.initStyleOption(filled, index)
+        return view.style().subElementRect(QStyle.SubElement.SE_ItemViewItemDecoration, filled, view)
 
     def initStyleOption(self, option, index) -> None:
         super().initStyleOption(option, index)
@@ -227,7 +406,7 @@ class TileDelegate(QStyledItemDelegate):
         style = option.widget.style() if option.widget else None
         if style:
             style.drawPrimitive(QStyle.PrimitiveElement.PE_PanelItemViewItem, option, painter, option.widget)
-        icon_rect = QRect(option.rect.left() + 4, option.rect.top() + 4, 48, 48)
+        icon_rect = self.icon_rect(option.rect)
         option.icon.paint(painter, icon_rect)
         text_rect = option.rect.adjusted(58, 6, -4, -4)
         details = entry.type_label if entry.is_dir else f"{entry.type_label} · {format_size(entry.effective_size)}"
@@ -245,6 +424,12 @@ class TileDelegate(QStyledItemDelegate):
         plain = QStyleOptionViewItem(option)
         plain.displayAlignment = Qt.AlignmentFlag.AlignLeft
         paint_find_match(painter, self.parent(), plain, entry.display_name, name_line, 0)
+        paint_select_marker(painter, self.parent(), index, icon_rect)
+        remember_badges(self.parent(), index, paint_generation_mark(painter, index, icon_rect))
+
+    @staticmethod
+    def icon_rect(cell: QRect) -> QRect:
+        return QRect(cell.left() + 4, cell.top() + 4, 48, 48)
 
 
 _MAX_REMEMBERED_SIZES = 200_000
@@ -272,10 +457,16 @@ class ItemDelegate(QStyledItemDelegate):
             return super().sizeHint(option, index)
         entry = index.data(EntryRole)
         metrics = option.fontMetrics
-        key = (entry.display_name, entry.depth, index.model().check_mode, metrics.height(), metrics.averageCharWidth()) if entry else None
+        limit = view.name_limit * metrics.averageCharWidth() if view.name_limit else 0
+        marks = tuple(row_badges(index))
+        key = (entry.display_name, entry.depth, index.model().check_mode, metrics.height(), metrics.averageCharWidth(), limit, marks) if entry else None
         size = self._sizes.get(key) if key else None
         if size is None:
-            size = QSize(super().sizeHint(option, index).width() + self._indent(index), metrics.height() + 3)
+            width = super().sizeHint(option, index).width()
+            if limit:
+                # Un nombre larguísimo no ensancha toda su columna: se recorta por el medio, con «…», y entero se ve al pasar el ratón.
+                width = min(width, limit + option.decorationSize.width() + 12)
+            size = QSize(width + self._indent(index) + inline_marks_width(marks, option.font), metrics.height() + 3)
             if key:
                 if len(self._sizes) >= _MAX_REMEMBERED_SIZES:
                     self._sizes.clear()
@@ -295,6 +486,12 @@ class ItemDelegate(QStyledItemDelegate):
         width = min(option.fontMetrics.horizontalAdvance(option.text) + 2 * margin + 3, text.width())
         return QRect(option.rect.left(), option.rect.top(), text.left() - option.rect.left() + width, option.rect.height())
 
+    def icon_rect(self, option: QStyleOptionViewItem, index: QModelIndex) -> QRect:
+        view = self.parent()
+        self.initStyleOption(option, index)
+        option.rect = option.rect.adjusted(self._indent(index), 0, 0, 0)
+        return view.style().subElementRect(QStyle.SubElement.SE_ItemViewItemDecoration, option, view)
+
     def paint(self, painter, option, index) -> None:
         view = self.parent()
         narrow = QStyleOptionViewItem(option)
@@ -310,12 +507,35 @@ class ItemDelegate(QStyledItemDelegate):
             name = "chevron-down" if model.is_expanded(entry.path) else "chevron-right"
             left = option.rect.left() + entry.depth * INDENT + 1
             painter.drawPixmap(QRect(left, option.rect.center().y() - 6, 12, 12), pixmap(name, 12))
-        if not view.full_row and view.viewMode() != QListView.ViewMode.IconMode:
-            narrow.rect = self.content_rect(QStyleOptionViewItem(option), index)
+        in_rows = view.viewMode() != QListView.ViewMode.IconMode
+        marks = row_badges(index)
+        reserve = inline_marks_width(marks, option.font) if in_rows else 0
+        room = QStyleOptionViewItem(option)
+        room.rect = option.rect.adjusted(0, 0, -reserve, 0)  # el nombre se recorta antes que las marcas
+        if not view.full_row and in_rows:
+            narrow.rect = self.content_rect(QStyleOptionViewItem(room), index)
         elif view.full_row and view.list_mode:
-            narrow.rect = option.rect.adjusted(self._indent(index), 0, 0, 0)
+            narrow.rect = room.rect.adjusted(self._indent(index), 0, 0, 0)
         super().paint(painter, narrow, index)
         paint_style_option_match(painter, view, self, narrow, index)
+        if view.single_click and view.hover_row == index.row():
+            paint_select_marker(painter, view, index, self.icon_rect(QStyleOptionViewItem(option), index))
+        if marks and in_rows:
+            remember_badges(view, index, paint_inline_marks(painter, marks, option.font, self.content_rect(QStyleOptionViewItem(room), index).right(), option.rect))
+        elif not in_rows and marks:
+            icon = self.icon_rect(QStyleOptionViewItem(option), index)
+            remember_badges(view, index, paint_generation_mark(painter, index, _drawn_icon(index, icon)))
+        else:
+            remember_badges(view, index, [])  # ya no tiene marcas: que no quede la descripción de las que tuvo
+
+
+def _drawn_icon(index: QModelIndex, area: QRect) -> QRect:
+    """Lo que ocupa de verdad la miniatura dentro de su hueco: una foto apaisada no llega arriba del todo."""
+    icon = index.data(Qt.ItemDataRole.DecorationRole)
+    if not isinstance(icon, QIcon) or icon.isNull():
+        return area
+    size = icon.actualSize(area.size())
+    return QRect(area.left() + (area.width() - size.width()) // 2, area.top() + (area.height() - size.height()) // 2, size.width(), size.height())
 
 
 class _DropMixin:
@@ -389,6 +609,7 @@ class DetailsView(_DropMixin, QTableView):
         super().__init__(parent)
         self.hover_row = -1
         self.full_row = False
+        self.single_click = False
         self.level_colors = True
         self.pane_role = "single"
         self._name_delegate = NameDelegate(self)
@@ -423,6 +644,14 @@ class DetailsView(_DropMixin, QTableView):
         name_index = index.siblingAtColumn(0)
         return self._name_delegate.name_rect(self.visualRect(name_index), name_index.data(EntryRole), self.fontMetrics(),
                                              self.model().check_mode)
+
+    def marker_at(self, index: QModelIndex, position: QPoint) -> bool:
+        """Si ese punto cae en la marca para seleccionar ese archivo."""
+        option = QStyleOptionViewItem()
+        self.initViewItemOption(option)
+        name_index = index.siblingAtColumn(0)
+        option.rect = self.visualRect(name_index).adjusted(self._name_delegate._offset(name_index.data(EntryRole)), 0, 0, 0)
+        return marker_rect(self._name_delegate.icon_rect(self, option, name_index)).contains(position)
 
     def selection_color(self) -> QColor:
         t = theme.current()
@@ -490,6 +719,10 @@ class ItemsView(_DropMixin, QListView):
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setMouseTracking(True)
         self.full_row = False
+        self.single_click = False
+        self.name_limit = 0  # en la lista, el ancho máximo de una columna, en caracteres; 0 sin límite
+        self.thumb_size = 128
+        self.setTextElideMode(Qt.TextElideMode.ElideMiddle)  # se ven el principio y la extensión
         self.level_colors = True
         self.pane_role = "single"
         self.list_mode = False
@@ -500,6 +733,8 @@ class ItemsView(_DropMixin, QListView):
 
     def configure(self, mode: str) -> None:
         grid, icon, cell, wrap, horizontal = self.MODES[mode]
+        if mode == "thumbnails":
+            icon, cell = self.thumb_size, (self.thumb_size + 20, self.thumb_size + 44)
         self.list_mode = mode == "list"
         # Con carpetas desplegadas cada fila mide distinto; en lista, además, por su nombre.
         self.setUniformItemSizes(not self.list_mode)
@@ -517,6 +752,11 @@ class ItemsView(_DropMixin, QListView):
         self.setWordWrap(grid)
         self.setItemDelegate(self._tile if mode == "tiles" else self._plain)
 
+    def dataChanged(self, top_left, bottom_right, roles=()) -> None:
+        super().dataChanged(top_left, bottom_right, roles)
+        if self.list_mode and (GenerationRole in roles or GitRole in roles):
+            self.scheduleDelayedItemsLayout()  # las marcas ensanchan el nombre: su columna debe medirse de nuevo
+
     def finish_layout(self) -> None:
         """Coloca ya todos los elementos, sin esperar a los lotes."""
         if self.list_mode:
@@ -527,6 +767,10 @@ class ItemsView(_DropMixin, QListView):
     def scrollTo(self, index: QModelIndex, hint=QAbstractItemView.ScrollHint.EnsureVisible) -> None:
         if self.list_mode and index.isValid() and not self.visualRect(index).isValid():
             self.finish_layout()  # ese archivo aún no tiene posición: sin ella no habría adónde ir
+        # En la lista, cada archivo ocupa para Qt el ancho del nombre más largo de su columna: para «que se vea», desplazaría
+        # hasta mostrar la columna entera aunque el nombre ya estuviera a la vista. Basta con que se vea el nombre.
+        if hint == QAbstractItemView.ScrollHint.EnsureVisible and index.isValid() and self.viewport().rect().contains(self.name_rect(index)):
+            return
         super().scrollTo(index, hint)
 
     def set_hover_row(self, row: int) -> None:
@@ -544,6 +788,16 @@ class ItemsView(_DropMixin, QListView):
         self.initViewItemOption(option)
         option.rect = self.visualRect(index)
         return self._plain.content_rect(option, index)
+
+    def marker_at(self, index: QModelIndex, position: QPoint) -> bool:
+        if self.itemDelegate() is self._tile:
+            icon = TileDelegate.icon_rect(self.visualRect(index))
+        else:
+            option = QStyleOptionViewItem()
+            self.initViewItemOption(option)
+            option.rect = self.visualRect(index)
+            icon = self._plain.icon_rect(option, index)
+        return marker_rect(icon).contains(position)
 
     def lasso_rows(self):
         """Devuelve la función que dice qué elementos toca un rectángulo, dado respecto al contenido de la lista. Solo cuenta lo que ocupan, no el hueco de su celda.
@@ -575,6 +829,8 @@ def path_crumbs(path: str) -> list[tuple[str, str]]:
     """Tramos de la barra de ruta como (etiqueta, destino). En Windows empiezan por «Este equipo»."""
     if is_results(path):
         return [(results_name(path), path)]
+    if remote.is_remote(path):
+        return remote.crumbs(path)
     crumbs = [(COMPUTER_LABEL, COMPUTER_PATH)] if has_computer_view() else []
     if not path or path == COMPUTER_PATH:
         return crumbs
@@ -673,7 +929,7 @@ class Breadcrumb(QFrame):
             button.clicked.connect(lambda _=False, t=target: self.pathEntered.emit(t))
             self._row.addWidget(button)
             self._buttons.append(button)
-            if self.folder_menus:
+            if self.folder_menus and not remote.is_remote(path):  # las de un servidor habría que pedirlas por la red a cada paso
                 self._arrows[button] = self._folder_arrow(target, "" if last else crumbs[position + 1][1])
                 self._row.addWidget(self._arrows[button])
         self._row.addStretch(1)
@@ -936,7 +1192,7 @@ class DiskMeter(QWidget):
 
     def set_usage(self, free: int | None, total: int | None) -> None:
         self.has_data = bool(total)
-        self.setVisible(self.has_data and self.parentWidget().width() >= 280)
+        self.setVisible(self.has_data and self.parentWidget().width() >= 280 and getattr(self.parentWidget(), "free_shown", True))
         self._used = 1 - (free or 0) / total if total else 0.0
         self.update()
 
@@ -965,6 +1221,7 @@ class StatusRow(QFrame):
         self.chip.setObjectName("chip")
         self.chip.hide()
         self.meter = DiskMeter()
+        self.free_shown = True  # con la barra de estado general, el espacio libre va solo en ella
         row = QHBoxLayout(self)
         row.setContentsMargins(6, 1, 6, 1)
         row.setSpacing(4)
@@ -989,8 +1246,8 @@ class StatusRow(QFrame):
         self._fit(event.size().width())
 
     def _fit(self, width: int) -> None:
-        self.free.setVisible(width >= 340)
-        self.meter.setVisible(width >= 280 and self.meter.has_data)
+        self.free.setVisible(width >= 340 and self.free_shown)
+        self.meter.setVisible(width >= 280 and self.meter.has_data and self.free_shown)
         noticing = bool(self.notice.text())
         for widget in (self.folder_icon, self.dirs, self.file_icon, self.files, self.message):
             widget.setVisible(not noticing)
@@ -1023,6 +1280,9 @@ class FileView(QWidget):
     """Una carpeta abierta. Conserva historial, selección y desplazamiento al recargar."""
 
     activated = Signal(object)
+    hoveredEntryChanged = Signal(object)  # el archivo bajo el ratón, o None al salir de él
+    statusChanged = Signal()  # han cambiado los contadores o el espacio libre
+    columnsResized = Signal(dict)  # se han cambiado a mano los anchos de las columnas de detalles
     pathChanged = Signal(object)
     selectionChanged = Signal(object)
     openFile = Signal(object, object)   # vista, Entry
@@ -1054,6 +1314,10 @@ class FileView(QWidget):
         self.grid_lines = False
         self.previous_path = ""
         self.hover_enabled = True
+        self._swallow_release = False
+        self._opened_by_click = 0.0
+        self._name_manual = False  # el ancho del nombre lo ha elegido el usuario: ya no sigue al del panel
+        self._fitting_name = self._setting_widths = False
         self.hover_card = HoverCard(self)
         self._computer_columns = False
         self._had_groups = False
@@ -1061,6 +1325,10 @@ class FileView(QWidget):
         self._lasso: Lasso | None = None
         self._role_to_show = False
         self._mode_before_results = ""
+        # La vista y el orden de cada carpeta: un diccionario compartido por todos los paneles (el de la configuración), o None si no se recuerdan.
+        self.folder_views: dict | None = None
+        self.git_program = ""  # el configurado; vacío, el que haya en el sistema
+        self._applying_folder_view = False
         self.setProperty("role", "single")
         self.setAcceptDrops(True)
         self._panel_decider = DropDecider()
@@ -1121,6 +1389,9 @@ class FileView(QWidget):
         bar.addWidget(self._tool("treepane", tr("Mostrar u ocultar el árbol de carpetas de este panel"), "Set PANETREE=Toggle"))
         bar.addWidget(self._tool("terminalpane", tr("Mostrar u ocultar la terminal de este panel"), "Set TERMINAL=Toggle"))
         bar.addWidget(self._tool("terminalonly", tr("Mostrar solo la terminal en este panel"), "Set TERMINALPANE=On"))
+        bar.addWidget(self._tool("remote", tr("Conectar este panel a un servidor por SFTP"), "Set SFTP=Menu"))
+        bar.addWidget(self._tool("disconnect", tr("Desconectar este panel del servidor"), "Set SFTP=Off"))
+        self._on_server = False
         self.send_button = self._tool("sendright", tr("Mostrar esta carpeta en el otro visualizador de archivos"), "Go DEST")
         bar.addWidget(self.send_button)
         for icon, tip, command in (("swap", tr("Intercambiar paneles"), "Go SWAP"), ("close", tr("Cerrar este panel"), "Set PANE=Close")):
@@ -1177,14 +1448,16 @@ class FileView(QWidget):
 
         for view in (self.details, self.thumbs):
             # Solo `doubleClicked`: `activated` también se emite en el doble clic y abriría todo dos veces.
-            # Intro se atiende en eventFilter.
+            # Intro se atiende en eventFilter. En el modo de un clic, abre `clicked`.
             view.doubleClicked.connect(self._activate_index)
+            view.clicked.connect(self._clicked)
             view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             view.customContextMenuRequested.connect(lambda pos, v=view: self._context_menu(v, pos))
             view.installEventFilter(self)
             view.viewport().installEventFilter(self)
         self.details.selectionModel().selectionChanged.connect(self._selection_changed)
         self.model.loadFinished.connect(self._load_finished)
+        self.details.horizontalHeader().sortIndicatorChanged.connect(lambda *_args: self.remember_folder_view())
         self.model.renameFailed.connect(lambda msg: self.loadFailed.emit(self, msg))
         self.model.renamed.connect(self.renamed)
         self.model.sizesChanged.connect(self._update_status)
@@ -1256,14 +1529,81 @@ class FileView(QWidget):
         for column, (key, _) in enumerate(COLUMNS):
             if key in widths:
                 self.details.setColumnWidth(column, widths[key])
-        # El nombre absorbe el espacio libre: así un panel estrecho no recorta las demás columnas.
-        self.details.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.details.horizontalHeader().setSortIndicator(0, Qt.SortOrder.AscendingOrder)
+        # Todas se pueden ensanchar arrastrando su borde. El nombre ocupa el espacio que dejan las demás mientras no se cambie a mano:
+        # «Stretch» haría lo mismo, pero Qt no deja arrastrar una columna así.
+        header = self.details.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setMinimumSectionSize(36)
+        header.setSortIndicator(0, Qt.SortOrder.AscendingOrder)
+        header.sectionResized.connect(self._column_resized)
+        header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        header.customContextMenuRequested.connect(self._header_menu)
         self._apply_columns()
+
+    def _fit_name(self) -> None:
+        """El nombre, hasta el borde del panel. Si se ensanchó a mano, se respeta."""
+        header = self.details.horizontalHeader()
+        if self._name_manual or header.isSectionHidden(0):
+            return
+        others = sum(header.sectionSize(column) for column in range(1, header.count()) if not header.isSectionHidden(column))
+        width = max(MIN_NAME_COLUMN, self.details.viewport().width() - others)
+        if header.sectionSize(0) != width:
+            self._fitting_name = True
+            header.resizeSection(0, width)
+            self._fitting_name = False
+
+    def _column_resized(self, column: int, _old: int, _new: int) -> None:
+        if self._fitting_name or self._setting_widths:
+            return
+        by_hand = bool(QApplication.mouseButtons() & Qt.MouseButton.LeftButton)  # arrastrando su borde o con doble clic en él
+        if column == 0 and by_hand:
+            self._name_manual = True
+        elif column != 0:
+            self._fit_name()
+        if by_hand:
+            self.columnsResized.emit(self.column_widths())
+
+    def column_widths(self) -> dict[str, int]:
+        """Las de las columnas que se ven; el nombre, solo si se cambió a mano."""
+        header = self.details.horizontalHeader()
+        return {key: header.sectionSize(column) for key, column in COLUMN_INDEX.items()
+                if not header.isSectionHidden(column) and (column != 0 or self._name_manual)}
+
+    def set_column_widths(self, widths) -> None:
+        if not isinstance(widths, dict):
+            return
+        self._setting_widths = True
+        for key, width in widths.items():
+            if key in COLUMN_INDEX and isinstance(width, int) and not isinstance(width, bool) and 20 <= width <= 4000:
+                self.details.setColumnWidth(COLUMN_INDEX[key], width)
+                if key == "name":
+                    self._name_manual = True
+        self._setting_widths = False
+        self._fit_name()
+
+    def fit_name_to_pane(self) -> None:
+        self._name_manual = False
+        self._fit_name()
+        self.columnsResized.emit(self.column_widths())
+
+    def _header_menu(self, position: QPoint) -> None:
+        menu = QMenu(self)
+        menu.addAction(tr("Ajustar el nombre al ancho del panel"), self.fit_name_to_pane).setEnabled(self._name_manual)
+        menu.addAction(tr("Ajustar cada columna a su contenido"), self._fit_all_columns)
+        menu.exec(self.details.horizontalHeader().mapToGlobal(position))
+
+    def _fit_all_columns(self) -> None:
+        self._setting_widths = True
+        for column in range(1, len(COLUMNS)):
+            if not self.details.isColumnHidden(column):
+                self.details.resizeColumnToContents(column)
+        self._setting_widths = False
+        self._fit_name()
+        self.columnsResized.emit(self.column_widths())
 
     # --- navegación ---
     def navigate(self, path: str, add_history: bool = True, focus: str | None = None) -> None:
-        path = os.path.normpath(path)
+        path = remote.normalize(path) if remote.is_remote(path) else os.path.normpath(path)
         if add_history:
             if not self._history or self._history[self._history_pos] != path:
                 del self._history[self._history_pos + 1:]
@@ -1280,6 +1620,8 @@ class FileView(QWidget):
             self._mode_before_results = ""
         self.previous_path = self.path
         self.path = path
+        if changed:
+            self._apply_folder_view(path)
         self.stack.setCurrentWidget(self.current_view)
         self._focus_after_load = focus
         if changed and self.filter_edit.text():
@@ -1289,7 +1631,16 @@ class FileView(QWidget):
         self._watch(path)
         self.model.load(path, self.show_hidden, self.flat)
         self.status.show_message(tr("Cargando…"))
+        self._refresh_remote_tools()
         self.pathChanged.emit(self)
+
+    def _refresh_remote_tools(self) -> None:
+        """En un servidor: Conectar no sirve y Desconectar sí."""
+        on_server = remote.is_remote(self.path)
+        self._bar_tools()["remote"].setEnabled(not on_server)
+        if on_server != self._on_server:
+            self._on_server = on_server
+            self._fit_pane_bar()
 
     def _watch(self, path: str) -> None:
         current = self._watcher.directories()
@@ -1326,6 +1677,8 @@ class FileView(QWidget):
     def parent_path(self) -> str:
         if self.path == COMPUTER_PATH or is_results(self.path):
             return ""
+        if remote.is_remote(self.path):
+            return remote.parent(self.path)
         if self.path == root_of(self.path):
             return COMPUTER_PATH if has_computer_view() else ""
         parent = os.path.dirname(self.path.rstrip("/\\"))
@@ -1333,7 +1686,7 @@ class FileView(QWidget):
 
     def go_root(self) -> None:
         if self.path != COMPUTER_PATH and not is_results(self.path):
-            self.navigate(root_of(self.path))
+            self.navigate(remote.root(self.path) if remote.is_remote(self.path) else root_of(self.path))
 
     def go_home(self) -> None:
         self.navigate(home_dir())
@@ -1352,7 +1705,8 @@ class FileView(QWidget):
         """Rutas para operar. Lo que cuelga de una carpeta también seleccionada se omite:
         con carpetas desplegadas, de otro modo se copiaría dos veces."""
         entries = self.selected_entries()
-        folders = tuple(e.path.rstrip("/\\") + os.sep for e in entries if e.is_dir)
+        separator = "/" if remote.is_remote(self.path) else os.sep
+        folders = tuple(e.path.rstrip("/\\") + separator for e in entries if e.is_dir)
         return [e.path for e in entries if not e.path.startswith(folders)]
 
     def current_entry(self):
@@ -1360,7 +1714,7 @@ class FileView(QWidget):
         return self.model.entry(index.row()) if index.isValid() else None
 
     def select_paths(self, paths: list[str]) -> None:
-        wanted = {os.path.normpath(p) for p in paths}
+        wanted = {remote.normalize(p) if remote.is_remote(p) else os.path.normpath(p) for p in paths}
         selection = QItemSelection()
         for row, entry in self.model.entry_rows():
             if entry.path in wanted:
@@ -1390,6 +1744,68 @@ class FileView(QWidget):
         """Selecciona lo que está (o no está) en el otro panel, por nombre."""
         names = {e.name.casefold() for e in other.model.entries}
         self.select_paths([e.path for e in self.model.entries if (e.name.casefold() in names) == present])
+
+    # --- marcas de git ---
+    def _read_git_states(self) -> None:
+        """En segundo plano, como `git status`: cada vez que se lee la carpeta, también al cambiar algo en ella."""
+        path, configured = self.path, self.git_program
+        if (not self.model.git_marks or remote.is_remote(path) or path == COMPUTER_PATH or is_results(path)
+                or archive.split_archive_path(path) is not None):
+            self.model.set_git_states(None)
+            return
+
+        def work(_sink):
+            git = git_tools.git_program(configured)
+            return git_tools.folder_states(git, path) if git else None
+
+        run_bg(work, lambda states: self.path == path and self.model.set_git_states(states), lambda _exc: None)
+
+    def set_git_marks(self, enabled: bool, program: str = "") -> None:
+        self.git_program = program
+        if enabled != self.model.git_marks:
+            self.model.set_git_marks(enabled)
+            self._read_git_states()
+
+    # --- vista y orden de cada carpeta ---
+    def _remembers(self, path: str) -> bool:
+        return self.folder_views is not None and bool(path) and path != COMPUTER_PATH and not is_results(path)
+
+    def _apply_folder_view(self, path: str) -> None:
+        """Al entrar en una carpeta, la vista y el orden que se eligieron en ella. Una carpeta sin nada guardado sigue como estaba la pestaña."""
+        saved = self.folder_views.get(path) if self._remembers(path) else None
+        if not (isinstance(saved, list) and len(saved) == 3):
+            return
+        mode, column, reverse = saved
+        self._applying_folder_view = True
+        try:
+            if mode in ItemsView.MODES or mode == "details":
+                self.set_view_mode(mode)
+            if column in COLUMN_INDEX:
+                order = Qt.SortOrder.DescendingOrder if reverse else Qt.SortOrder.AscendingOrder
+                self.details.horizontalHeader().setSortIndicator(COLUMN_INDEX[column], order)
+        finally:
+            self._applying_folder_view = False
+
+    def set_default_sort(self, column: str, reverse: bool = False) -> None:
+        """El orden con que empieza la pestaña. Una carpeta con su orden recordado lo sigue usando."""
+        self._applying_folder_view = True  # no es una elección para esta carpeta: no se recuerda
+        try:
+            order = Qt.SortOrder.DescendingOrder if reverse else Qt.SortOrder.AscendingOrder
+            self.details.horizontalHeader().setSortIndicator(COLUMN_INDEX.get(column, 0), order)
+        finally:
+            self._applying_folder_view = False
+
+    def remember_folder_view(self) -> None:
+        """Lo que se acaba de elegir en esta carpeta. Las últimas se conservan; las más antiguas se olvidan."""
+        if self._applying_folder_view or not self._remembers(self.path):
+            return
+        header = self.details.horizontalHeader()
+        value = [self.view_mode, COLUMNS[header.sortIndicatorSection()][0] if 0 <= header.sortIndicatorSection() < len(COLUMNS) else "name",
+                 header.sortIndicatorOrder() == Qt.SortOrder.DescendingOrder]
+        self.folder_views.pop(self.path, None)
+        self.folder_views[self.path] = value
+        while len(self.folder_views) > MAX_FOLDER_VIEWS:
+            del self.folder_views[next(iter(self.folder_views))]
 
     # --- modos ---
     def set_view_mode(self, mode: str) -> None:
@@ -1468,6 +1884,49 @@ class FileView(QWidget):
         self.details.viewport().update()
         self.thumbs.viewport().update()
 
+    def set_thumbnail_size(self, size: int) -> None:
+        if size == self.thumbs.thumb_size:
+            return
+        self.thumbs.thumb_size = size
+        self.model.set_thumb_size(max(size, 96))  # pequeñas, se reducen de las de 96: así no se rehacen al cambiar de vista
+        if self.view_mode == "thumbnails":
+            self.thumbs.configure("thumbnails")
+
+    def set_free_space_shown(self, shown: bool) -> None:
+        self.status.free_shown = shown
+        self.status._fit(self.status.width())
+
+    def set_previews(self, video_thumbnails: str, folder_previews: bool, ffmpeg_dir: str) -> None:
+        """Las miniaturas de los vídeos (cuatro fotogramas, uno o ninguno) y las de las carpetas con sus imágenes dentro."""
+        self.model.set_previews(video_thumbnails, folder_previews, ffmpeg_dir)
+
+    def set_generation_marks(self, enabled: bool, kinds: str = "both") -> None:
+        self.model.set_generation_marks(enabled, kinds)
+        if self.thumbs.list_mode:
+            self.thumbs.scheduleDelayedItemsLayout()
+
+    def set_list_name_limit(self, characters: int) -> None:
+        """El ancho máximo de las columnas de la lista, en caracteres. 0, sin límite."""
+        if characters != self.thumbs.name_limit:
+            self.thumbs.name_limit = characters
+            if self.thumbs.list_mode:
+                self.thumbs.scheduleDelayedItemsLayout()
+
+    def name_is_cut(self, index: QModelIndex) -> bool:
+        """Si en la lista no se ve el nombre entero."""
+        items = self.thumbs
+        if self.current_view is not items or not items.list_mode or not items.name_limit:
+            return False
+        entry = index.data(EntryRole)
+        return entry is not None and items.fontMetrics().horizontalAdvance(entry.display_name) > items.name_limit * items.fontMetrics().averageCharWidth()
+
+    def set_single_click(self, enabled: bool) -> None:
+        """Un clic abre, como en el modo de un clic del escritorio; para seleccionar, la marca + del icono, Ctrl o Mayús."""
+        self.details.single_click = self.thumbs.single_click = enabled
+        for view in (self.details, self.thumbs):
+            view.viewport().unsetCursor()
+            view.viewport().update()
+
     def set_full_row(self, enabled: bool) -> None:
         self.details.full_row = self.thumbs.full_row = enabled
         self.details.viewport().update()
@@ -1489,9 +1948,11 @@ class FileView(QWidget):
         Se ocultan primero los que tienen otro camino rápido; Subir es el último."""
         tools = self._bar_tools()
         dual_only = (tools["close"], tools["swap"], self.send_button, tools["terminalonly"])
-        keys = ("terminalonly", "copypath", "favorites", "home", "refresh", "menu-arrow", "close", "swap", "send", "gitbranch", "treepane", "terminalpane", "goforward", "goback", "goup")
+        keys = ("terminalonly", "remote", "copypath", "favorites", "home", "refresh", "menu-arrow", "close", "swap", "send", "gitbranch", "treepane", "terminalpane",
+                "disconnect", "goforward", "goback", "goup")
         order = [tools[key] for key in keys]
-        wanted = [tools[key] for key in keys if key not in self._removed_tools and (self._dual_tools_visible or tools[key] not in dual_only) and (key != "gitbranch" or self.git_branch)]
+        wanted = [tools[key] for key in keys if key not in self._removed_tools and (self._dual_tools_visible or tools[key] not in dual_only) and (key != "gitbranch" or self.git_branch)
+                  and (key != "disconnect" or remote.is_remote(self.path))]
         layout = self.pane_bar.layout()
         margins = layout.contentsMargins()
         outlines = 4  # los contornos de la barra y de la ruta
@@ -1591,6 +2052,7 @@ class FileView(QWidget):
             self.details.setColumnWidth(COLUMN_INDEX["type"], 190 if computer else 92)
         for key, index in COLUMN_INDEX.items():
             self.details.setColumnHidden(index, key in hidden)
+        self._fit_name()
 
     def _apply_group_rows(self) -> None:
         """Los títulos de grupo ocupan toda la fila en detalles y no aparecen en las demás vistas."""
@@ -1637,6 +2099,7 @@ class FileView(QWidget):
             self.status.show_message(f"⚠ {error}")
             self.loadFailed.emit(self, error)
             return
+        self._read_git_states()
         self._find_after_load()
         if self._focus_after_load:
             focus = os.path.normpath(self._focus_after_load)
@@ -1675,6 +2138,17 @@ class FileView(QWidget):
         free = self.model.free_space
         status.free.setText(tr("{value} libres", value=format_size(free)) if free is not None else "")
         status.meter.set_usage(free, self.model.total_space)
+        self.statusChanged.emit()
+
+    def _clicked(self, index: QModelIndex) -> None:
+        view = self.current_view
+        if not view.single_click or QApplication.keyboardModifiers() & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier):
+            return
+        # La segunda pulsación de un doble clic, por costumbre, no debe abrir también lo que haya quedado debajo.
+        if time.monotonic() - self._opened_by_click < QApplication.doubleClickInterval() / 1000:
+            return
+        self._opened_by_click = time.monotonic()
+        self._activate_index(index)
 
     def _activate_index(self, index: QModelIndex) -> None:
         entry = self.model.entry(index.row())
@@ -1761,11 +2235,27 @@ class FileView(QWidget):
         viewports = (self.details.viewport(), self.thumbs.viewport())
         if kind == QEvent.Type.ToolTip and self._lasso is not None:
             return True  # mientras se selecciona, una tarjeta encima estorbaría
+        if kind == QEvent.Type.ToolTip and watched in viewports:
+            view = self.details if watched is viewports[0] else self.thumbs
+            under = view.indexAt(event.pos())
+            meaning, place = badge_at(view, under.row(), event.pos()) if under.isValid() else ("", QRect())
+            if meaning:  # sobre una marca: qué significa, en lugar de la tarjeta; se va al salir de la marca
+                self.hover_card.dismiss()
+                QToolTip.showText(event.globalPos(), meaning, watched, place)
+                return True
+            QToolTip.hideText()  # fuera de la marca no debe quedar lo que dijo
+        if kind == QEvent.Type.ToolTip and watched is viewports[1]:
+            index = self.hit_index(self.thumbs, event.pos())
+            entry = self.model.entry(index.row()) if index.isValid() else None
+            # Un nombre recortado en la lista se ve entero en la tarjeta; sin ella, en una descripción emergente.
+            if entry is not None and self.name_is_cut(index) and (not self.hover_enabled or remote.is_remote(entry.path)):
+                QToolTip.showText(event.globalPos(), entry.display_name, self.thumbs.viewport())
+                return True
         if kind == QEvent.Type.ToolTip and watched in viewports and self.hover_enabled:
             view = self.details if watched is viewports[0] else self.thumbs
             index = self.hit_index(view, event.pos())
             entry = self.model.entry(index.row()) if index.isValid() else None
-            if entry is None:
+            if entry is None or remote.is_remote(entry.path):  # la tarjeta lee el archivo: del servidor sería descargarlo
                 self.hover_card.dismiss()
             else:
                 self._hover_row = index.row()
@@ -1898,6 +2388,8 @@ class FileView(QWidget):
         if self._handle_hover(watched, event):
             return True
         kind = event.type()
+        if kind == QEvent.Type.Resize and watched is self.details.viewport():
+            self._fit_name()  # el panel cambia de ancho, o aparece o desaparece la barra de desplazamiento
         if watched is self.find_bar.edit:
             if kind == QEvent.Type.ShortcutOverride and event.key() == Qt.Key.Key_F3:
                 event.accept()  # en la ventana, F3 es otra cosa; aquí es la siguiente coincidencia
@@ -1917,12 +2409,29 @@ class FileView(QWidget):
                     else:  # se soltó fuera de la ventana, o al cambiar a otra
                         self._end_lasso()
                     return True
-                view.set_hover_row(view.name_index_at(event.position().toPoint()).row())
+                position = event.position().toPoint()
+                hovered = view.name_index_at(position)
+                if hovered.row() != view.hover_row:
+                    self.hoveredEntryChanged.emit(self.model.entry(hovered.row()) if hovered.isValid() else None)
+                view.set_hover_row(hovered.row())
+                if view.single_click:  # la mano dice que un clic lo abre; sobre la marca, que lo selecciona
+                    if hovered.isValid() and not view.marker_at(hovered, position):
+                        view.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+                    else:
+                        view.viewport().unsetCursor()
             elif kind == QEvent.Type.Leave:
+                if view.hover_row != -1:
+                    self.hoveredEntryChanged.emit(None)
                 view.set_hover_row(-1)
             elif kind == QEvent.Type.MouseButtonRelease and self._lasso is not None and event.button() == Qt.MouseButton.LeftButton:
                 self._end_lasso()
                 return True
+            elif kind == QEvent.Type.MouseButtonRelease and self._swallow_release and event.button() == Qt.MouseButton.LeftButton:
+                # La pulsación ya se atendió aquí: la lista no debe tomar su soltar por un clic sobre el archivo.
+                self._swallow_release = False
+                return True
+            elif kind == QEvent.Type.MouseButtonDblClick and view.single_click:
+                return True  # el primer clic ya abrió
             elif (kind == QEvent.Type.MouseButtonDblClick and event.button() == Qt.MouseButton.LeftButton
                     and not view.name_index_at(event.position().toPoint()).isValid()):
                 return True  # fuera del nombre, un doble clic no abre nada
@@ -1944,6 +2453,15 @@ class FileView(QWidget):
             if view is not None and event.button() == Qt.MouseButton.LeftButton:
                 position = event.position().toPoint()
                 if self._chevron_hit(view, position):
+                    self._swallow_release = True
+                    return True
+                marked = view.name_index_at(position) if view.single_click else QModelIndex()
+                if marked.isValid() and view.marker_at(marked, position):
+                    view.selectionModel().select(marked, QItemSelectionModel.SelectionFlag.Toggle | QItemSelectionModel.SelectionFlag.Rows)
+                    view.selectionModel().setCurrentIndex(marked, QItemSelectionModel.SelectionFlag.NoUpdate)
+                    view.viewport().update()
+                    view.setFocus()
+                    self._swallow_release = True
                     return True
                 if not view.name_index_at(position).isValid():
                     # Solo se selecciona pulsando el nombre. Fuera de él, se quita la selección (Ctrl y Mayús la conservan).

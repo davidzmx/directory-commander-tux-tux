@@ -49,6 +49,9 @@ def path_states(paths: list[str], timeout: float = FOLDER_CHECK_SECONDS) -> dict
 
 
 def location_label(path: str) -> str:
+    if path.startswith("sftp://"):
+        from . import remote
+        return remote.label(path)
     return COMPUTER_LABEL if path == COMPUTER_PATH else results_name(path) or path
 
 
@@ -202,6 +205,9 @@ def list_dir(path: str, show_hidden: bool = False, flat: bool = False, is_cancel
         return list_drives()
     if is_results(path):
         return _list_results(results_name(path))
+    if path.startswith("sftp://"):
+        from . import remote
+        return remote.list_remote(path, show_hidden)
     location = archive.split_archive_path(path)
     if location is not None:
         return _list_archive(*location)
@@ -232,6 +238,8 @@ def _list_archive(archive_path: str, inner: str) -> list[Entry]:
 
 def has_visible_entries(entry: Entry, show_hidden: bool) -> bool:
     """Si una carpeta tiene algo que desplegar. Si no se puede saber, se responde que sí: al desplegarla se verá el motivo."""
+    if entry.path.startswith("sftp://"):
+        return True  # preguntarle al servidor por cada carpeta haría muy lento el listado
     try:
         if entry.in_archive:
             return bool(archive.list_children(*archive.split_archive_path(entry.path)))

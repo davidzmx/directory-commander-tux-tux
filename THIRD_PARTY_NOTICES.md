@@ -7,6 +7,7 @@ El código de este repositorio se publica bajo la licencia MIT (archivo `LICENSE
 | [Qt](https://www.qt.io/) y [PySide6 / Shiboken6](https://doc.qt.io/qtforpython/) | LGPL-3.0 (también GPL-2.0 o GPL-3.0) | https://code.qt.io/ |
 | [FFmpeg](https://ffmpeg.org/), incluido con Qt Multimedia | LGPL | https://ffmpeg.org/download.html |
 | [Python](https://www.python.org/) | PSF-2.0 | https://github.com/python/cpython |
+| [Pygments](https://pygments.org/), para colorear el código | BSD-2-Clause | https://github.com/pygments/pygments |
 | [OpenSSL](https://www.openssl.org/), incluido con Python y Qt | Apache-2.0 | https://github.com/openssl/openssl |
 | [Mesa](https://www.mesa3d.org/) (`opengl32sw.dll`, solo en Windows) | MIT | https://gitlab.freedesktop.org/mesa/mesa |
 | Microsoft Visual C++ Runtime (solo en Windows) | Licencia de redistribución de Microsoft | — |

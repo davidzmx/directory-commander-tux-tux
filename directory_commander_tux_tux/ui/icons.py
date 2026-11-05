@@ -28,6 +28,11 @@ _SHAPES = {
     "favoritesedit": '<path d="M10 2l2.300 4.900 5.300.7-3.900 3.600 1 5.300-4.700-2.600-4.700 2.600 1-5.300L2.400 7.600l5.300-.7z" fill="{f}" stroke="{f}"/>'
                      '<path d="M13 22l1-3.500 6-6 2.500 2.500-6 6z" fill="{a}" stroke="{a}" stroke-width="1"/>',
     "folder": _FOLDER,
+    "save": '<path d="M5 3h11l3 3v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M8 3v5h7V3"/><rect x="7" y="13" width="10" height="6" rx="1"/>',
+    "diskusage": '<rect x="3" y="3" width="18" height="18" rx="1"/><path d="M12 3v18M3 13h9M12 9h9M16 9v12"/>'
+                 '<rect x="3.800" y="3.800" width="7.400" height="8.400" fill="{a}" stroke="none"/>',
+    "aimarks": '<path d="M3 4h8l10 10-7 7L3 11z"/><circle cx="7.500" cy="8.500" r="1.300"/>'
+               '<path d="M18.500 1l1.200 2.800L22.500 5l-2.800 1.200L18.500 9l-1.200-2.800L14.500 5l2.800-1.200z" fill="{a}" stroke="{a}" stroke-width="1"/>',
     "makedir": _FOLDER + '<path d="M12 11v6M9 14h6" stroke="#ffffff" stroke-width="2"/>',
     "copy": '<rect x="9" y="8" width="11" height="13" rx="1"/><path d="M5 16V4h11"/>',
     "move": '<path d="M6 3h8l4 4v5"/><path d="M6 3v18h6"/><path d="M14 18h7M18 15l3 3-3 3" stroke="{a}" stroke-width="2.200"/>',
@@ -81,6 +86,8 @@ _SHAPES = {
     "treepane": '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M10 4v16"/><path d="M5.500 8v7.500h2M5.500 11.500h2" stroke="{a}"/>',
     "terminalpane": '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 11h18"/><path d="M6.500 13.500l2 1.750-2 1.750M11 17.500h4" stroke="{a}"/>',
     "terminalonly": '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M7 9l3 3-3 3M12 15h5" stroke="{a}"/>',
+    "remote": '<rect x="4" y="3" width="16" height="7" rx="1"/><rect x="4" y="12" width="16" height="7" rx="1"/><path d="M7 6.500h.1M7 15.500h.1" stroke="{a}" stroke-width="2.400"/><path d="M11 6.500h6M11 15.500h6"/>',
+    "disconnect": '<rect x="4" y="3" width="16" height="7" rx="1"/><rect x="4" y="12" width="16" height="7" rx="1"/><path d="M14.500 13.500l5 5M19.500 13.500l-5 5" stroke="{a}" stroke-width="2"/><path d="M7 6.500h.1M7 15.500h.1" stroke-width="2.400"/>',
     "filespane": '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M7 9h10M7 12h10M7 15h6" stroke="{a}"/>',
     "terminalgeneral":'<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 12h18M12 4v8"/><path d="M6.500 14l2 1.750-2 1.750M11 17.500h4" stroke="{a}"/>',
     "prefs": '<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.600 5.600l2.100 2.100M16.300 16.300l2.100 2.100M18.400 5.600l-2.100 2.100M7.700 16.300l-2.100 2.100"/>',

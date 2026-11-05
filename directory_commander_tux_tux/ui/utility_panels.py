@@ -54,6 +54,7 @@ class JobsPanel(QWidget):
 
     aboutToStart = Signal()
     jobFinished = Signal(str, object)  # título, OpResult
+    progressChanged = Signal()  # ha empezado, avanzado o terminado alguna operación
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -61,6 +62,7 @@ class JobsPanel(QWidget):
         self.pool.setMaxThreadCount(2)
         self.running = 0
         self._calls: set = set()
+        self._progress: dict = {}  # fila: (título, hecho, total)
         self.empty = QLabel(tr("No hay operaciones en curso"))
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.inner = QVBoxLayout()
@@ -84,12 +86,16 @@ class JobsPanel(QWidget):
         self.inner.insertWidget(0, row)
         self.empty.hide()
         self.running += 1
+        self._progress[row] = (title, 0, 0)
+        self.progressChanged.emit()
 
         def finish(result: OpResult) -> None:
             if window is not None:
                 result.unattended = window.unattended.isChecked()
                 window.job_finished()
             self.running -= 1
+            self._progress.pop(row, None)
+            self.progressChanged.emit()
             self.inner.removeWidget(row)
             row.deleteLater()
             self._calls.discard(call)
@@ -110,6 +116,8 @@ class JobsPanel(QWidget):
                 row.bar.setRange(0, 1000)
                 row.bar.setValue(int(done * 1000 / total))
             row.label.setText(f"{title}: {name}" if name else title)
+            self._progress[row] = (title, done, total)
+            self.progressChanged.emit()
 
         window = None
         call = run_bg(fn, finish, failed, progress, self.pool)
@@ -118,6 +126,19 @@ class JobsPanel(QWidget):
         if transfer is not None:
             window = TransferDialog(*transfer, call.sink, self.window())
             window.cancelRequested.connect(call.cancel)
+
+    def summary(self) -> str:
+        """Lo que hay en curso, en una línea: «Copiar 3 elementos: 45 %», o cuántas y su avance conjunto."""
+        if not self._progress:
+            return ""
+        jobs = list(self._progress.values())
+        sized = [(done, total) for _title, done, total in jobs if total > 0]
+        percent = round(sum(done for done, _total in sized) * 100 / sum(total for _done, total in sized)) if sized else None
+        if len(jobs) == 1:
+            title = jobs[0][0]
+            return tr("{title}: {percent} %", title=title, percent=percent) if percent is not None else tr("{title}…", title=title)
+        return (tr("{count} operaciones en curso: {percent} %", count=len(jobs), percent=percent) if percent is not None
+                else tr("{count} operaciones en curso", count=len(jobs)))
 
     def cancel_all(self) -> None:
         for call in list(self._calls):
