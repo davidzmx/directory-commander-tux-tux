@@ -1651,7 +1651,8 @@ def test_real_shell_follows_the_pane(window, folders, monkeypatch):
     terminal = real_shell_ready(window, monkeypatch)
     window.groups[0].current.navigate(str(folders[1]))
     assert wait_until(lambda: terminal._current_folder == str(folders[1]) and terminal.session.shell_is_idle())
-    terminal._send_text("pwd\r")
+    # PowerShell da «pwd» en una tabla, que recorta con «...» una ruta más ancha que la terminal: su texto, entero.
+    terminal._send_text("(pwd).Path\r" if terminal.family == POWERSHELL else "pwd\r")
     assert wait_until(lambda: screen_text(terminal).count("derecha") >= 3)
 
 

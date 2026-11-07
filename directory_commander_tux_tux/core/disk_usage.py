@@ -6,9 +6,12 @@ from __future__ import annotations
 
 import os
 import stat
+import sys
 from array import array
 
 REPORT_EVERY = 2000  # archivos entre aviso y aviso del avance
+# En Windows, lo que da el recorrido de una carpeta no trae ni el disco ni los enlaces de cada archivo: se piden aparte.
+_WINDOWS = sys.platform == "win32"
 
 
 class Node:
@@ -75,6 +78,10 @@ def scan(root: str, sink=None, one_filesystem: bool = True) -> Node:
         for item in items:
             try:
                 details = item.stat(follow_symlinks=False)
+                if _WINDOWS and (stat.S_ISREG(details.st_mode) or (one_filesystem and stat.S_ISDIR(details.st_mode))):
+                    if item.is_junction():
+                        continue  # como un enlace: lo de dentro está en otro sitio, y puede llevar de vuelta aquí
+                    details = os.stat(item.path, follow_symlinks=False)
             except OSError:
                 continue
             if stat.S_ISDIR(details.st_mode):

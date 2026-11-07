@@ -392,15 +392,16 @@ class MarkdownView(QTextBrowser):
             self.go_to_heading(url.fragment())
             return
         target = self.document().baseUrl().resolved(url) if url.isRelative() else url
-        if target.isLocalFile() and is_markdown(target.toLocalFile()) and os.path.isfile(target.toLocalFile()):
+        local = os.path.normpath(target.toLocalFile()) if target.isLocalFile() else ""  # Qt la da con «/», también en Windows
+        if local and is_markdown(local) and os.path.isfile(local):
             if self.handles_markdown_links:
-                self.show_file(target.toLocalFile())
+                self.show_file(local)
                 if target.fragment():
                     self.go_to_heading(target.fragment())
-            self.markdownLinkClicked.emit(target.toLocalFile())
+            self.markdownLinkClicked.emit(local)
             return
         from .open_external import open_externally
-        open_externally(target.toLocalFile() if target.isLocalFile() else target.toString())
+        open_externally(local or target.toString())
 
     def go_to_heading(self, anchor: str) -> bool:
         """Como GitHub: el ancla de un título es su texto en minúsculas, sin signos y con guiones en lugar de espacios."""

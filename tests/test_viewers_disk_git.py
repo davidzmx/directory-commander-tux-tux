@@ -3,6 +3,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 
 import pytest
 from PySide6.QtCore import QPointF, Qt
@@ -212,6 +213,10 @@ def test_disk_usage_command_opens_the_selected_folder(window, tree):
 
 
 # ------------------------------------------------------------------ marcas de git
+# .git está oculta en los dos sistemas; .gitignore, solo donde ocultan los nombres que empiezan por punto.
+SHOWN_IN_REPOSITORY = 5 if sys.platform == "win32" else 4
+
+
 @pytest.fixture
 def repository(tmp_path):
     if shutil.which("git") is None:
@@ -254,7 +259,7 @@ def test_list_shows_git_marks_and_can_hide_them(app, repository):
     view.resize(700, 300)
     view.show()
     view.navigate(str(repository))
-    assert wait_until(lambda: view.model.rowCount() == 4)  # .git y .gitignore, ocultos
+    assert wait_until(lambda: view.model.rowCount() == SHOWN_IN_REPOSITORY)
     index = {view.model.entry(row).name: view.model.index(row, 0) for row in range(view.model.rowCount())}
     assert wait_until(lambda: index["src"].data(GitRole) == ("M", True))
     assert row_badges(index["src"]) == [("•", "#d9822b")] and row_badges(index["nuevo.txt"]) == [("U", "#3fa36b")]
@@ -365,7 +370,7 @@ def test_git_marks_explain_themselves_and_ai_marks_do_not(app, repository):
     view.resize(700, 300)
     view.show()
     view.navigate(str(repository))
-    assert wait_until(lambda: view.model.rowCount() == 4)
+    assert wait_until(lambda: view.model.rowCount() == SHOWN_IN_REPOSITORY)
     index = {view.model.entry(row).name: view.model.index(row, 0) for row in range(view.model.rowCount())}
     assert wait_until(lambda: index["src"].data(GitRole) == ("M", True))
     view.details.viewport().repaint()

@@ -3945,6 +3945,7 @@ def test_list_long_name_is_not_cut(window, tree):
     name = "nombre_mucho_mas_largo_que_el_de_los_demas_archivos.txt"
     (left / name).write_text("x", encoding="utf-8")
     view = window.source
+    view.set_list_name_limit(0)  # sin límite: con el de serie, de 50 caracteres, este se recortaría a propósito
     view.set_view_mode("list")
     window.run_command("Go REFRESH")
     assert wait_until(lambda: view.model.rowCount() == 4)

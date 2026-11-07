@@ -352,7 +352,7 @@ from directory_commander_tux_tux.core.config import Config  # noqa: E402
 from directory_commander_tux_tux.ui import sftp  # noqa: E402
 from directory_commander_tux_tux.ui.drag_drop import dropped_paths, path_url  # noqa: E402
 from directory_commander_tux_tux.ui.file_view import path_crumbs  # noqa: E402
-from directory_commander_tux_tux.ui.main_window import MainWindow  # noqa: E402
+from directory_commander_tux_tux.ui.main_window import MainWindow, _tab_title  # noqa: E402
 from directory_commander_tux_tux.ui.terminal import TerminalView  # noqa: E402
 from tests.test_terminal import FakeSession  # noqa: E402
 
@@ -655,7 +655,7 @@ def test_a_remote_tab_shows_its_host_and_can_only_be_disconnected(window, server
     tools["disconnect"].click()
     QTest.qWait(50)
     assert view.path == str(window.right) and tools["remote"].isEnabled() and tools["disconnect"].isHidden()
-    assert group.tabText(group.indexOf(view)) == "derecha"
+    assert group.tabText(group.indexOf(view)) == _tab_title(str(window.right))  # en Windows, con su unidad delante
 
 
 def test_the_tree_of_a_remote_pane_shows_the_server(window, server):
