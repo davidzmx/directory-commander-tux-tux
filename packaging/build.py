@@ -51,8 +51,15 @@ def _system() -> str:
 
 
 def build_exe() -> str:
-    subprocess.run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--distpath", DIST, "--workpath", os.path.join(ROOT, "build"), os.path.join(ROOT, "packaging", f"{APP_ID}.spec")], check=True, cwd=ROOT)
+    temp_dist = os.path.join(DIST, "_dist_temp")
+    if os.path.isdir(temp_dist):
+        shutil.rmtree(temp_dist, ignore_errors=True)
+    subprocess.run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--distpath", temp_dist, "--workpath", os.path.join(ROOT, "build"), os.path.join(ROOT, "packaging", f"{APP_ID}.spec")], check=True, cwd=ROOT)
+    source_folder = os.path.join(temp_dist, APP_ID)
     folder = os.path.join(DIST, APP_ID)
+    os.makedirs(folder, exist_ok=True)
+    shutil.copytree(source_folder, folder, dirs_exist_ok=True)
+    shutil.rmtree(temp_dist, ignore_errors=True)
     for name in LEGAL_FILES:
         shutil.copy(os.path.join(ROOT, name), folder)
     return folder
