@@ -1712,6 +1712,8 @@ class MainWindow(ExtraCommands, QMainWindow):
             "Set NAVLOCK=Toggle": lambda: self.nav_lock,
             "Set HOVERINFO=Toggle": lambda: bool(self.config.get("hover_info", True)),
         })
+        for size in THUMB_SIZES:
+            states[f"Set THUMBNAILSIZE={size}"] = (lambda s=size: self._thumbnail_size() == s)
         return states
 
     def _update_menu_checks(self) -> None:
@@ -3545,6 +3547,23 @@ class MainWindow(ExtraCommands, QMainWindow):
         if mode == "thumbnails":
             self._award("thumbnails")
 
+    def set_thumbnail_size(self, size: int) -> None:
+        if size not in THUMB_SIZES:
+            return
+        self.config["thumbnail_size"] = size
+        self.config.save()
+        for view in self.all_views():
+            view.set_thumbnail_size(size)
+
+    def _set_thumbnailsize(self, value: str) -> None:
+        try:
+            size = int(value)
+        except ValueError:
+            raise ValueError(tr("Valor no válido para THUMBNAILSIZE: {value}", value=value))
+        if size not in THUMB_SIZES:
+            raise ValueError(tr("Valor no válido para THUMBNAILSIZE: {value}", value=value))
+        self.set_thumbnail_size(size)
+
     def _set_flatview(self, value: str) -> None:
         current = self.source.flat
         self.source.set_flat(not current if value.lower() == "toggle" else value.lower() in ("on", "yes"))
@@ -4646,6 +4665,8 @@ class MainWindow(ExtraCommands, QMainWindow):
             menu.addAction(themed("favoritesadd"), tr("Añadir a favoritos"), lambda: self._add_favorite_dialog(view, folders[0].path))
         if images and not on_server:
             add(tr("Ver imágenes"), "Show", icon="show")
+        if view.view_mode == "thumbnails":
+            self._add_thumbnail_size_menu(menu, getattr(view.thumbs, "thumb_size", None))
         menu.addSeparator()
         add(tr("Copiar"), "Clipboard COPY", not on_server, "copy")
         add(tr("Cortar"), "Clipboard CUT", local)
@@ -4742,6 +4763,8 @@ class MainWindow(ExtraCommands, QMainWindow):
             item = self._add_command(modes, label, f"Set VIEW={mode}", icon=icon)
             item.setCheckable(True)
             item.setChecked(view.view_mode == mode)
+        if view.view_mode == "thumbnails":
+            self._add_thumbnail_size_menu(menu, getattr(view.thumbs, "thumb_size", None))
         order = menu.addMenu(tr("Ordenar por"))
         for label, key in ((tr("Nombre"), "name"), (tr("Tamaño"), "size"), (tr("Tipo"), "type"), (tr("Modificación"), "modified"),
                            (tr("Atributos"), "attrs")):
@@ -4775,6 +4798,15 @@ class MainWindow(ExtraCommands, QMainWindow):
         menu.addSeparator()
         add(tr("Propiedades de esta carpeta"), "Properties CURRENT", local, "properties")
         return self._arrange_menu(menu, context_menu.FOLDER)
+
+    def _add_thumbnail_size_menu(self, menu: QMenu, current_size: int | None = None) -> QMenu:
+        size_menu = menu.addMenu(themed("thumbnails"), tr("Tamaño de las miniaturas"))
+        current = current_size if current_size in THUMB_SIZES else self._thumbnail_size()
+        for size in THUMB_SIZES:
+            item = self._add_command(size_menu, tr("{size} píxeles", size=size), f"Set THUMBNAILSIZE={size}")
+            item.setCheckable(True)
+            item.setChecked(size == current)
+        return size_menu
 
     def _show_file_menu(self, view: FileView, position) -> None:
         self._view_activated(view)

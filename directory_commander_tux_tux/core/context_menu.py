@@ -10,16 +10,17 @@ FOLDER = "folder"
 FILE = "file"
 OPEN_WITH = N_("Abrir con")
 BROWSE_ARCHIVE = N_("Explorar contenido")
+THUMBNAIL_SIZE = N_("Tamaño de las miniaturas")
 
 DEFAULT_LAYOUTS: dict[str, list[str]] = {
     FOLDER: [N_("Pegar"), SEPARATOR,
              N_("Nueva carpeta"), N_("Nuevo archivo de texto"), N_("Nuevo ZIP vacío"), SEPARATOR,
-             N_("Ver"), N_("Ordenar por"), N_("Vista plana"), N_("Mostrar ocultos"), SEPARATOR,
+             N_("Ver"), THUMBNAIL_SIZE, N_("Ordenar por"), N_("Vista plana"), N_("Mostrar ocultos"), SEPARATOR,
              N_("Seleccionar todo"), N_("Actualizar"), N_("Calcular tamaños de carpetas"), N_("Uso del disco…"), SEPARATOR,
              N_("Abrir en una pestaña nueva"), N_("Dividir panel - Horizontal"), N_("Dividir panel - Vertical"), N_("Cerrar este panel"), N_("Solo la terminal en este panel"), N_("Panel remoto (SFTP)…"), N_("Desconectar del servidor"), N_("Abrir terminal aquí"), N_("Añadir a favoritos"), N_("Copiar la ruta de esta carpeta"), SEPARATOR,
              SHELL_ITEMS, SEPARATOR,
              N_("Propiedades de esta carpeta")],
-    FILE: [N_("Abrir"), OPEN_WITH, N_("Editar Markdown"), N_("Ver JSON"), BROWSE_ARCHIVE, N_("Abrir en una pestaña nueva"), N_("Añadir a favoritos"), N_("Ver imágenes"), SEPARATOR,
+    FILE: [N_("Abrir"), OPEN_WITH, N_("Editar Markdown"), N_("Ver JSON"), BROWSE_ARCHIVE, N_("Abrir en una pestaña nueva"), N_("Añadir a favoritos"), N_("Ver imágenes"), THUMBNAIL_SIZE, SEPARATOR,
            N_("Copiar"), N_("Copiar rutas como texto"), N_("Cortar"), SEPARATOR,
            N_("Copiar a destino"), N_("Mover a destino"), N_("Duplicar aquí"), SEPARATOR,
            N_("Renombrar"), N_("Enviar a la papelera"), N_("Eliminar definitivamente"), SEPARATOR,
@@ -32,10 +33,28 @@ DEFAULT_LAYOUTS: dict[str, list[str]] = {
 # Los menús de serie de versiones anteriores. Preferencias guarda el menú entero aunque no se haya cambiado nada: uno que es
 # exactamente uno de estos se toma como el de serie de ahora, para que reciba las opciones nuevas en su sitio.
 _PREVIOUS_DEFAULTS: dict[str, list[list[str]]] = {
-    FILE: [["Abrir", OPEN_WITH, BROWSE_ARCHIVE, "Abrir en una pestaña nueva", "Ver imágenes", SEPARATOR, "Copiar", "Cortar", SEPARATOR,
-            "Copiar a destino", "Mover a destino", "Duplicar aquí", SEPARATOR, "Renombrar", "Enviar a la papelera", "Eliminar definitivamente", SEPARATOR,
-            "Extraer", "Comprimir en ZIP…", "Imagen", "Calcular hash", "Calcular tamaño", SEPARATOR, SHELL_ITEMS, SEPARATOR,
-            "Copiar rutas como texto", "Atributos…", "Propiedades"]],
+    FOLDER: [
+        ["Pegar", SEPARATOR, "Nueva carpeta", "Nuevo archivo de texto", "Nuevo ZIP vacío", SEPARATOR,
+         "Ver", "Ordenar por", "Vista plana", "Mostrar ocultos", SEPARATOR,
+         "Seleccionar todo", "Actualizar", "Calcular tamaños de carpetas", "Uso del disco…", SEPARATOR,
+         "Abrir en una pestaña nueva", "Dividir panel - Horizontal", "Dividir panel - Vertical", "Cerrar este panel",
+         "Solo la terminal en este panel", "Panel remoto (SFTP)…", "Desconectar del servidor", "Abrir terminal aquí",
+         "Añadir a favoritos", "Copiar la ruta de esta carpeta", SEPARATOR, SHELL_ITEMS, SEPARATOR,
+         "Propiedades de esta carpeta"],
+    ],
+    FILE: [
+        ["Abrir", OPEN_WITH, BROWSE_ARCHIVE, "Abrir en una pestaña nueva", "Ver imágenes", SEPARATOR, "Copiar", "Cortar", SEPARATOR,
+         "Copiar a destino", "Mover a destino", "Duplicar aquí", SEPARATOR, "Renombrar", "Enviar a la papelera", "Eliminar definitivamente", SEPARATOR,
+         "Extraer", "Comprimir en ZIP…", "Imagen", "Calcular hash", "Calcular tamaño", SEPARATOR, SHELL_ITEMS, SEPARATOR,
+         "Copiar rutas como texto", "Atributos…", "Propiedades"],
+        ["Abrir", OPEN_WITH, "Editar Markdown", "Ver JSON", BROWSE_ARCHIVE, "Abrir en una pestaña nueva", "Añadir a favoritos", "Ver imágenes", SEPARATOR,
+         "Copiar", "Copiar rutas como texto", "Cortar", SEPARATOR,
+         "Copiar a destino", "Mover a destino", "Duplicar aquí", SEPARATOR,
+         "Renombrar", "Enviar a la papelera", "Eliminar definitivamente", SEPARATOR,
+         "Extraer", "Comprimir en ZIP…", "Imagen", "Calcular hash", "Calcular tamaño", SEPARATOR,
+         SHELL_ITEMS, SEPARATOR,
+         "Atributos…", "Propiedades"],
+    ],
 }
 
 

@@ -170,6 +170,43 @@ def test_thumbnail_size_can_be_chosen(app, tmp_path):
     view.dispose()
 
 
+def test_thumbnail_size_context_submenu(window, tree):
+    from directory_commander_tux_tux.core.config import THUMB_SIZES
+    left, _right = tree
+    view = window.source
+    view.set_view_mode("details")
+    # En vista de detalles no debe aparecer el submenú
+    folder_menu_details = window.build_folder_menu(view)
+    assert not any(a.text() == "Tamaño de las miniaturas" for a in folder_menu_details.actions())
+
+    # En vista de miniaturas debe aparecer en el menú de carpeta y en el de archivo
+    view.set_view_mode("thumbnails")
+    folder_menu = window.build_folder_menu(view)
+    size_action = next((a for a in folder_menu.actions() if a.text() == "Tamaño de las miniaturas"), None)
+    assert size_action is not None and size_action.menu() is not None
+
+    sub_actions = size_action.menu().actions()
+    assert len(sub_actions) == len(THUMB_SIZES)
+    expected_texts = [f"{s} píxeles" for s in THUMB_SIZES]
+    assert [a.text() for a in sub_actions] == expected_texts
+
+    # El tamaño por defecto (128) debe estar marcado
+    checked_action = next((a for a in sub_actions if a.isChecked()), None)
+    assert checked_action is not None and checked_action.text() == "128 píxeles"
+
+    # También en el menú de archivo al hacer clic en un elemento en la vista de miniaturas
+    select(view, "a.txt")
+    file_menu = window.build_file_menu(view)
+    file_size_action = next((a for a in file_menu.actions() if a.text() == "Tamaño de las miniaturas"), None)
+    assert file_size_action is not None and file_size_action.menu() is not None
+
+    # Al cambiar de tamaño activando una acción (ej. 192 píxeles)
+    action_192 = next(a for a in sub_actions if a.text() == "192 píxeles")
+    action_192.trigger()
+    assert window.config.get("thumbnail_size") == 192
+    assert view.thumbs.thumb_size == 192
+
+
 # ------------------------------------------------------------------ la lista
 def test_list_columns_have_a_maximum_width(app, tmp_path):
     long_name = "un nombre larguísimo " * 8 + ".pdf"
