@@ -4,7 +4,7 @@
 
 A **multi-pane file manager with built-in terminals and git**, for **Linux (KDE and GNOME)** and **Windows**. Written in Python with Qt 6 (PySide6).
 
-![Four panes, each with its terminal and the git branch of its folder](docs/capturas/en/principal.png)
+![Four panes, each with its terminal and its colored frame: three in git repositories on this computer and one on a server over SFTP, with its terminal on that server](docs/capturas/en/principal.png)
 
 ## Multi-pane, terminals and git
 
@@ -17,6 +17,10 @@ A **multi-pane file manager with built-in terminals and git**, for **Linux (KDE 
 - Styles to change the layout with one click, which you can edit or create yourself: see [Styles](#styles-one-layout-for-each-task)
 - Named sessions that save panes, tabs and terminals. They are loaded, saved and started at the top right, and managed in Preferences → Sessions
 
+![Eight panes in a grid, each with its colored frame and its tabs](docs/capturas/en/marcos.png)
+
+![Four panes, each with its own folder tree and terminal; the bottom right one, on a server](docs/capturas/en/arboles.png)
+
 ### A terminal in each pane
 
 - One terminal per pane, below it or to its right, plus a general one. They are real consoles: interactive programs such as `python`, `ssh` or `vim` work
@@ -27,12 +31,16 @@ A **multi-pane file manager with built-in terminals and git**, for **Linux (KDE 
 - Dropping files on a terminal types their paths, quoted, without running anything
 - The «Vertical pane-terminal» and «Horizontal pane-terminal» styles put a terminal in place of the second pane. In Preferences you can also make the general terminal take the whole width of the window when panes are side by side
 
+![Six panes: five with their terminal below, one of them on the server, and one that shows only its terminal](docs/capturas/en/terminales.png)
+
 ### Built-in git
 
 - Each terminal whose folder is a repository shows the active branch and the user commits will be signed with, and lets you switch branch or create one. The branch also appears on each pane's bar
 - Buttons for `status`, `add`, `unstage`, `commit`, `push`, `pull`, `fetch`, `diff` and `log`, written in that same terminal
 - `add`, `unstage` and `commit` open a window with the files and checkboxes, and show the command being built before sending it
 - The command of each button can be changed and others can be added, in Preferences → Button bars. The rest is set in Preferences → Git integration
+
+![A pane with the git marks of each file and folder, and its terminal with the branch, the user and the git buttons](docs/capturas/en/git.png)
 
 ![The commit window, with the files to include and the command that will run](docs/capturas/en/commit.png)
 
@@ -49,6 +57,10 @@ A **multi-pane file manager with built-in terminals and git**, for **Linux (KDE 
 - The first time you connect to a server its fingerprint is shown and you are asked whether to trust it; accepting adds it to `~/.ssh/known_hosts`. If the key of a known server changes, it does not connect
 - In Preferences → SSH/SFTP you choose whether the server's files open with their program (they are downloaded to a temporary folder and, when a change is saved, it is uploaded asking first or without asking, as chosen; if meanwhile the file changed on the server, you are always asked, so that change is not lost. A Markdown file from the server opens in the program's editor) and whether their preview and thumbnails are shown, up to a size
 
+![A pane on this computer and another on a server over SFTP, each with its tree and terminal; the remote pane's one, on the server](docs/capturas/en/remoto.png)
+
+![The general terminal connected over SSH to a server, below two local panes](docs/capturas/en/ssh.png)
+
 ## Styles: one layout for each task
 
 A style is a way of arranging the window: panes, folder trees, viewer, metadata, view and terminals. You switch between them with one click on the styles bar.
@@ -58,7 +70,7 @@ A style is a way of arranging the window: panes, folder trees, viewer, metadata,
 | | |
 |---|---|
 | **Commander**: the classic two panes, with several tabs in each<br>[![Commander style](docs/capturas/en/comandante.png)](docs/capturas/en/comandante.png) | **Vertical Dual Tree**: a folder tree for each pane, here in the light theme<br>[![Vertical Dual Tree style](docs/capturas/en/doble-arbol.png)](docs/capturas/en/doble-arbol.png) |
-| **Vertical pane-terminal**: a pane and its terminal side by side, with git<br>[![Vertical pane-terminal style](docs/capturas/en/panel-terminal.png)](docs/capturas/en/panel-terminal.png) | **Images**: thumbnails and a viewer on the side<br>[![Images style](docs/capturas/en/imagenes.png)](docs/capturas/en/imagenes.png) |
+| **Vertical pane-terminal**: a pane and its terminal side by side, with git<br>[![Vertical pane-terminal style](docs/capturas/en/git.png)](docs/capturas/en/git.png) | **Images**: thumbnails and a viewer on the side<br>[![Images style](docs/capturas/en/imagenes.png)](docs/capturas/en/imagenes.png) |
 | **Filmstrip**: a large viewer above a strip of images<br>[![Filmstrip style](docs/capturas/en/tira.png)](docs/capturas/en/tira.png) | **A style of your own**: two panes, viewer and metadata<br>[![A custom style](docs/capturas/en/estilo-propio.png)](docs/capturas/en/estilo-propio.png) |
 
 The four-pane layout at the top of this page is a custom style too. This is the editor, with the custom style above open:

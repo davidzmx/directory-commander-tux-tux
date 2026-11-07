@@ -4,7 +4,7 @@
 
 Gestor de archivos **multipanel, con terminales integradas y git**, para **Linux (KDE y GNOME)** y **Windows**. Escrito en Python con Qt 6 (PySide6).
 
-![Cuatro paneles, cada uno con su terminal y la rama de git de su carpeta](docs/capturas/es/principal.png)
+![Cuatro paneles, cada uno con su terminal y su marco de color: tres en repositorios git del equipo y uno en un servidor por SFTP, con su terminal en ese servidor](docs/capturas/es/principal.png)
 
 ## Multipanel, terminales y git
 
@@ -17,6 +17,10 @@ Gestor de archivos **multipanel, con terminales integradas y git**, para **Linux
 - Estilos para cambiar de disposición con un clic, que puedes editar o crear tú: mira [Estilos](#estilos-una-disposición-para-cada-tarea)
 - Sesiones con nombre que guardan paneles, pestañas y terminales. Arriba a la derecha se cargan, se guardan y se empieza una nueva; se administran en Preferencias → Sesiones
 
+![Ocho paneles en cuadrícula, cada uno con su marco de color y sus pestañas](docs/capturas/es/marcos.png)
+
+![Cuatro paneles, cada uno con su propio árbol de carpetas y su terminal; el de abajo a la derecha, en un servidor](docs/capturas/es/arboles.png)
+
 ### Una terminal en cada panel
 
 - Una terminal por panel, abajo o a la derecha, y una general. Son consolas de verdad: funcionan los programas interactivos, como `python`, `ssh` o `vim`
@@ -27,12 +31,16 @@ Gestor de archivos **multipanel, con terminales integradas y git**, para **Linux
 - Al soltar archivos sobre una terminal se escriben sus rutas, entre comillas, sin ejecutar nada
 - Los estilos «Vertical panel-terminal» y «Horizontal panel-terminal» ponen una terminal en lugar del segundo panel. En Preferencias también se puede hacer que, con los paneles en vertical, la general ocupe todo el ancho de la ventana
 
+![Seis paneles: cinco con su terminal debajo, una de ellas en el servidor, y uno que muestra solo su terminal](docs/capturas/es/terminales.png)
+
 ### Git integrado
 
 - Cada terminal cuya carpeta sea un repositorio muestra la rama activa y el usuario con el que se firmarán los commits, y permite cambiar de rama o crear otra. La rama también se ve en la barra de cada panel
 - Botones para `status`, `add`, `unstage`, `commit`, `push`, `pull`, `fetch`, `diff` y `log`, que se escriben en esa misma terminal
 - `add`, `unstage` y `commit` abren una ventana con los archivos y casillas, y muestran la orden que se va armando antes de enviarla
 - La orden de cada botón se puede cambiar y se pueden añadir otras, en Preferencias → Barras de botones. El resto se configura en Preferencias → Integración con Git
+
+![Un panel con las marcas de git de cada archivo y carpeta, y su terminal con la rama, el usuario y los botones de git](docs/capturas/es/git.png)
 
 ![La ventana de commit, con los archivos que se incluyen y la orden que se va a ejecutar](docs/capturas/es/commit.png)
 
@@ -49,6 +57,10 @@ Gestor de archivos **multipanel, con terminales integradas y git**, para **Linux
 - La primera vez que se conecta a un servidor se muestra su huella y se pregunta si se confía en él; al aceptarla se añade a `~/.ssh/known_hosts`. Si la clave de un servidor conocido cambia, no se conecta
 - En Preferencias → SSH/SFTP se elige si los archivos del servidor se abren con su programa (se descargan a una carpeta temporal y, al guardar un cambio, se sube preguntando antes o sin preguntar, según se elija; si mientras tanto el archivo cambió en el servidor, se pregunta siempre, para no perder ese cambio. Un Markdown del servidor se abre en el editor del programa) y si se muestran su vista previa y sus miniaturas, hasta un tamaño
 
+![Un panel del equipo y otro en un servidor por SFTP, cada uno con su árbol y su terminal; la del panel remoto, en el servidor](docs/capturas/es/remoto.png)
+
+![La terminal general conectada por SSH a un servidor, bajo dos paneles del equipo](docs/capturas/es/ssh.png)
+
 ## Estilos: una disposición para cada tarea
 
 Un estilo es una forma de colocar la ventana: paneles, árboles de carpetas, visor, metadatos, vista y terminales. Se cambia de uno a otro con un clic en la barra de estilos.
@@ -58,7 +70,7 @@ Un estilo es una forma de colocar la ventana: paneles, árboles de carpetas, vis
 | | |
 |---|---|
 | **Comandante**: los dos paneles clásicos, con varias pestañas en cada uno<br>[![Estilo Comandante](docs/capturas/es/comandante.png)](docs/capturas/es/comandante.png) | **Vertical doble árbol**: un árbol de carpetas para cada panel, aquí en el tema claro<br>[![Estilo Vertical doble árbol](docs/capturas/es/doble-arbol.png)](docs/capturas/es/doble-arbol.png) |
-| **Vertical panel-terminal**: un panel y su terminal, uno junto al otro, con git<br>[![Estilo Vertical panel-terminal](docs/capturas/es/panel-terminal.png)](docs/capturas/es/panel-terminal.png) | **Imágenes**: miniaturas y un visor al lado<br>[![Estilo Imágenes](docs/capturas/es/imagenes.png)](docs/capturas/es/imagenes.png) |
+| **Vertical panel-terminal**: un panel y su terminal, uno junto al otro, con git<br>[![Estilo Vertical panel-terminal](docs/capturas/es/git.png)](docs/capturas/es/git.png) | **Imágenes**: miniaturas y un visor al lado<br>[![Estilo Imágenes](docs/capturas/es/imagenes.png)](docs/capturas/es/imagenes.png) |
 | **Tira de Fotogramas**: un visor grande sobre una tira de imágenes<br>[![Estilo Tira de Fotogramas](docs/capturas/es/tira.png)](docs/capturas/es/tira.png) | **Un estilo propio**: dos paneles, visor y metadatos<br>[![Un estilo propio](docs/capturas/es/estilo-propio.png)](docs/capturas/es/estilo-propio.png) |
 
 Los cuatro paneles del principio de esta página también son un estilo propio. Este es el editor, con el estilo propio de arriba abierto:
