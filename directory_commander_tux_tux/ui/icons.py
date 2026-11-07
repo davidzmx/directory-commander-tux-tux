@@ -82,6 +82,8 @@ _SHAPES = {
     "gomydocuments": _DOC + '<path d="M9 13h6M9 16h6"/>',
     "gotrash": '<path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14"/>',
     "terminal": '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M7 9l3 3-3 3M12 15h5"/>',
+    "movetop": '<path d="M5 4h14"/><path d="M12 20V8M7 13l5-5 5 5"/>',
+    "movebottom": '<path d="M5 20h14"/><path d="M12 4v12M7 11l5 5 5-5"/>',
     "paneframes": '<rect x="3" y="4" width="8" height="16" rx="1" stroke="{a}" stroke-width="2"/><rect x="13" y="4" width="8" height="16" rx="1"/>',
     "treepane": '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M10 4v16"/><path d="M5.500 8v7.500h2M5.500 11.500h2" stroke="{a}"/>',
     "terminalpane": '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 11h18"/><path d="M6.500 13.500l2 1.750-2 1.750M11 17.500h4" stroke="{a}"/>',

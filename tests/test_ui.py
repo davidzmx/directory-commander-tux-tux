@@ -25,7 +25,7 @@ from directory_commander_tux_tux.ui.transfer_dialog import SpeedGraph, TransferD
 from directory_commander_tux_tux.ui import clipboard, hover_card as hover_card_module, image_ops, theme
 from directory_commander_tux_tux.core.listing import COMPUTER_PATH, Entry, entry_from_path, format_size, has_computer_view
 from directory_commander_tux_tux.ui.favorites_pages import AddFavoriteDialog
-from directory_commander_tux_tux.ui.dialogs import PreferencesDialog, PropertiesDialog, RenameDialog
+from directory_commander_tux_tux.ui.dialogs import PreferencesDialog, PropertiesDialog
 from directory_commander_tux_tux.ui.icons import has_icon, themed
 from directory_commander_tux_tux.ui.image_viewer import ImageViewer, color_depth, format_aspect, slider_to_zoom, zoom_to_slider
 from directory_commander_tux_tux.ui.file_view import COLUMN_INDEX, Breadcrumb, FileView, path_crumbs
@@ -337,23 +337,6 @@ def test_drop_handler_copies_and_ignores_same_folder(window, tree):
     window._files_dropped(window.source, [str(left / "a.txt")], None, False)
     assert window.jobs.running == 0
     assert not (left / "a (2).txt").exists()
-
-
-def test_rename_dialog_preview_blocks_duplicates(app, tree):
-    left, _ = tree
-    entries = [Entry("a.txt", str(left / "a.txt"), False), Entry("b.txt", str(left / "b.txt"), False)]
-    dialog = RenameDialog(str(left), entries, {"subcarpeta"}, {})
-    dialog.mode.setCurrentIndex(dialog.mode.findData("regex"))
-    dialog.pattern.setText("(.*)")
-    dialog.replacement.setText("igual")
-    ok = dialog.buttons.button(dialog.buttons.StandardButton.Ok)
-    assert not ok.isEnabled()
-    dialog.replacement.setText("foto_[#]")
-    dialog.seq_digits.setValue(3)
-    assert ok.isEnabled()
-    assert dialog.new_names == ["foto_001.txt", "foto_002.txt"]
-    dialog.pattern.setText("(")
-    assert not ok.isEnabled()
 
 
 def test_find_panel(window, tree):

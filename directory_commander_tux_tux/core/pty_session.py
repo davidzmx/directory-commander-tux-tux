@@ -290,6 +290,8 @@ if sys.platform == "win32":
             finally:
                 _CloseHandle(process)
             path = text.raw.decode("utf-16-le", "replace").removeprefix("\\\\?\\")
+            if "\0" in path or not path:
+                return None  # se leyó mientras el intérprete cambiaba de carpeta: aún no está escrita
             return path.rstrip("\\") + "\\" if len(path.rstrip("\\")) == 2 else path.rstrip("\\")
 
         def read(self, size: int) -> bytes:

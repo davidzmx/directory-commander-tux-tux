@@ -581,6 +581,9 @@ def test_real_session_knows_its_folder_after_cd(tmp_path):
     inside.mkdir()
     session = PtySession(PLAIN_SHELL.argv, str(tmp_path), 200, 10, lambda _data: None, lambda: None)
     try:
+        end = time.monotonic() + 5
+        while time.monotonic() < end and session.current_directory() is None:  # recién arrancado, puede no haberla escrito aún
+            time.sleep(0.05)
         assert same(session.current_directory(), tmp_path)
         session.write(b'cd "dentro \xc3\xb1"\r')
         end = time.monotonic() + 15

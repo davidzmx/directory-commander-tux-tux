@@ -9,7 +9,7 @@ import tempfile
 from dataclasses import replace
 
 from PySide6.QtCore import QByteArray, QEvent, QFile, QMimeDatabase, QPoint, QProcess, QSize, QStandardPaths, QStorageInfo, QThreadPool, QTimer, Qt
-from PySide6.QtGui import QAction, QActionGroup, QCursor, QIcon, QKeySequence
+from PySide6.QtGui import QAction, QActionGroup, QCursor, QIcon, QImageReader, QKeySequence
 from PySide6.QtWidgets import QProxyStyle, QStyle
 from PySide6.QtWidgets import (QApplication, QComboBox, QDockWidget, QFileDialog, QFrame, QHBoxLayout,
                                QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QMenuBar, QMessageBox,
@@ -27,7 +27,8 @@ from ..core.listing import (COMPUTER_LABEL, COMPUTER_PATH, CONTENT_TYPES, entry_
 from . import clipboard, theme
 from .background import GuiAsker, collect_garbage_in_gui_thread, run_bg
 from .check_combo import CheckCombo
-from .dialogs import PreferencesDialog, PropertiesDialog, RenameDialog, SetAttrDialog
+from .batch_rename import BatchRenameDialog
+from .dialogs import PreferencesDialog, PropertiesDialog, SetAttrDialog
 from .extra_commands import ExtraCommands, _turn
 from .favorites_pages import AddFavoriteDialog
 from .file_view import Breadcrumb, DiskMeter, FileView, FolderList
@@ -80,7 +81,7 @@ MENU_ITEMS = [
     (N_("&Editar"), N_("Mover a destino"), "move", "Shift+F6", "Copy MOVE", True),
     (N_("&Editar"), N_("Duplicar aquí"), None, "Ctrl+Alt+D", "Copy HERE", True),
     (N_("&Editar"), N_("Renombrar"), "rename", "F2", "Rename", True),
-    (N_("&Editar"), N_("Renombrado avanzado…"), "rename", "Ctrl+F2", "Rename ADVANCED", True),
+    (N_("&Editar"), N_("Renombrado masivo…"), "rename", "Ctrl+F2", "Rename ADVANCED", True),
     (N_("&Editar"), N_("Enviar a la papelera"), "delete", "Delete", "Delete", True),
     (N_("&Editar"), N_("Eliminar definitivamente"), "deletepermanent", "Shift+Delete", "Delete NORECYCLE", True),
     (N_("&Editar"), None, None, None, None, False),
@@ -227,6 +228,12 @@ def _location_exists(path: str) -> bool:
 def remote_host(path: str) -> str:
     """El servidor, tal como se escribió en el perfil: una IP o un nombre."""
     return remote.server_parts(remote.server_of(path))[1]
+
+
+def _image_size(path: str) -> tuple[int, int]:
+    """Las medidas de una imagen, leyendo solo su cabecera. (0, 0) si no lo es."""
+    size = QImageReader(path).size()
+    return (size.width(), size.height()) if size.isValid() else (0, 0)
 
 
 def _tab_title(path: str, show_drive: bool = True) -> str:
@@ -2179,6 +2186,7 @@ class MainWindow(ExtraCommands, QMainWindow):
         view.hover_card.ffmpeg_dir = self.config.get("ffmpeg_dir", "")
         view.set_full_row(bool(self.config.get("full_row_select", False)))
         view.set_single_click(self.config.get("single_click") is True)
+        view.set_resort_on_change(self.config.get("resort_on_change") is True)
         view.set_list_name_limit(self._list_name_limit())
         view.set_thumbnail_size(self._thumbnail_size())
         self._apply_previews(view)
@@ -2823,7 +2831,7 @@ class MainWindow(ExtraCommands, QMainWindow):
             return
         simple = {
             "UP": view.up, "BACK": view.back, "FORWARD": view.forward, "ROOT": view.go_root, "HOME": view.go_home,
-            "HOMEDIR": view.go_home, "REFRESH": view.refresh, "PATHFIELD": self._begin_path_edit,
+            "HOMEDIR": view.go_home, "REFRESH": lambda: view.refresh(resort=True), "PATHFIELD": self._begin_path_edit,
             "PATHFIELDPATHTREE": self._begin_path_edit,
             "TABNEW": lambda: self.groups[self.active_side].add_tab(view.path),
             "TABCLOSE": lambda: self.groups[self.active_side].close_tab(self.groups[self.active_side].currentIndex()),
@@ -3137,31 +3145,27 @@ class MainWindow(ExtraCommands, QMainWindow):
         if remote.is_remote(view.path) and (cmd.has("ADVANCED") or preset or len(entries) != 1 or view.flat):
             raise OSError(tr("En un panel remoto se renombra de uno en uno"))
         if not cmd.has("ADVANCED") and not preset and len(entries) == 1 and not view.flat:
-            view.begin_rename()
+            view.begin_rename(self.config.get("rename_selects_stem") is not False)
             return
         if view.flat or any(e.depth for e in entries):
             raise OSError(tr("Para renombrar en lote, sal de la vista plana o pliega las carpetas"))
         selected = {e.name for e in entries}
         others = {e.name for e in view.model.entries if e.name not in selected and not e.depth}
         presets = self.config.get("rename_presets", {})
-        dialog = RenameDialog(view.path, entries, others, presets, self)
-        if preset:
-            if preset not in presets:
-                raise ValueError(tr("Preset desconocido: {preset}", preset=preset))
-            dialog.preset_box.setCurrentText(preset)
-        if dialog.exec():
-            self.release_media()
-            errors = rename.apply_renames(view.path, dialog.names, dialog.new_names)
-            self.config["rename_presets"] = presets
-            failed = {name for name, _message in errors}
-            pairs = [(old, new) for old, new in zip(dialog.names, dialog.new_names) if old != new and old not in failed]
-            if pairs:
-                self._push_undo({"kind": "rename", "dir": view.path, "pairs": pairs})
-            for name, message in errors:
-                self.log.log(tr("Renombrar {name}: {message}", name=name, message=message))
-            if errors:
-                QMessageBox.warning(self, APP_NAME, tr("{count} elementos no se pudieron renombrar. Mira el registro.", count=len(errors)))
-            view.refresh()
+        dialog = BatchRenameDialog(view.path, [e.name for e in entries], others, presets, _image_size, self)
+        if preset and not dialog.load_profile(preset):
+            raise ValueError(tr("Preset desconocido: {preset}", preset=preset))
+
+        def renamed(pairs: list) -> None:
+            self._push_undo({"kind": "rename", "dir": view.path, "pairs": pairs})
+            for old, new in pairs:
+                self.log.log(tr("Renombrado: {old} → {new}", old=old, new=new))
+            view.refresh(renamed={os.path.join(view.path, old): os.path.join(view.path, new) for old, new in pairs})
+
+        dialog.renamed.connect(renamed)
+        self.release_media()  # en Windows, un archivo abierto en el visor no se puede renombrar
+        dialog.exec()
+        self.config["rename_presets"] = presets
 
     def _cmd_undo(self, cmd: commands.Command) -> None:
         redoing = cmd.has("REDO")
@@ -4230,6 +4234,7 @@ class MainWindow(ExtraCommands, QMainWindow):
             view.hover_card.ffmpeg_dir = self.config.get("ffmpeg_dir", "")
             view.model.remote_previews = sftp.previews(self.config)
             view.set_single_click(self.config.get("single_click") is True)
+            view.set_resort_on_change(self.config.get("resort_on_change") is True)
             view.set_list_name_limit(self._list_name_limit())
             view.set_thumbnail_size(self._thumbnail_size())
             self._apply_previews(view)
@@ -4672,11 +4677,12 @@ class MainWindow(ExtraCommands, QMainWindow):
         add(tr("Atributos…"), "SetAttr", local, "setattr")
         add(tr("Propiedades"), "Properties", not on_server, "properties")
         menu = self._arrange_menu(menu, context_menu.FILE)
-        if len(entries) == 1:  # la clave de la configuración sigue siendo la misma: solo cambia lo que se lee
-            single = tr("Copiar ruta de la carpeta") if entries[0].is_dir else tr("Copiar ruta del archivo")
-            for action in menu.actions():
-                if action.text() == tr("Copiar rutas como texto"):
-                    action.setText(single)
+        # La clave de la configuración sigue siendo la misma: solo cambia lo que se lee.
+        shown = {tr("Copiar rutas como texto"): tr("Copiar ruta de la carpeta") if entries[0].is_dir else tr("Copiar ruta del archivo")} if len(entries) == 1 \
+            else {tr("Renombrar"): tr("Renombrado masivo…")}
+        for action in menu.actions():
+            if action.text() in shown:
+                action.setText(shown[action.text()])
         return menu
 
     def _arrange_menu(self, menu: QMenu, which: str) -> QMenu:

@@ -479,7 +479,7 @@ def test_new_tabs_sort_by_type_unless_chosen(window, tree):
     left, _right = tree
     (left / "z.md").write_text("", encoding="utf-8")
     view = window.source
-    view.refresh()
+    view.refresh(resort=True)  # como F5: sin reordenar, lo nuevo iría al final
     assert wait_until(lambda: [e.name for e in view.model.entries] == ["subcarpeta", "z.md", "a.txt", "b.txt"])  # Archivo MD antes que Archivo TXT
     window.config["default_sort"] = "name"
     other = window.groups[window.active_side].add_tab(str(left))

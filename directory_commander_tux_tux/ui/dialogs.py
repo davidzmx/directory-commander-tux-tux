@@ -1,4 +1,4 @@
-"""Diálogos: renombrado en lote, colisiones y propiedades."""
+"""Diálogos: atributos, preferencias y propiedades."""
 from __future__ import annotations
 
 import os
@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, 
                                QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton,
                                QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
-from ..core import bar_buttons, fsops, i18n, pane_colors, rename, shells, styles
+from ..core import bar_buttons, fsops, i18n, pane_colors, shells, styles
 from ..core.config import GENERATION_MARK_KINDS, THUMB_SIZES, config_dir
 from ..core.exiftool import find_exiftool
 from ..core.media_info import find_tool
@@ -28,143 +28,6 @@ from .sessions_page import SessionsPage
 from .sftp import SftpPage
 from .system_pages import ComparePage, FileManagerPage, GitPage
 from .tab_settings_pages import TabSettingsPages
-
-
-class RenameDialog(QDialog):
-    """Vista previa en vivo: nada se toca en disco hasta aceptar, y aceptar exige un lote válido."""
-
-    def __init__(self, directory: str, entries: list[Entry], others: set[str], presets: dict, parent=None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle(tr("Renombrar"))
-        self.resize(760, 520)
-        self.directory = directory
-        self.names = [e.name for e in entries]
-        self.others = others
-        self.presets = presets
-        self.new_names: list[str] = []
-
-        self.preset_box = QComboBox()
-        self.preset_box.addItem(tr("(sin preset)"))
-        self.preset_box.addItems(sorted(presets))
-        self.preset_box.currentTextChanged.connect(self._load_preset)
-        save_btn = QPushButton(tr("Guardar preset…"))
-        save_btn.clicked.connect(self._save_preset)
-        preset_row = QHBoxLayout()
-        preset_row.addWidget(self.preset_box, 1)
-        preset_row.addWidget(save_btn)
-
-        self.mode = QComboBox()
-        self.mode.addItem(tr("Buscar y reemplazar texto"), "simple")
-        self.mode.addItem(tr("Comodines (* y ?)"), "wildcard")
-        self.mode.addItem(tr("Expresión regular"), "regex")
-        self.pattern = QLineEdit()
-        self.replacement = QLineEdit()
-        self.replacement.setPlaceholderText(tr("Usa [#] para numerar; \\1 para grupos en regex"))
-        self.ignore_ext = QCheckBox(tr("No tocar la extensión"))
-        self.ignore_ext.setChecked(True)
-        self.case = QComboBox()
-        for label, value in ((tr("Sin cambios"), "none"), (tr("MAYÚSCULAS"), "upper"), (tr("minúsculas"), "lower"),
-                             (tr("Cada Palabra"), "title"), (tr("Primera letra"), "sentence")):
-            self.case.addItem(label, value)
-        self.seq_start = QSpinBox(minimum=0, maximum=10 ** 8, value=1)
-        self.seq_step = QSpinBox(minimum=1, maximum=10 ** 6, value=1)
-        self.seq_digits = QSpinBox(minimum=1, maximum=12, value=1)
-        seq_row = QHBoxLayout()
-        for label, widget in ((tr("Empezar en"), self.seq_start), (tr("Paso"), self.seq_step), (tr("Dígitos"), self.seq_digits)):
-            seq_row.addWidget(QLabel(label))
-            seq_row.addWidget(widget)
-        seq_row.addStretch(1)
-
-        form = QFormLayout()
-        form.addRow("Preset", preset_row)
-        form.addRow(tr("Modo"), self.mode)
-        form.addRow(tr("Buscar"), self.pattern)
-        form.addRow(tr("Reemplazar por"), self.replacement)
-        form.addRow(tr("Mayúsculas"), self.case)
-        form.addRow(tr("Numeración [#]"), seq_row)
-        form.addRow("", self.ignore_ext)
-
-        self.table = QTableWidget(len(self.names), 2)
-        self.table.setHorizontalHeaderLabels([tr("Nombre actual"), tr("Nombre nuevo")])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.table.verticalHeader().hide()
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        for row, name in enumerate(self.names):
-            self.table.setItem(row, 0, QTableWidgetItem(name))
-            self.table.setItem(row, 1, QTableWidgetItem(name))
-        self.message = QLabel()
-        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        self.buttons.accepted.connect(self.accept)
-        self.buttons.rejected.connect(self.reject)
-
-        layout = QVBoxLayout(self)
-        layout.addLayout(form)
-        layout.addWidget(self.table, 1)
-        layout.addWidget(self.message)
-        layout.addWidget(self.buttons)
-
-        self.mode.currentIndexChanged.connect(self._update_preview)
-        self.pattern.textChanged.connect(self._update_preview)
-        self.replacement.textChanged.connect(self._update_preview)
-        self.ignore_ext.toggled.connect(self._update_preview)
-        self.case.currentIndexChanged.connect(self._update_preview)
-        for spin in (self.seq_start, self.seq_step, self.seq_digits):
-            spin.valueChanged.connect(self._update_preview)
-        if len(self.names) == 1:
-            stem = os.path.splitext(self.names[0])[0]
-            self.replacement.setText(stem)
-            self.pattern.setText(stem)
-        self._update_preview()
-
-    def spec(self) -> rename.RenameSpec:
-        return rename.RenameSpec(self.mode.currentData(), self.pattern.text(), self.replacement.text(),
-                                 self.ignore_ext.isChecked(), self.case.currentData(), self.seq_start.value(),
-                                 self.seq_step.value(), self.seq_digits.value())
-
-    def set_spec(self, spec: rename.RenameSpec) -> None:
-        self.mode.setCurrentIndex(self.mode.findData(spec.mode))
-        self.pattern.setText(spec.pattern)
-        self.replacement.setText(spec.replacement)
-        self.ignore_ext.setChecked(spec.ignore_ext)
-        self.case.setCurrentIndex(self.case.findData(spec.case))
-        self.seq_start.setValue(spec.seq_start)
-        self.seq_step.setValue(spec.seq_step)
-        self.seq_digits.setValue(spec.seq_digits)
-
-    def _update_preview(self) -> None:
-        ok_button = self.buttons.button(QDialogButtonBox.StandardButton.Ok)
-        try:
-            self.new_names = rename.compute_names(self.names, self.spec())
-        except ValueError as exc:
-            self.new_names = []
-            self.message.setText(f"⚠ {exc}")
-            ok_button.setEnabled(False)
-            return
-        problems = rename.find_problems(self.names, self.new_names, self.others)
-        for row, new in enumerate(self.new_names):
-            item = self.table.item(row, 1)
-            item.setText(new)
-            item.setForeground(QColor("#d04040") if row in problems else self.palette().text().color())
-            item.setToolTip(problems.get(row, ""))
-        changed = sum(1 for a, b in zip(self.names, self.new_names) if a != b)
-        if problems:
-            self.message.setText(tr("⚠ {count} con problemas: {value}", count=len(problems), value=next(iter(problems.values()))))
-        else:
-            self.message.setText(tr("Se renombrarán {changed} de {count} elementos", changed=changed, count=len(self.names)))
-        ok_button.setEnabled(not problems and changed > 0)
-
-    def _load_preset(self, name: str) -> None:
-        if name in self.presets:
-            self.set_spec(rename.RenameSpec.from_dict(self.presets[name]))
-
-    def _save_preset(self) -> None:
-        name, ok = QInputDialog.getText(self, tr("Guardar preset"), tr("Nombre:"))
-        if ok and name.strip():
-            name = name.strip()
-            if name not in self.presets:
-                self.preset_box.addItem(name)
-            self.presets[name] = self.spec().to_dict()
-            self.preset_box.setCurrentText(name)
 
 
 _ATTR_LABELS = {"r": tr("Solo lectura"), "h": tr("Oculto"), "s": tr("Sistema"), "a": tr("Listo para archivar"),
@@ -316,6 +179,11 @@ class PreferencesDialog(QDialog):
         self.confirm_exit = QCheckBox(tr("Confirmar antes de salir del programa"))
         self.confirm_exit.setToolTip(tr("Con conexiones SSH/SFTP abiertas se pregunta siempre, porque se cerrarán"))
         self.confirm_exit.setChecked(config.get("confirm_exit", True) is not False)
+        self.resort_on_change = QCheckBox(tr("Reordenar la lista en cuanto se copia, se mueve o cambia un archivo"))
+        self.resort_on_change.setToolTip(tr("Sin marcar, lo que ya se ve no se mueve y lo nuevo aparece al final, hasta que se actualiza la carpeta (F5)"))
+        self.resort_on_change.setChecked(config.get("resort_on_change") is True)
+        self.rename_stem = QCheckBox(tr("Al renombrar, seleccionar solo el nombre, sin la extensión"))
+        self.rename_stem.setChecked(config.get("rename_selects_stem") is not False)
         self.single_click = QCheckBox(tr("Abrir archivos y carpetas con un clic; seleccionar con la marca + de su icono"))
         self.single_click.setToolTip(tr("Al pasar el ratón por un archivo aparece un + sobre su icono: púlsalo para seleccionarlo. "
                                         "Ctrl y Mayús siguen seleccionando como siempre"))
@@ -379,6 +247,8 @@ class PreferencesDialog(QDialog):
         marks.addRow(self.generation_marks)  # las de git, en Integración con Git
         marks.addRow(tr("Cuáles:"), self.generation_kinds)
         browsing.addRow(self.single_click)
+        browsing.addRow(self.rename_stem)
+        browsing.addRow(self.resort_on_change)
         browsing.addRow(self.hover_info)
         opening.addRow(tr("Abrir las imágenes con:"), self.open_images)
         opening.addRow(tr("Abrir los vídeos con:"), self.open_videos)
@@ -729,6 +599,8 @@ class PreferencesDialog(QDialog):
         config["default_sort"] = self.default_sort.currentData()
         config["default_sort_reverse"] = self.default_sort_reverse.isChecked()
         config["single_click"] = self.single_click.isChecked()
+        config["rename_selects_stem"] = self.rename_stem.isChecked()
+        config["resort_on_change"] = self.resort_on_change.isChecked()
         config["hover_info"] = self.hover_info.isChecked()
         config["open_images"] = self.open_images.currentData()
         config["open_videos"] = self.open_videos.currentData()

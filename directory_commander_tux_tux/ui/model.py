@@ -186,6 +186,7 @@ class FileModel(QAbstractTableModel):
         self.git_marks = True
         self._git_states: tuple = ({}, {}, ())  # archivos, carpetas con cambios dentro, carpetas ignoradas
         self.generation_kinds = "both"  # both, prompt o workflow
+        self.reloading = False
         self.ffmpeg_dir = ""
         self._generated: dict[tuple, bool] = {}  # por (ruta, fecha de modificación): sigue valiendo al volver a leer la carpeta
         self._generated_pending: set[tuple] = set()
@@ -230,8 +231,13 @@ class FileModel(QAbstractTableModel):
             self._probing = None
 
     # --- carga ---
-    def load(self, path: str, show_hidden: bool = False, flat: bool = False) -> None:
+    def load(self, path: str, show_hidden: bool = False, flat: bool = False, resort: bool = True, renamed: dict[str, str] | None = None) -> None:
+        """`resort` en falso, al volver a leer la misma carpeta porque algo cambió en ella: lo que ya estaba no se mueve, y lo nuevo va al
+        final. Así una descarga, una copia o un archivo que se guarda no reordenan la lista, con ella ordenada por fecha, mientras se mira."""
         self._generation += 1
+        previous = {entry.path: position for position, entry in enumerate(self._all)} if not resort and path == self.path and not flat else None
+        if previous is not None and renamed:
+            previous.update({os.path.normpath(new): previous[os.path.normpath(old)] for old, new in renamed.items() if os.path.normpath(old) in previous})
         generation = self._generation
         if self._loading:
             self._loading.cancel()
@@ -270,14 +276,17 @@ class FileModel(QAbstractTableModel):
         self._in_archive = path == COMPUTER_PATH or archive.split_archive_path(path) is not None
         self._loading = run_bg(
             work,
-            on_done=lambda value: self._loaded(generation, value),
+            on_done=lambda value: self._loaded(generation, value, previous),
             on_error=lambda exc: self._failed(generation, exc),
         )
 
-    def _loaded(self, generation: int, value) -> None:
+    def _loaded(self, generation: int, value, previous: dict[str, int] | None = None) -> None:
         if generation != self._generation:
             return
         entries, children, disk = value
+        if previous:
+            known = sorted((entry for entry in entries if entry.path in previous), key=lambda entry: previous[entry.path])
+            entries = known + [entry for entry in entries if entry.path not in previous]  # los nuevos, entre sí, en su orden
         self.free_space, self.total_space = (disk[0].free, disk[0].total) if disk else (None, None)
         self.device = disk[1] if disk else None
         self._loading = None
@@ -287,12 +296,14 @@ class FileModel(QAbstractTableModel):
             for entry in group:
                 if entry.path in self._dir_sizes:
                     entry.dir_size = self._dir_sizes[entry.path]
+        self.reloading = True  # la misma carpeta o una nueva, leída otra vez: lo que se veía debe seguir viéndose
         self.beginResetModel()
         self._all = entries
         self._children = children
         self._expanded &= set(children)
         self._rows = self._build_rows()
         self.endResetModel()
+        self.reloading = False
         self.loadFinished.emit("")
         self._probe_folders([entry for group in [entries, *children.values()] for entry in group])
 
@@ -773,7 +784,10 @@ class FileModel(QAbstractTableModel):
         return git_tools.state_of(entry.path, *self._git_states)
 
     def set_git_states(self, states) -> None:
-        self._git_states = states or ({}, {}, ())
+        states = states or ({}, {}, ())
+        if states == self._git_states:
+            return  # al volver a leer la carpeta suele ser lo mismo: avisar haría recolocar la lista para nada
+        self._git_states = states
         if self.rowCount():
             self.dataChanged.emit(self.index(0, 0), self.index(self.rowCount() - 1, 0), [GitRole, Qt.ItemDataRole.ForegroundRole])
 
@@ -790,6 +804,11 @@ class FileModel(QAbstractTableModel):
         has_prompt, workflow, tool = marks[:3]
         has_prompt, workflow = has_prompt and self.generation_kinds != "workflow", workflow and self.generation_kinds != "prompt"
         return (has_prompt, workflow, tool) if has_prompt or workflow else None
+
+    def may_have_generation_marks(self, entry: Entry) -> bool:
+        """Si se mostrarán sus marcas de IA cuando se lean: lo que puede tenerlas, del equipo y con las marcas activadas."""
+        return (self.generation_marks and not entry.is_dir and not entry.in_archive and not remote.is_remote(entry.path)
+                and entry.extension in ai_metadata.IMAGE_EXTENSIONS | ai_metadata.VIDEO_EXTENSIONS)
 
     def _generation_mark(self, entry: Entry):
         """(prompt, workflow, programa), o None. Solo de los archivos del equipo: hay que leer sus metadatos, y se hace en segundo plano."""

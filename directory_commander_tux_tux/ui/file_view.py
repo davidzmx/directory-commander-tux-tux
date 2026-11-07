@@ -6,6 +6,7 @@ import os
 import time
 from pathlib import PurePath
 
+import shiboken6
 from PySide6.QtCore import (QEvent, QFileSystemWatcher, QItemSelection, QItemSelectionModel, QModelIndex, QObject, QPoint, QPointF, QRect, QRectF,
                             QSize, Qt, QTimer, Signal)
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter, QPalette, QPen
@@ -35,6 +36,36 @@ GROUP_ROW_EXTRA = 12
 MIN_DRIVE_NAME_WIDTH = 190
 MIN_BREADCRUMB_WIDTH = 60
 MIN_NAME_COLUMN = 120
+ANCHOR_STEPS = 5000  # al volver a leer la carpeta, cuánto se puede mover la vista para que siga viéndose lo mismo
+SINGLE_PASS_ROWS = 30_000  # hasta aquí, la lista se recoloca de una vez; con más, por lotes para no bloquear la ventana
+MARKS_LAYOUT_MS = 400  # las marcas llegan de una en una: la lista se recoloca, como mucho, una vez en este tiempo
+
+
+def first_visible(view) -> tuple[QModelIndex, QPoint]:
+    """El primer elemento que se ve y su sitio en la vista."""
+    area = view.viewport().rect()
+    index = view.indexAt(QPoint(2, 2))
+    if not index.isValid() and view.model() is not None:  # entre iconos hay huecos: el primero que asome
+        model = view.model()
+        index = next((model.index(row, 0) for row in range(model.rowCount()) if view.visualRect(model.index(row, 0)).intersects(area)), QModelIndex())
+    return index, view.visualRect(index).topLeft() if index.isValid() else QPoint()
+
+
+def keep_at(view, index: QModelIndex, place: QPoint, axes=("x", "y")) -> None:
+    """Desplaza la vista hasta que `index` vuelva a estar en `place`. Desplazando por elementos, cada paso es uno; por píxeles, basta uno."""
+    for axis in axes:
+        bar = view.horizontalScrollBar() if axis == "x" else view.verticalScrollBar()
+        per_item = (view.horizontalScrollMode() if axis == "x" else view.verticalScrollMode()) == QAbstractItemView.ScrollMode.ScrollPerItem
+        for _ in range(ANCHOR_STEPS):
+            rect = view.visualRect(index)
+            delta = getattr(rect.topLeft(), axis)() - getattr(place, axis)()
+            extent = rect.width() if axis == "x" else rect.height()
+            if not rect.isValid() or abs(delta) < (max(1, extent // 2) if per_item else 1):
+                break
+            before = bar.value()
+            bar.setValue(before + ((1 if delta > 0 else -1) if per_item else delta))
+            if bar.value() == before:
+                break
 MAX_FOLDER_VIEWS = 2000
 PROMPT_MARK_COLOR = "#8e44ad"
 WORKFLOW_MARK_COLOR = "#16a085"
@@ -107,6 +138,31 @@ def paint_select_marker(painter, view, index, icon: QRect) -> None:
     if not selected:
         painter.drawLine(QPointF(middle.x(), middle.y() - reach), QPointF(middle.x(), middle.y() + reach))
     painter.restore()
+
+
+def stem_length(name: str) -> int:
+    """Lo que se selecciona al renombrar: el nombre sin su extensión. Uno que empieza por punto, como «.gitignore», es todo nombre."""
+    dot = name.rfind(".")
+    return dot if dot > 0 else len(name)
+
+
+def keep_typed_text(delegate, editor, index) -> None:
+    """Qt vuelve a poner el nombre en el editor cada vez que cambia algo de la fila, como una marca que acaba de leerse:
+    borraría lo que el usuario está escribiendo. Solo se pone al abrirlo."""
+    if editor.property("filled"):
+        return
+    QStyledItemDelegate.setEditorData(delegate, editor, index)
+    editor.setProperty("filled", True)
+
+
+def reserved_badges(index) -> list[tuple[str, str]]:
+    """Las marcas para las que se deja sitio en la lista: las de git que tiene y, si puede tener marcas de IA, las que se muestran,
+    las tenga ya leídas o no. Así, al llegar, no ensanchan su columna ni hacen recolocar la lista."""
+    model, entry = index.model(), index.data(EntryRole)
+    if entry is None or not getattr(model, "may_have_generation_marks", lambda _entry: False)(entry):
+        return row_badges(index)
+    kinds = model.generation_kinds
+    return generation_badges((kinds != "workflow", kinds != "prompt", "")) + git_badges(index.data(GitRole))
 
 
 def generation_badges(marks, long: bool = False) -> list[tuple[str, str]]:
@@ -387,6 +443,9 @@ class NameDelegate(QStyledItemDelegate):
             editor.setPalette(QApplication.palette())  # la tabla tiene el color de selección transparente
         return editor
 
+    def setEditorData(self, editor, index) -> None:
+        keep_typed_text(self, editor, index)
+
     def updateEditorGeometry(self, editor, option, index) -> None:
         super().updateEditorGeometry(editor, option, index)
         editor.setGeometry(editor.geometry().adjusted(self._offset(index.data(EntryRole)) + 18, 0, 0, 0))
@@ -443,6 +502,9 @@ class ItemDelegate(QStyledItemDelegate):
         super().__init__(parent)
         self._sizes: dict[tuple, QSize] = {}
 
+    def setEditorData(self, editor, index) -> None:
+        keep_typed_text(self, editor, index)
+
     def _indent(self, index: QModelIndex) -> int:
         if not self.parent().list_mode:
             return 0
@@ -458,7 +520,7 @@ class ItemDelegate(QStyledItemDelegate):
         entry = index.data(EntryRole)
         metrics = option.fontMetrics
         limit = view.name_limit * metrics.averageCharWidth() if view.name_limit else 0
-        marks = tuple(row_badges(index))
+        marks = tuple(reserved_badges(index))
         key = (entry.display_name, entry.depth, index.model().check_mode, metrics.height(), metrics.averageCharWidth(), limit, marks) if entry else None
         size = self._sizes.get(key) if key else None
         if size is None:
@@ -727,6 +789,8 @@ class ItemsView(_DropMixin, QListView):
         self.pane_role = "single"
         self.list_mode = False
         self.hover_row = -1
+        self._marks_timer = QTimer(self, singleShot=True, interval=MARKS_LAYOUT_MS)
+        self._marks_timer.timeout.connect(self._relayout_for_marks)
         self._tile = TileDelegate(self)
         self._plain = ItemDelegate(self)
         self.configure("thumbnails")
@@ -754,8 +818,30 @@ class ItemsView(_DropMixin, QListView):
 
     def dataChanged(self, top_left, bottom_right, roles=()) -> None:
         super().dataChanged(top_left, bottom_right, roles)
-        if self.list_mode and (GenerationRole in roles or GitRole in roles):
-            self.scheduleDelayedItemsLayout()  # las marcas ensanchan el nombre: su columna debe medirse de nuevo
+        # Las de git ensanchan el nombre: su columna debe medirse de nuevo. Las de IA ya tenían su sitio.
+        if self.list_mode and GitRole in roles and not self._marks_timer.isActive():
+            self._marks_timer.start()
+
+    def _relayout_for_marks(self) -> None:
+        if self.list_mode:
+            self.doItemsLayout()
+
+    def doItemsLayout(self) -> None:
+        """En la lista desplazada, de una vez y en la misma columna. Por lotes, mientras se coloca, la barra mide menos y Qt recorta su
+        posición, que luego no recupera: la vista volvería hacia el principio. Al principio no hay nada que mover: por lotes, sin bloquear."""
+        bar = self.horizontalScrollBar()
+        value = bar.value()
+        model = self.model()
+        if (not self.list_mode or not value or model is None or model.rowCount() > SINGLE_PASS_ROWS
+                or self.layoutMode() == QListView.LayoutMode.SinglePass):
+            super().doItemsLayout()
+            return
+        self.setLayoutMode(QListView.LayoutMode.SinglePass)
+        try:
+            super().doItemsLayout()
+        finally:
+            self.setLayoutMode(QListView.LayoutMode.Batched)
+        bar.setValue(value)
 
     def finish_layout(self) -> None:
         """Coloca ya todos los elementos, sin esperar a los lotes."""
@@ -763,6 +849,8 @@ class ItemsView(_DropMixin, QListView):
             self.setLayoutMode(QListView.LayoutMode.SinglePass)
             self.doItemsLayout()
             self.setLayoutMode(QListView.LayoutMode.Batched)
+        else:
+            self.doItemsLayout()
 
     def scrollTo(self, index: QModelIndex, hint=QAbstractItemView.ScrollHint.EnsureVisible) -> None:
         if self.list_mode and index.isValid() and not self.visualRect(index).isValid():
@@ -1309,6 +1397,9 @@ class FileView(QWidget):
         self._saved_selection: list[str] = []
         self._saved_current = ""
         self._saved_scroll = (0, 0)
+        self._saved_anchor: tuple[str, QPoint] | None = None  # el primer archivo que se veía, y dónde
+        self._saved_at_end = (False, False)
+        self.resort_on_change = False  # reordenar la lista en cuanto aparece o cambia un archivo
         self._focus_after_load: str | None = None
         self.last_selection: list[str] = []
         self.grid_lines = False
@@ -1649,8 +1740,13 @@ class FileView(QWidget):
         if archive.split_archive_path(path) is None and os.path.isdir(path):
             self._watcher.addPath(path)
 
-    def refresh(self) -> None:
-        self.model.load(self.path, self.show_hidden, self.flat)
+    def refresh(self, resort: bool | None = None, renamed: dict[str, str] | None = None) -> None:
+        """`resort`: ordenar otra vez, como al pulsar F5. Sin indicarlo, según la opción: al cambiar algo en la carpeta, de serie no.
+        `renamed` (ruta antigua → nueva): sin reordenar, cada archivo renombrado sigue en su sitio."""
+        self.model.load(self.path, self.show_hidden, self.flat, self.resort_on_change if resort is None else resort, renamed)
+
+    def set_resort_on_change(self, enabled: bool) -> None:
+        self.resort_on_change = enabled
 
     def can_go_back(self) -> bool:
         return self._history_pos > 0
@@ -1832,22 +1928,31 @@ class FileView(QWidget):
     def set_show_hidden(self, value: bool) -> None:
         if value != self.show_hidden:
             self.show_hidden = value
-            self.refresh()
+            self.refresh(resort=True)  # lo que aparece debe ir en su sitio, no al final
 
     def set_flat(self, value: bool) -> None:
         if value != self.flat and self.path != COMPUTER_PATH and not is_results(self.path) and archive.split_archive_path(self.path) is None:
             self.flat = value
-            self.refresh()
+            self.refresh(resort=True)
 
     def show_filter(self) -> None:
         self.filter_edit.show()
         self.filter_edit.setFocus()
         self.filter_edit.selectAll()
 
-    def begin_rename(self) -> None:
+    def begin_rename(self, only_stem: bool = True) -> None:
+        """Con `only_stem`, queda seleccionado el nombre sin la extensión, para cambiarlo sin tocarla."""
         index = self.current_view.currentIndex()
-        if index.isValid():
-            self.current_view.edit(self.model.index(index.row(), 0))
+        if not index.isValid():
+            return
+        index = self.model.index(index.row(), 0)
+        self.current_view.edit(index)
+        entry = self.model.entry(index.row())
+        editor = QApplication.focusWidget()
+        if only_stem and entry is not None and not entry.is_dir and isinstance(editor, QLineEdit):
+            length = stem_length(editor.text())
+            editor.setSelection(0, length)
+            QTimer.singleShot(0, lambda: editor.setSelection(0, length) if shiboken6.isValid(editor) and editor.hasSelectedText() else None)
 
     def set_role(self, role: str) -> None:
         if self.property("role") == role:
@@ -1877,7 +1982,7 @@ class FileView(QWidget):
 
     def set_expandable(self, enabled: bool) -> None:
         self.model.expandable = enabled
-        self.refresh()
+        self.refresh(resort=True)
 
     def set_level_colors(self, enabled: bool) -> None:
         self.details.level_colors = self.thumbs.level_colors = enabled
@@ -2075,6 +2180,24 @@ class FileView(QWidget):
         self._saved_current = current.path if current else ""
         view = self.current_view
         self._saved_scroll = (view.horizontalScrollBar().value(), view.verticalScrollBar().value())
+        # Al final sigue al final al volver a leer la carpeta: si aparece una columna o una fila más, se vería la de antes. Al desplegar, no.
+        self._saved_at_end = tuple(bool(self.model.reloading and bar.value() and bar.value() >= bar.maximum())
+                                   for bar in (view.horizontalScrollBar(), view.verticalScrollBar()))
+        self._saved_anchor = None
+        # Solo con una fila por archivo. En la lista o con iconos, un archivo que aparece antes corre los demás un puesto, y el primero que se
+        # veía puede pasar a la columna o la fila anterior: seguirlo movería la vista entera. Al desplegar o filtrar, la barra se queda donde estaba.
+        if any(self._saved_scroll) and self.model.reloading and view is self.details:
+            index, place = first_visible(view)
+            entry = self.model.entry(index.row()) if index.isValid() else None
+            self._saved_anchor = (entry.path, place) if entry is not None else None
+
+    def _keep_in_place(self, view) -> None:
+        """Lo que se veía sigue en su sitio aunque aparezcan o desaparezcan archivos antes, como el temporal de una descarga:
+        se lleva la vista hasta él, no hasta los mismos píxeles. Lo que estaba al principio sigue al principio."""
+        path, place = self._saved_anchor
+        row = self.model.row_of(path)
+        if row >= 0:
+            keep_at(view, self.model.index(row, 0), place, [axis for axis, saved in zip(("x", "y"), self._saved_scroll) if saved])
 
     def _restore_view_state(self) -> None:
         self.details.hover_row = -1
@@ -2093,6 +2216,16 @@ class FileView(QWidget):
             view.finish_layout()  # la barra no admite el valor hasta conocer el ancho total
         view.horizontalScrollBar().setValue(across)
         view.verticalScrollBar().setValue(down)
+        for bar, at_end in zip((view.horizontalScrollBar(), view.verticalScrollBar()), self._saved_at_end):
+            if at_end:
+                bar.setValue(bar.maximum())
+        if self._saved_anchor is not None and not any(self._saved_at_end):
+            if view is self.thumbs:
+                view.finish_layout()
+            else:
+                view.doItemsLayout()  # las filas, ya colocadas: sin eso no se sabe dónde queda cada una
+            self._keep_in_place(view)
+            self._saved_anchor = None
 
     def _load_finished(self, error: str) -> None:
         if error:

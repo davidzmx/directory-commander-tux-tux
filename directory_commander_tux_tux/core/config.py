@@ -277,6 +277,8 @@ DEFAULTS: dict = {
     "favorites": [],
     "favorites_autosort": False,
     "rename_presets": {},
+    "rename_selects_stem": True,  # al renombrar uno, queda seleccionado el nombre sin la extensión
+    "resort_on_change": False,  # al aparecer o cambiar un archivo, reordenar la lista ya; si no, lo nuevo va al final hasta actualizar
     "toolbar": DEFAULT_TOOLBAR,
     "styles": DEFAULT_STYLES,
     "style": N_("Vertical doble panel"),

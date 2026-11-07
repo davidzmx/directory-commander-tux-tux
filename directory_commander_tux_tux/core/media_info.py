@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import struct
 import subprocess
 import sys
@@ -37,6 +38,10 @@ class MediaInfo:
     title: str = ""
     artist: str = ""
     album: str = ""
+    year: str = ""
+    track: str = ""
+    genre: str = ""
+    comment: str = ""
     cover: bytes | None = None
 
 
@@ -339,7 +344,8 @@ _MPEG_BITRATES = {
     (2, 1): (0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160),
 }
 _MPEG_RATES = {3: (44100, 48000, 32000), 2: (22050, 24000, 16000), 0: (11025, 12000, 8000)}
-_ID3_TEXT = {b"TIT2": "title", b"TPE1": "artist", b"TALB": "album", b"TT2": "title", b"TP1": "artist", b"TAL": "album"}
+_ID3_TEXT = {b"TIT2": "title", b"TPE1": "artist", b"TALB": "album", b"TT2": "title", b"TP1": "artist", b"TAL": "album",
+             b"TYER": "year", b"TDRC": "year", b"TYE": "year", b"TRCK": "track", b"TRK": "track", b"TCON": "genre", b"TCO": "genre"}
 
 
 def _skip_id3(fin) -> int:
@@ -383,7 +389,14 @@ def _parse_id3(fin, info: MediaInfo) -> None:
             length = int.from_bytes(data[position + 4:position + 8], "big")
         body = data[position + header_size:position + header_size + length]
         if frame in _ID3_TEXT:
-            setattr(info, _ID3_TEXT[frame], _decode_id3_text(body))
+            value = _decode_id3_text(body)
+            if _ID3_TEXT[frame] == "genre":
+                value = re.sub(r"^\(\d+\)", "", value) or value  # «(17)Rock»: el número es el de la lista antigua
+            elif _ID3_TEXT[frame] == "year":
+                value = value[:4]
+            setattr(info, _ID3_TEXT[frame], value)
+        elif frame in (b"COMM", b"COM") and not info.comment and len(body) > 4:
+            info.comment = _decode_id3_text(body[:1] + body[4:].split(b"\0\0" if body[0] in (1, 2) else b"\0", 1)[-1])
         elif frame == b"APIC" and info.cover is None:
             info.cover = _parse_apic(body)
         position += header_size + length
