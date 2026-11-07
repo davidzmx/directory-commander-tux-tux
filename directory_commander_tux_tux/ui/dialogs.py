@@ -23,6 +23,7 @@ from .color_button import ColorButton
 from .styles_page import StylesPage
 from .context_menu_pages import ContextMenuPages
 from .favorites_pages import FavoritesPage, RecentPage, FrequentFoldersPage, FrequentPointsPage
+from .hover_card import HOVER_PREVIEW_SIZES
 from .preference_pages import PreferencePages
 from .sessions_page import SessionsPage
 from .sftp import SftpPage
@@ -190,6 +191,10 @@ class PreferencesDialog(QDialog):
         self.single_click.setChecked(config.get("single_click") is True)
         self.hover_info = QCheckBox(tr("Mostrar información al pasar el ratón por un archivo"))
         self.hover_info.setChecked(config.get("hover_info", True))
+        self.hover_preview_size = QComboBox()
+        for key, (_size, label) in HOVER_PREVIEW_SIZES.items():
+            self.hover_preview_size.addItem(tr(label), key)
+        self.hover_preview_size.setCurrentIndex(max(0, self.hover_preview_size.findData(config.get("hover_preview_size", "standard"))))
         self.level_colors = QCheckBox(tr("Mostrar en otro color los niveles de las carpetas desplegadas"))
         self.level_colors.setChecked(config.get("tree_level_colors", True))
         self.open_images = QComboBox()
@@ -250,6 +255,7 @@ class PreferencesDialog(QDialog):
         browsing.addRow(self.rename_stem)
         browsing.addRow(self.resort_on_change)
         browsing.addRow(self.hover_info)
+        browsing.addRow(tr("Tamaño de la vista previa al pasar el ratón:"), self.hover_preview_size)
         opening.addRow(tr("Abrir las imágenes con:"), self.open_images)
         opening.addRow(tr("Abrir los vídeos con:"), self.open_videos)
         opening.addRow(tr("Abrir los Markdown con:"), self.open_markdown)
@@ -602,6 +608,7 @@ class PreferencesDialog(QDialog):
         config["rename_selects_stem"] = self.rename_stem.isChecked()
         config["resort_on_change"] = self.resort_on_change.isChecked()
         config["hover_info"] = self.hover_info.isChecked()
+        config["hover_preview_size"] = self.hover_preview_size.currentData()
         config["open_images"] = self.open_images.currentData()
         config["open_videos"] = self.open_videos.currentData()
         config["open_archives"] = self.open_archives.currentData()

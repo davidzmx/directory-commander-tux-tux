@@ -2186,6 +2186,7 @@ class MainWindow(ExtraCommands, QMainWindow):
         view.favoritesMenuRequested.connect(self._view_favorites_menu)
         view.folderOpened.connect(lambda _view, path: self._award("double_click", path))
         view.hover_card.ffmpeg_dir = self.config.get("ffmpeg_dir", "")
+        view.hover_card.preview_size = self.config.get("hover_preview_size", "standard")
         view.set_full_row(bool(self.config.get("full_row_select", False)))
         view.set_single_click(self.config.get("single_click") is True)
         view.set_resort_on_change(self.config.get("resort_on_change") is True)
@@ -4251,6 +4252,7 @@ class MainWindow(ExtraCommands, QMainWindow):
         for view in self.all_views():
             view.hover_enabled = bool(self.config.get("hover_info", True))
             view.hover_card.ffmpeg_dir = self.config.get("ffmpeg_dir", "")
+            view.hover_card.preview_size = self.config.get("hover_preview_size", "standard")
             view.model.remote_previews = sftp.previews(self.config)
             view.set_single_click(self.config.get("single_click") is True)
             view.set_resort_on_change(self.config.get("resort_on_change") is True)

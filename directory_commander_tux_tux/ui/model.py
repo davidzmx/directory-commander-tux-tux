@@ -374,6 +374,8 @@ class FileModel(QAbstractTableModel):
                 if not (matches_filter(entry.display_name, self._filter)
                         and matches_content_type(entry, self._content_types)):
                     continue
+                if "ai" in self._content_types and not self.has_ai_tags(entry):
+                    continue
                 entry.depth = depth
                 rows.append(entry)
                 if entry.path in self._expanded:
@@ -442,6 +444,10 @@ class FileModel(QAbstractTableModel):
         wanted = tuple(content_types)
         if wanted != self._content_types:
             self._content_types = wanted
+            if "ai" in wanted:
+                for entry in self._all:
+                    if not entry.is_dir and entry.extension in ai_metadata.IMAGE_EXTENSIONS | ai_metadata.VIDEO_EXTENSIONS:
+                        self._generation_mark(entry)
             self._rebuild()
 
     @property
@@ -805,6 +811,21 @@ class FileModel(QAbstractTableModel):
         has_prompt, workflow = has_prompt and self.generation_kinds != "workflow", workflow and self.generation_kinds != "prompt"
         return (has_prompt, workflow, tool) if has_prompt or workflow else None
 
+    def has_ai_tags(self, entry: Entry) -> bool:
+        """Indica si una entrada tiene marcas de IA (prompt y/o workflow). Las carpetas siempre pasan."""
+        if entry.is_dir:
+            return True
+        if entry.in_archive or remote.is_remote(entry.path):
+            return False
+        if entry.extension not in ai_metadata.IMAGE_EXTENSIONS | ai_metadata.VIDEO_EXTENSIONS:
+            return False
+        key = (entry.path, entry.mtime)
+        if key in self._generated:
+            marks = self._generated[key]
+            return bool(marks and (marks[0] or marks[1]))
+        self._generation_mark(entry)
+        return False
+
     def may_have_generation_marks(self, entry: Entry) -> bool:
         """Si se mostrarán sus marcas de IA cuando se lean: lo que puede tenerlas, del equipo y con las marcas activadas."""
         return (self.generation_marks and not entry.is_dir and not entry.in_archive and not remote.is_remote(entry.path)
@@ -815,9 +836,9 @@ class FileModel(QAbstractTableModel):
         path = entry.path
         key = (path, entry.mtime)
         if key in self._generated:
-            return self._generated[key] if self.generation_marks else None
+            return self._generated[key] if (self.generation_marks or "ai" in self._content_types) else None
         extension = entry.extension
-        if (not self.generation_marks or entry.is_dir or entry.in_archive or remote.is_remote(path) or key in self._generated_pending
+        if (not (self.generation_marks or "ai" in self._content_types) or entry.is_dir or entry.in_archive or remote.is_remote(path) or key in self._generated_pending
                 or extension not in ai_metadata.IMAGE_EXTENSIONS | ai_metadata.VIDEO_EXTENSIONS):
             return None
         self._generated_pending.add(key)
@@ -828,9 +849,12 @@ class FileModel(QAbstractTableModel):
             self._generated_pending.discard(key)
             marks = generation.marks if generation is not None and (generation.has_prompt or generation.workflow) else None
             self._generated[key] = marks
-            row = self.row_of(path)
-            if marks and row >= 0:
-                self.dataChanged.emit(self.index(row, 0), self.index(row, 0), [GenerationRole, Qt.ItemDataRole.ToolTipRole])
+            if "ai" in self._content_types:
+                self._rebuild()
+            else:
+                row = self.row_of(path)
+                if marks and row >= 0:
+                    self.dataChanged.emit(self.index(row, 0), self.index(row, 0), [GenerationRole, Qt.ItemDataRole.ToolTipRole])
 
         run_bg(lambda _sink: ai_metadata.read_generation(path, extension), on_done=found, pool=_thumb_pool)
         return None

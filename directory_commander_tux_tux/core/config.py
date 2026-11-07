@@ -210,6 +210,7 @@ DEFAULTS: dict = {
     "lock_bars": False,
     "full_row_select": False,
     "hover_info": True,
+    "hover_preview_size": "standard",
     "language": AUTO,
     "open_images": "viewer",
     "open_archives": "system",

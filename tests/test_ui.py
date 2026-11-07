@@ -4962,8 +4962,13 @@ def test_pane_bar_hides_buttons_by_priority(app):
     view.resize(1000, 300)
     settle()
     send = dict(view._tool_buttons)[view.send_button]
-    every = {icon for _button, icon in view._tool_buttons} - {"disconnect"}  # Desconectar solo está en un panel remoto
+    every = {icon for _button, icon in view._tool_buttons} - {"disconnect", "thumbnails"}  # Desconectar solo está en remoto; tamaño solo en miniaturas
     assert shown_tools(view) == every
+    view.set_view_mode("thumbnails")
+    settle()
+    assert shown_tools(view) == every | {"thumbnails"}
+    view.set_view_mode("details")
+    settle()
     view.resize(260, 300)
     settle()
     narrow = shown_tools(view)

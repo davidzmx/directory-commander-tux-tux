@@ -674,3 +674,76 @@ def test_preferences_general_is_split_into_pages_that_fit(window):
     dialog.apply_to(window.config)
     assert window.config["pane_free_space"] == "always"
     dialog.close()
+
+
+def test_thumbnail_size_button_and_zoom_wheel(window):
+    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtCore import QPointF, QPoint
+
+    view = window.source
+    window.run_command("Set VIEW=Details")
+    assert not view.thumb_size_button.isVisible()
+
+    window.run_command("Set VIEW=Thumbnails")
+    assert view.thumb_size_button.isVisible()
+    view._fill_thumb_size_menu()
+    menu = view.thumb_size_button.menu()
+    assert menu is not None
+    actions = menu.actions()
+    sizes = [a.data() for a in actions if a.data() is not None]
+    assert sizes == [64, 96, 128, 160, 192, 256]
+
+    view.set_thumbnail_size(96)
+    event_up = QWheelEvent(QPointF(5, 5), QPointF(5, 5), QPoint(), QPoint(0, 120),
+                           Qt.MouseButton.NoButton, Qt.KeyboardModifier.ControlModifier,
+                           Qt.ScrollPhase.NoScrollPhase, False)
+    view.thumbs.wheelEvent(event_up)
+    QApplication.processEvents()
+    assert view.thumbs.thumb_size == 128
+
+    event_down = QWheelEvent(QPointF(5, 5), QPointF(5, 5), QPoint(), QPoint(0, -120),
+                             Qt.MouseButton.NoButton, Qt.KeyboardModifier.ControlModifier,
+                             Qt.ScrollPhase.NoScrollPhase, False)
+    view.thumbs.wheelEvent(event_down)
+    QApplication.processEvents()
+    assert view.thumbs.thumb_size == 96
+
+
+def test_hover_preview_size_config(window):
+    from directory_commander_tux_tux.ui.dialogs import PreferencesDialog
+    from directory_commander_tux_tux.ui.hover_card import HOVER_PREVIEW_SIZES
+
+    view = window.source
+    assert view.hover_card.preview_size == "standard"
+    assert view.hover_card._preview_target_box() == HOVER_PREVIEW_SIZES["standard"][0]
+
+    dialog = PreferencesDialog(window.config)
+    dialog.hover_preview_size.setCurrentIndex(dialog.hover_preview_size.findData("original"))
+    dialog.apply_to(window.config)
+    dialog.close()
+
+    assert window.config["hover_preview_size"] == "original"
+    window._preferences_changed()
+    assert view.hover_card.preview_size == "original"
+    assert view.hover_card._preview_target_box() == HOVER_PREVIEW_SIZES["original"][0]
+
+
+def test_ai_content_filter(window, tmp_path):
+    folder = tmp_path / "ai_filter_test"
+    folder.mkdir()
+    (folder / "comfy.png").write_bytes(ai_samples.comfy_png())
+    (folder / "plain.png").write_bytes(ai_samples.png())
+    (folder / "subfolder").mkdir()
+
+    view = window.source
+    view.navigate(str(folder))
+    assert wait_until(lambda: len(view.model.entries) == 3)
+
+    view.model.set_content_types({"ai"})
+    assert wait_until(lambda: any(e.name == "comfy.png" for e in view.model.entries))
+    assert wait_until(lambda: not any(e.name == "plain.png" for e in view.model.entries))
+    names = {e.name for e in view.model.entries}
+    assert "comfy.png" in names
+    assert "subfolder" in names
+    assert "plain.png" not in names
+

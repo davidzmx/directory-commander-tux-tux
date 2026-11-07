@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QAbstractSlider, QApplication,
                                QWidget)
 
 from ..core import archive, git_tools, remote
+from ..core.config import THUMB_SIZES
 from ..core.bar_buttons import PATH
 from ..core.listing import COMPUTER_LABEL, COMPUTER_PATH, format_size, has_computer_view, is_results, list_dir, location_label, results_name, sort_entries
 from ..core.platform_utils import home_dir, root_of
@@ -796,6 +797,7 @@ class ItemsView(_DropMixin, QListView):
         self.configure("thumbnails")
 
     def configure(self, mode: str) -> None:
+        self.current_mode = mode
         grid, icon, cell, wrap, horizontal = self.MODES[mode]
         if mode == "thumbnails":
             icon, cell = self.thumb_size, (self.thumb_size + 20, self.thumb_size + 44)
@@ -911,6 +913,28 @@ class ItemsView(_DropMixin, QListView):
         if not index.isValid() or self.model().entry(index.row()) is None:
             return QModelIndex()
         return index if self.full_row or self.name_rect(index).contains(position) else QModelIndex()
+
+    def wheelEvent(self, event) -> None:
+        """Ctrl + rueda del ratón en miniaturas: zoom dinámico entre los tamaños configurables."""
+        if (event.modifiers() & Qt.KeyboardModifier.ControlModifier) and getattr(self, "current_mode", "") == "thumbnails":
+            delta = event.angleDelta().y()
+            if delta:
+                parent = self.parent()
+                while parent is not None and not hasattr(parent, "commandRequested"):
+                    parent = parent.parent()
+                if parent is not None:
+                    current = self.thumb_size
+                    if delta > 0:
+                        larger = [s for s in THUMB_SIZES if s > current]
+                        target = larger[0] if larger else current
+                    else:
+                        smaller = [s for s in THUMB_SIZES if s < current]
+                        target = smaller[-1] if smaller else current
+                    if target != current:
+                        parent.commandRequested.emit(parent, f"Set THUMBNAILSIZE={target}")
+                event.accept()
+                return
+        super().wheelEvent(event)
 
 
 def path_crumbs(path: str) -> list[tuple[str, str]]:
@@ -1477,6 +1501,13 @@ class FileView(QWidget):
         self.git_label.hide()
         self.git_branch = ""
         bar.addWidget(self.git_label)
+        self.thumb_size_button = self._tool_button("thumbnails", tr("Tamaño de las miniaturas"))
+        self.thumb_size_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._thumb_size_menu = QMenu(self)
+        self._thumb_size_menu.aboutToShow.connect(self._fill_thumb_size_menu)
+        self.thumb_size_button.setMenu(self._thumb_size_menu)
+        self.thumb_size_button.hide()
+        bar.addWidget(self.thumb_size_button)
         bar.addWidget(self._tool("treepane", tr("Mostrar u ocultar el árbol de carpetas de este panel"), "Set PANETREE=Toggle"))
         bar.addWidget(self._tool("terminalpane", tr("Mostrar u ocultar la terminal de este panel"), "Set TERMINAL=Toggle"))
         bar.addWidget(self._tool("terminalonly", tr("Mostrar solo la terminal en este panel"), "Set TERMINALPANE=On"))
@@ -1909,6 +1940,9 @@ class FileView(QWidget):
         self.model.show_thumbnails = mode in ("thumbnails", "filmstrip", "tiles")
         if mode != "details":
             self.thumbs.configure(mode)
+        if hasattr(self, "thumb_size_button"):
+            self.thumb_size_button.setVisible(mode == "thumbnails")
+            self._fit_pane_bar()
         self.stack.setCurrentWidget(self.current_view)
 
     def _uses_details(self) -> bool:
@@ -2053,11 +2087,11 @@ class FileView(QWidget):
         Se ocultan primero los que tienen otro camino rápido; Subir es el último."""
         tools = self._bar_tools()
         dual_only = (tools["close"], tools["swap"], self.send_button, tools["terminalonly"])
-        keys = ("terminalonly", "remote", "copypath", "favorites", "home", "refresh", "menu-arrow", "close", "swap", "send", "gitbranch", "treepane", "terminalpane",
+        keys = ("terminalonly", "remote", "copypath", "favorites", "home", "refresh", "menu-arrow", "close", "swap", "send", "gitbranch", "thumbnails", "treepane", "terminalpane",
                 "disconnect", "goforward", "goback", "goup")
         order = [tools[key] for key in keys]
-        wanted = [tools[key] for key in keys if key not in self._removed_tools and (self._dual_tools_visible or tools[key] not in dual_only) and (key != "gitbranch" or self.git_branch)
-                  and (key != "disconnect" or remote.is_remote(self.path))]
+        wanted = [tools[key] for key in keys if key in tools and key not in self._removed_tools and (self._dual_tools_visible or tools[key] not in dual_only) and (key != "gitbranch" or self.git_branch)
+                  and (key != "disconnect" or remote.is_remote(self.path)) and (key != "thumbnails" or self.view_mode == "thumbnails")]
         layout = self.pane_bar.layout()
         margins = layout.contentsMargins()
         outlines = 4  # los contornos de la barra y de la ruta
@@ -2653,6 +2687,16 @@ class FileView(QWidget):
     def _fill_history_menu(self) -> None:
         self._history_menu.clear()
         self.build_recent_menu(self._history_menu)
+
+    def _fill_thumb_size_menu(self) -> None:
+        self._thumb_size_menu.clear()
+        current = self.thumbs.thumb_size
+        for size in THUMB_SIZES:
+            action = self._thumb_size_menu.addAction(tr("{size} píxeles", size=size))
+            action.setData(size)
+            action.setCheckable(True)
+            action.setChecked(size == current)
+            action.triggered.connect(lambda _c=False, s=size: self.commandRequested.emit(self, f"Set THUMBNAILSIZE={s}"))
 
     def build_recent_menu(self, menu: QMenu) -> None:
         seen: set[str] = set()

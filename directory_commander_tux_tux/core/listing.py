@@ -324,6 +324,7 @@ CONTENT_TYPES = {
     "documents": (tr("Documentos"), {"pdf", "doc", "docx", "odt", "rtf", "txt", "md", "xls", "xlsx", "ods", "ppt", "pptx", "odp", "epub"}),
     "archives": (tr("Comprimidos"), {"zip", "tar", "gz", "tgz", "bz2", "xz", "7z", "rar", "jar", "cbz"}),
     "code": (tr("Código"), {"py", "js", "ts", "c", "h", "cpp", "hpp", "rs", "go", "java", "cs", "sh", "html", "css", "json", "xml", "yml", "yaml", "toml"}),
+    "ai": (tr("Con etiquetas de IA"), {"png", "webp", "jpg", "jpeg", "mp4", "webm", "mkv", "mov"}),
 }
 
 

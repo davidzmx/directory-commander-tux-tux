@@ -15,7 +15,15 @@ from ..core.media_info import (MediaInfo, codec_name, format_duration, is_media_
                                video_frame)
 from .background import run_bg
 from .model import IMAGE_EXTENSIONS, _thumb_pool, icon_for, image_reader
-from ..core.i18n import tr
+from ..core.i18n import N_, tr
+
+HOVER_PREVIEW_SIZES: dict[str, tuple[QSize, str]] = {
+    "standard": (QSize(112, 150), N_("Estándar (112 × 150)")),
+    "medium": (QSize(200, 250), N_("Mediano (200 × 250)")),
+    "large": (QSize(320, 400), N_("Grande (320 × 400)")),
+    "huge": (QSize(480, 600), N_("Muy grande (480 × 600)")),
+    "original": (QSize(0, 0), N_("Tamaño real (100%)")),
+}
 
 THUMB_BOX = QSize(112, 150)
 FOLDER_ICON_BOX = QSize(64, 64)
@@ -60,11 +68,13 @@ def read_image_info(path: str, in_archive: bool = False) -> tuple[int, int, int]
     return (size.width(), size.height(), depth) if size.isValid() else (0, 0, 0)
 
 
-def _image_thumb(path: str, in_archive: bool = False) -> QImage:
+def _image_thumb(path: str, in_archive: bool = False, target_box: QSize | None = None) -> QImage:
     reader = image_reader(path, in_archive)
     reader.setAutoTransform(True)
     size = reader.size()
-    if size.isValid():
+    if size.isValid() and target_box is not None and target_box.width() > 0 and target_box.height() > 0:
+        reader.setScaledSize(size.scaled(target_box, Qt.AspectRatioMode.KeepAspectRatio))
+    elif size.isValid() and target_box is None:
         reader.setScaledSize(size.scaled(THUMB_BOX, Qt.AspectRatioMode.KeepAspectRatio))
     return reader.read()
 
@@ -133,6 +143,7 @@ class HoverCard(QFrame):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.ffmpeg_dir = ""
         self.show_hidden = False
+        self.preview_size = "standard"
         self._size_call = None
         self._token = 0
         self._position = QPoint()
@@ -222,6 +233,9 @@ class HoverCard(QFrame):
         self._reveal()
         self._load_thumbnail(token, entry, image, media)
 
+    def _preview_target_box(self) -> QSize:
+        return HOVER_PREVIEW_SIZES.get(self.preview_size, HOVER_PREVIEW_SIZES["standard"])[0]
+
     def _reset_content(self, entry: Entry, subtitle: str, folder: bool) -> None:
         """Las carpetas llevan el icono a la derecha y sin subtítulo; los archivos, la miniatura a la izquierda."""
         self.title.setText(entry.name)
@@ -238,7 +252,13 @@ class HoverCard(QFrame):
             if widget is not None:
                 widget.deleteLater()
         self.row.setDirection(QHBoxLayout.Direction.RightToLeft if folder else QHBoxLayout.Direction.LeftToRight)
-        self.thumb.setFixedSize(FOLDER_ICON_BOX if folder else THUMB_BOX)
+        box = self._preview_target_box()
+        if folder or box.isEmpty():
+            self.thumb.setFixedSize(FOLDER_ICON_BOX if folder else THUMB_BOX)
+            self.setMaximumWidth(460)
+        else:
+            self.thumb.setFixedSize(box)
+            self.setMaximumWidth(max(460, box.width() + 350))
         self.thumb.setPixmap(icon_for(entry).pixmap(64, 64))
 
     def _add_row(self, label: str, value: str) -> QLabel:
@@ -302,7 +322,7 @@ class HoverCard(QFrame):
 
     def _load_thumbnail(self, token: int, entry: Entry, image, media) -> None:
         path = entry.path
-        key = (path, entry.mtime)
+        key = (path, entry.mtime, self.preview_size)
         cached = _thumb_cache.get(key)
         if cached is not None:
             self._set_thumbnail(token, cached)
@@ -314,10 +334,11 @@ class HoverCard(QFrame):
             return
         ffmpeg_dir, duration = self.ffmpeg_dir, media.duration if media is not None else 0.0
         in_archive = entry.in_archive
+        target_box = self._preview_target_box()
 
         def work(_sink):
             if is_image:
-                return _image_thumb(path, in_archive)
+                return _image_thumb(path, in_archive, target_box)
             raw = cover or video_frame(path, ffmpeg_dir, duration)
             return QImage.fromData(raw) if raw else QImage()
 
@@ -326,7 +347,18 @@ class HoverCard(QFrame):
     def _thumb_loaded(self, token: int, key, image: QImage) -> None:
         if image.isNull():
             return
-        image = image.scaled(THUMB_BOX, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        box = self._preview_target_box()
+        screen = QGuiApplication.screenAt(self._position) or QGuiApplication.primaryScreen()
+        avail = screen.availableGeometry() if screen is not None else None
+        max_w = int(avail.width() * 0.8) if avail else 1200
+        max_h = int(avail.height() * 0.8) if avail else 900
+        if box.width() > 0 and box.height() > 0:
+            image = image.scaled(box, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        elif self.preview_size == "original":
+            if image.width() > max_w or image.height() > max_h:
+                image = image.scaled(max_w, max_h, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        else:
+            image = image.scaled(THUMB_BOX, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
         _thumb_cache[key] = image
         while len(_thumb_cache) > _CACHE_SIZE:
             _thumb_cache.popitem(last=False)
@@ -334,7 +366,11 @@ class HoverCard(QFrame):
 
     def _set_thumbnail(self, token: int, image: QImage) -> None:
         if token == self._token:
+            self.thumb.setFixedSize(image.size())
+            self.setMaximumWidth(max(460, image.width() + 350))
             self.thumb.setPixmap(QPixmap.fromImage(image))
+            self.adjustSize()
+            self._place()
 
     def _place(self) -> None:
         """Junto al cursor, sin salirse de la pantalla."""
