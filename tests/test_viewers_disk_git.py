@@ -543,3 +543,43 @@ def test_a_link_to_another_markdown_opens_another_editor(window, tmp_path):
     assert paths == ["dos.md", "uno.md"] and editor.preview.path != str(tmp_path / "dos.md")  # la vista sigue siendo la del texto que se edita
     for item in window.findChildren(MarkdownEditor):
         item.close()
+
+
+def test_disk_map_ignores_a_scan_it_stopped(app, tmp_path, monkeypatch):
+    """Lo que avisa un análisis detenido llega después: no debe tocar una ventana cerrada ni el análisis que lo sustituyó."""
+    import time
+
+    from PySide6.QtTest import QTest
+    from directory_commander_tux_tux.ui.disk_usage import DiskUsageWindow
+
+    (tmp_path / "a.bin").write_bytes(b"x" * 3000)
+    real_scan, slow = disk_usage.scan, []
+
+    def scan(path, sink):
+        if slow:  # hasta que se detiene
+            slow.pop()
+            while True:
+                sink.check()
+                time.sleep(0.01)
+        return real_scan(path, sink)
+
+    errors = []
+    monkeypatch.setattr(disk_usage, "scan", scan)
+    monkeypatch.setattr(sys, "excepthook", lambda *exc: errors.append(exc[1]))
+    slow.append(True)
+    refreshed = DiskUsageWindow(str(tmp_path), None)
+    refreshed.show()
+    QTest.qWait(100)
+    refreshed.scan()  # «Actualizar» a medio análisis
+    assert wait_until(lambda: refreshed.top is not None)
+    QTest.qWait(200)  # el aviso del primero, ya detenido
+    assert refreshed.top.size == 3000 and not refreshed.stop_action.isEnabled()
+    assert "detenido" not in refreshed.statusBar().currentMessage()
+    refreshed.close()
+    slow.append(True)
+    closed = DiskUsageWindow(str(tmp_path), None)
+    closed.show()
+    QTest.qWait(100)
+    closed.close()
+    QTest.qWait(300)
+    assert errors == []

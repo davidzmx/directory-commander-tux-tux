@@ -278,12 +278,20 @@ class DiskUsageWindow(QMainWindow):
         self.stop_action.setEnabled(True)
         self.refresh_action.setEnabled(False)
         path = self.path
-        self._call = run_bg(lambda sink: disk_usage.scan(path, sink), self._scanned, self._failed, self._progress)
+        call = None
+
+        def current(handler):
+            """Solo cuenta lo que llega del análisis en curso: uno detenido avisa después, quizá con la ventana ya cerrada."""
+            return lambda value: handler(value) if call is not None and self._call is call else None
+
+        call = run_bg(lambda sink: disk_usage.scan(path, sink), current(self._scanned), current(self._failed), current(self._progress))
+        self._call = call
 
     def stop(self) -> None:
         if self._call is not None:
             self._call.cancel()
             self._call = None
+            self.statusBar().showMessage(tr("Análisis detenido"))
         self.stop_action.setEnabled(False)
         self.refresh_action.setEnabled(True)
 
@@ -295,7 +303,7 @@ class DiskUsageWindow(QMainWindow):
         self._call = None
         self.stop_action.setEnabled(False)
         self.refresh_action.setEnabled(True)
-        self.statusBar().showMessage(tr("Análisis detenido") if exc.__class__.__name__ == "Cancelled" else tr("No se pudo analizar: {exc}", exc=exc))
+        self.statusBar().showMessage(tr("No se pudo analizar: {exc}", exc=exc))
 
     def _scanned(self, top: Node) -> None:
         self._call = None
