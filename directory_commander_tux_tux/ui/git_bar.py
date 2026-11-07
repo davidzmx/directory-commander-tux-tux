@@ -11,6 +11,7 @@ from ..core import bar_buttons, git_tools
 from ..core.i18n import N_, tr
 from ..core.shells import OTHER
 from .background import run_bg
+from .git_user_dialog import GitUserDialog
 from .icons import themed
 
 POLL_MS = 2000
@@ -214,6 +215,8 @@ class GitBar(QWidget):
         self.branch_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.user_label = QLabel()
         self.user_label.setObjectName("gitUser")
+        self.user_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.user_label.mousePressEvent = self._user_clicked
         self.branch_menu = QMenu(self)
         self.branch_menu.aboutToShow.connect(self._fill_branches)
         self.branch_button.setMenu(self.branch_menu)
@@ -333,9 +336,23 @@ class GitBar(QWidget):
 
     def _show_user(self, name: str, email: str) -> None:
         self.user = (name, email)
-        self.user_label.setToolTip(tr("Los commits se firman como: {user}", user=f"{name} <{email}>") if name or email else tr("Git no tiene configurado ningún usuario en esta carpeta"))
+        action_tip = tr(" (haz clic para cambiar)")
+        base_tip = tr("Los commits se firman como: {user}", user=f"{name} <{email}>") if name or email else tr("Git no tiene configurado ningún usuario en esta carpeta")
+        self.user_label.setToolTip(base_tip + action_tip)
         self._branch_tip()
         self._fit_user()
+
+    def _user_clicked(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.edit_user()
+
+    def edit_user(self) -> None:
+        if not self._git or not self.terminal.current_path():
+            return
+        name, email = self.user
+        dialog = GitUserDialog(self._git, self.terminal.current_path(), name, email, parent=self.window())
+        if dialog.exec():
+            self.check()
 
     # ---------------------------------------------------------------- órdenes
     def send(self, command: str) -> bool:

@@ -284,6 +284,7 @@ def stylesheet(t: Theme, dest_tint: bool = True) -> str:
     QToolButton#gitBranch::menu-indicator {{ image: none; width: 0; }}
     QLabel#gitBranch {{ margin: 2px 0; }}
     QLabel#gitUser {{ color: {t.dim}; padding: 0 3px; }}
+    QLabel#gitUser:hover {{ color: {t.text}; text-decoration: underline; }}
     QLabel#findHint {{ color: {t.dim}; }}
     QLabel#findHeading {{ font-weight: bold; }}
     QFrame#findChips {{ background: {t.field}; border: 1px solid {t.border}; border-radius: 2px; }}

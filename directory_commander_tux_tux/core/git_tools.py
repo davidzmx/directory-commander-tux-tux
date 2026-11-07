@@ -140,6 +140,28 @@ def current_user(git: str, folder: str) -> tuple[str, str]:
     return values.get("user.name", ""), values.get("user.email", "")
 
 
+def set_user(git: str, folder: str, name: str, email: str) -> None:
+    """Configura el usuario y correo en el repositorio local."""
+    if not git or not folder:
+        return
+    name = name.strip()
+    email = email.strip()
+    try:
+        if name:
+            _run(git, folder, "config", "user.name", name)
+        else:
+            _run(git, folder, "config", "--unset", "user.name")
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        if email:
+            _run(git, folder, "config", "user.email", email)
+        else:
+            _run(git, folder, "config", "--unset", "user.email")
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
 def has_commits(git: str, folder: str) -> bool:
     try:
         return _run(git, folder, "rev-parse", "--verify", "-q", "HEAD").returncode == 0

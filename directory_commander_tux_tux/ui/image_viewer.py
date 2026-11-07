@@ -5,15 +5,16 @@ import math
 import os
 import time
 
-from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QTimer
+from PySide6.QtCore import QByteArray, QEvent, QPoint, QRect, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QImageReader, QPixmap, QTransform
 from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QScrollArea,
                                QSizePolicy, QSlider, QToolBar, QToolButton, QWidgetAction)
 
 from .. import APP_NAME
-from ..core import bar_buttons
+from ..core import ai_metadata, bar_buttons
 from ..core.listing import format_size
 from . import image_ops, theme
+from .ai_prompt_dock import AIPromptDock
 from .open_external import open_externally
 from .background import run_bg
 from .crop_overlay import CropOverlay
@@ -66,9 +67,10 @@ class ImageViewer(QMainWindow):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setWindowIcon(app_icon())
-        self.resize(1120, 720)
         self.host = host
         self.origin = origin
+        self.config = getattr(host, "config", {}) if host is not None else {}
+        self._apply_initial_geometry()
         self.paths = paths
         self.index = max(0, min(start, len(paths) - 1))
         self.zoom: float | None = None  # None = ajustar a la ventana
@@ -90,13 +92,50 @@ class ImageViewer(QMainWindow):
         self.scroll.setWidgetResizable(True)
         self.scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # las flechas cambian de imagen, no desplazan
         self.scroll.setStyleSheet(f"QScrollArea {{ background: {background}; border: none; }}")
+        self.scroll.viewport().setMouseTracking(True)
+        self.label.setMouseTracking(True)
         self.scroll.viewport().installEventFilter(self)
         self.label.installEventFilter(self)
         self.setCentralWidget(self.scroll)
+
+        self.btn_side_prev = QToolButton(self.scroll.viewport())
+        self.btn_side_next = QToolButton(self.scroll.viewport())
+        for btn, icon, tip, delta in (
+            (self.btn_side_prev, "goback", tr("Imagen anterior"), -1),
+            (self.btn_side_next, "goforward", tr("Imagen siguiente"), 1),
+        ):
+            btn.setIcon(themed(icon))
+            btn.setIconSize(QSize(28, 28))
+            btn.setToolTip(tip)
+            btn.setFixedSize(48, 64)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setMouseTracking(True)
+            btn.setStyleSheet("""
+                QToolButton {
+                    background-color: rgba(20, 20, 20, 0.7);
+                    border: 1px solid rgba(255, 255, 255, 0.25);
+                    border-radius: 8px;
+                    padding: 4px;
+                }
+                QToolButton:hover {
+                    background-color: rgba(0, 0, 0, 0.95);
+                    border: 1px solid rgba(255, 255, 255, 0.7);
+                }
+            """)
+            btn.clicked.connect(lambda _=False, d=delta: self.step(d))
+            btn.hide()
+
         self.crop = CropOverlay(self.label)
         self.crop.hide()
         self.crop.selectionChanged.connect(self._crop_selection_changed)
         self.crop.confirmed.connect(self.save_crop)
+
+        self.prompt_dock = AIPromptDock(self)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.prompt_dock)
+        self.prompt_dock.hide()
+        self.prompt_dock.visibilityChanged.connect(
+            lambda v: self.actions_by_key["ai_prompt"].setChecked(v) if "ai_prompt" in self.actions_by_key else None
+        )
 
         self.timer = QTimer(self)
         self.timer.setInterval(SLIDESHOW_MS)
@@ -109,6 +148,17 @@ class ImageViewer(QMainWindow):
         self._build_toolbar()
         self._build_status_bar()
         self.load_current()
+
+    def _apply_initial_geometry(self) -> None:
+        mode = self.config.get("viewer_window_mode", "remember")
+        if mode == "remember":
+            geom = self.config.get("viewer_geometry", "")
+            if geom:
+                self.restoreGeometry(QByteArray.fromHex(geom.encode()))
+                return
+        w = int(self.config.get("viewer_default_width", 1120))
+        h = int(self.config.get("viewer_default_height", 720))
+        self.resize(w, h)
 
     # ---------------------------------------------------------------- interfaz
     def _action(self, key: str, label: str, icon: str, slot, shortcut: str = "", checkable: bool = False) -> None:
@@ -141,6 +191,7 @@ class ImageViewer(QMainWindow):
         add("crop", tr("Recortar"), "crop", lambda: self.set_cropping(not self.crop.isVisible()), "C", True)
         add("save_crop", tr("Guardar selección…"), "savecrop", self.save_crop, "Ctrl+S")
         add("copy", tr("Copiar la imagen"), "copy", self.copy_image, "Ctrl+C")
+        add("ai_prompt", tr("Prompt de IA"), "comment", self.toggle_prompt_panel, checkable=True)
         add("rename", tr("Renombrar"), "rename", self.rename_current, "F2")
         add("delete", tr("Eliminar"), "delete", self.delete_current, "Del")
         add("reveal", tr("Mostrar en la lista"), "folder", self.reveal_current)
@@ -149,6 +200,7 @@ class ImageViewer(QMainWindow):
         for key in ("rename", "delete", "reveal"):
             self.actions_by_key[key].setEnabled(self.host is not None)
         self.actions_by_key["save_crop"].setEnabled(False)
+        self.actions_by_key["ai_prompt"].setEnabled(False)
 
     def _build_menus(self) -> None:
         by_key = self.actions_by_key
@@ -156,7 +208,7 @@ class ImageViewer(QMainWindow):
         for title, keys in ((tr("&Archivo"), ("open_system", "reveal", None, "close")),
                             (tr("&Editar"), ("copy", None, "crop", "save_crop", None, "rename", "delete")),
                             (tr("&Ver"), ("previous", "next", "first", "last", None, "zoom_in", "zoom_out", "actual", "fit_shrink",
-                                      "fit_enlarge", None, "rotate_left", "rotate_right", None, "fullscreen", "slideshow"))):
+                                      "fit_enlarge", None, "rotate_left", "rotate_right", None, "fullscreen", "slideshow", None, "ai_prompt"))):
             menu = bar.addMenu(title)
             for key in keys:
                 menu.addSeparator() if key is None else menu.addAction(by_key[key])
@@ -195,7 +247,7 @@ class ImageViewer(QMainWindow):
             elif key not in removed:
                 self.toolbar.addAction(by_key[key])
                 button = self.toolbar.widgetForAction(by_key[key])
-                if isinstance(button, QToolButton) and key in ("fullscreen", "crop", "save_crop", "rename", "delete", "reveal"):
+                if isinstance(button, QToolButton) and key in ("fullscreen", "crop", "save_crop", "rename", "delete", "reveal", "ai_prompt"):
                     button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         tidy_separators(self.toolbar)
 
@@ -204,7 +256,7 @@ class ImageViewer(QMainWindow):
         bar = self.statusBar()
         bar.setSizeGripEnabled(True)
         bar.setStyleSheet("QStatusBar::item { border: none; }")  # los separadores ya son propios
-        for position, key in enumerate(("name", "position", "format", "aspect", "mode", "size", "time", "selection")):
+        for position, key in enumerate(("name", "position", "format", "aspect", "mode", "size", "time", "selection", "ai")):
             if position:
                 line = QFrame()
                 line.setFrameShape(QFrame.Shape.VLine)
@@ -215,6 +267,8 @@ class ImageViewer(QMainWindow):
             label.setTextFormat(Qt.TextFormat.PlainText)
             bar.addWidget(label)
             self.status_labels[key] = label
+        self.status_labels["ai"].setCursor(Qt.CursorShape.PointingHandCursor)
+        self.status_labels["ai"].mousePressEvent = lambda _e: self.toggle_prompt_panel() if self.actions_by_key["ai_prompt"].isEnabled() else None
 
     def apply_icons(self) -> None:
         for key, icon in self._icons.items():
@@ -250,8 +304,9 @@ class ImageViewer(QMainWindow):
         labels = self.status_labels
         labels["name"].setText(os.path.basename(path))
         labels["position"].setText(f"{self.index + 1}/{len(self.paths)}")
-        for key in ("format", "aspect", "mode", "time"):
-            labels[key].setText("")
+        for key in ("format", "aspect", "mode", "time", "ai"):
+            if key in labels:
+                labels[key].setText("")
         try:
             labels["size"].setText(format_size(os.path.getsize(path)))
         except OSError:
@@ -269,6 +324,23 @@ class ImageViewer(QMainWindow):
         labels["format"].setText(tr("{width} x {height} x {value} Imagen {kind}", width=image.width(), height=image.height(), value=color_depth(image), kind=kind).rstrip())
         labels["aspect"].setText(format_aspect(image.width(), image.height()))
         labels["time"].setText(tr("{seconds:.2f} seg", seconds=seconds))
+
+        ext = os.path.splitext(path)[1].lstrip(".").lower()
+        gen = ai_metadata.read_generation(path, ext)
+        has_prompt = gen is not None and bool(gen.prompt)
+        has_ai = gen is not None and (gen.has_prompt or gen.workflow)
+        self.actions_by_key["ai_prompt"].setEnabled(has_prompt)
+        if "ai" in labels:
+            if has_ai:
+                tool = gen.tool or tr("IA")
+                labels["ai"].setText(f"✨ {tool}")
+                tip = gen.prompt if gen.prompt else tool
+                if has_prompt:
+                    tip += f"\n{tr('Haz clic para ver/copiar el prompt')}"
+                labels["ai"].setToolTip(tip)
+            else:
+                labels["ai"].setText("")
+        self.prompt_dock.set_generation(gen)
         self._apply_zoom()
 
     def _failed(self, generation: int, path: str, reason: str) -> None:
@@ -276,6 +348,10 @@ class ImageViewer(QMainWindow):
             self._pixmap = self._shown = None
             self.label.setPixmap(QPixmap())
             self.label.setText(tr("No se pudo abrir {basename}: {reason}", basename=os.path.basename(path), reason=reason))
+            if "ai" in self.status_labels:
+                self.status_labels["ai"].setText("")
+            self.actions_by_key["ai_prompt"].setEnabled(False)
+            self.prompt_dock.set_generation(None)
             self._update_zoom_controls()
 
     # ---------------------------------------------------------------- zoom y giro
@@ -435,9 +511,65 @@ class ImageViewer(QMainWindow):
     # ---------------------------------------------------------------- operaciones sobre el archivo
     def copy_image(self) -> None:
         if self._shown is not None:
-            area = self.crop.selection
+            area = self.crop.selection if self.crop.isVisible() else QRect()
             QApplication.clipboard().setPixmap(self._shown if area.isEmpty() else self._shown.copy(area))
-            self.statusBar().showMessage(tr("Imagen copiada") if area.isEmpty() else tr("Selección copiada"), 2000)
+            self.statusBar().showMessage(tr("Selección copiada") if not area.isEmpty() else tr("Imagen copiada"), 2000)
+
+    def copy_full_image(self) -> None:
+        if self._shown is not None:
+            QApplication.clipboard().setPixmap(self._shown)
+            self.statusBar().showMessage(tr("Imagen copiada"), 2000)
+
+    def toggle_prompt_panel(self) -> None:
+        visible = not self.prompt_dock.isVisible()
+        self.prompt_dock.setVisible(visible)
+        self.actions_by_key["ai_prompt"].setChecked(visible)
+
+    def _show_context_menu(self, global_pos: QPoint) -> None:
+        if self._shown is None:
+            return
+        menu = QMenu(self)
+        by_key = self.actions_by_key
+
+        zoom_menu = menu.addMenu(themed("zoom_in"), tr("Zoom"))
+        zoom_menu.addAction(by_key["zoom_in"])
+        zoom_menu.addAction(by_key["zoom_out"])
+        zoom_menu.addAction(by_key["actual"])
+        zoom_menu.addAction(by_key["fit_shrink"])
+        zoom_menu.addAction(by_key["fit_enlarge"])
+
+        menu.addSeparator()
+
+        has_selection = self.crop.isVisible() and not self.crop.selection.isEmpty()
+        if has_selection:
+            copy_sel = menu.addAction(themed("copy"), tr("Copiar selección"))
+            copy_sel.triggered.connect(self.copy_image)
+            copy_all = menu.addAction(themed("copy"), tr("Copiar la imagen completa"))
+            copy_all.triggered.connect(self.copy_full_image)
+        else:
+            menu.addAction(by_key["copy"])
+
+        menu.addAction(by_key["crop"])
+        if has_selection:
+            menu.addAction(by_key["save_crop"])
+
+        menu.addSeparator()
+        menu.addAction(by_key["fullscreen"])
+
+        if by_key["ai_prompt"].isEnabled():
+            menu.addSeparator()
+            menu.addAction(by_key["ai_prompt"])
+
+        menu.exec(global_pos)
+
+    def closeEvent(self, event) -> None:
+        if self.config.get("viewer_window_mode", "remember") == "remember":
+            if not self.isFullScreen() and not self.isMinimized():
+                geom_str = bytes(self.saveGeometry().toHex()).decode()
+                self.config["viewer_geometry"] = geom_str
+                if self.host is not None and hasattr(self.host, "config"):
+                    self.host.config["viewer_geometry"] = geom_str
+        super().closeEvent(event)
 
     def open_with_system(self) -> None:
         if self.current_path:
@@ -487,8 +619,30 @@ class ImageViewer(QMainWindow):
     # ---------------------------------------------------------------- ratón y teclado
     def eventFilter(self, watched, event) -> bool:
         kind = event.type()
+        if kind == QEvent.Type.ContextMenu and watched in (self.label, self.scroll.viewport(), self.scroll):
+            self._show_context_menu(event.globalPosition().toPoint() if hasattr(event, "globalPosition") else event.globalPos())
+            return True
         if kind == QEvent.Type.Wheel and watched is self.scroll.viewport():
             return self._wheel(event)
+        if watched in (self.label, self.scroll.viewport()):
+            if kind == QEvent.Type.MouseMove:
+                vp = self.scroll.viewport()
+                pos = vp.mapFromGlobal(event.globalPosition().toPoint() if hasattr(event, "globalPosition") else event.globalPos())
+                margin = 120
+                can_step = len(self.paths) > 1
+                near_left = 0 <= pos.x() <= margin and 0 <= pos.y() <= vp.height()
+                near_right = vp.width() - margin <= pos.x() <= vp.width() and 0 <= pos.y() <= vp.height()
+                self.btn_side_prev.setVisible(can_step and (near_left or self.btn_side_prev.geometry().contains(pos)))
+                self.btn_side_next.setVisible(can_step and (near_right or self.btn_side_next.geometry().contains(pos)))
+            elif kind == QEvent.Type.Leave:
+                self.btn_side_prev.hide()
+                self.btn_side_next.hide()
+            elif kind == QEvent.Type.Resize and watched is self.scroll.viewport():
+                vp = self.scroll.viewport()
+                y = max(10, (vp.height() - self.btn_side_prev.height()) // 2)
+                self.btn_side_prev.move(14, y)
+                self.btn_side_next.move(vp.width() - self.btn_side_next.width() - 14, y)
+
         if watched is self.label:
             if kind == QEvent.Type.Resize:
                 self.crop.setGeometry(self.label.rect())

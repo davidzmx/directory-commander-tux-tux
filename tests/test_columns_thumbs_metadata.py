@@ -747,3 +747,114 @@ def test_ai_content_filter(window, tmp_path):
     assert "subfolder" in names
     assert "plain.png" not in names
 
+
+def test_ai_prompt_dock_widget(app):
+    from directory_commander_tux_tux.ui.ai_prompt_dock import AIPromptDock
+    from directory_commander_tux_tux.core.ai_metadata import Generation
+
+    dock = AIPromptDock()
+    dock.set_generation(None)
+    assert not dock.prompt_section.isVisible()
+
+    data = Generation(
+        tool="ComfyUI",
+        prompt="un gato astronauta",
+        negative="feo, borroso",
+        workflow=True,
+        nodes=5,
+        settings=(("Modelo", "sd15"), ("Pasos", "20"))
+    )
+    dock.set_generation(data)
+    assert dock.prompt_edit.toPlainText() == "un gato astronauta"
+    assert dock.negative_edit.toPlainText() == "feo, borroso"
+    assert dock.copy_prompt_btn.isEnabled()
+    assert dock.copy_negative_btn.isEnabled()
+
+    dock.copy_prompt_btn.click()
+    assert QApplication.clipboard().text() == "un gato astronauta"
+
+    dock.copy_negative_btn.click()
+    assert QApplication.clipboard().text() == "feo, borroso"
+    dock.close()
+
+
+def test_image_viewer_features_and_ai_dock(window, tmp_path):
+    from directory_commander_tux_tux.ui.image_viewer import ImageViewer
+    folder = tmp_path / "img_test"
+    folder.mkdir()
+    p1 = folder / "comfy.png"
+    p1.write_bytes(ai_samples.comfy_png())
+    p2 = folder / "plain.png"
+    p2.write_bytes(ai_samples.png())
+
+    viewer = ImageViewer([str(p1), str(p2)], 0)
+    viewer.show()
+    assert viewer.btn_side_prev is not None
+    assert viewer.btn_side_next is not None
+
+    # AI prompt dock should be present
+    assert viewer.prompt_dock is not None
+    assert "ai_prompt" in viewer.actions_by_key
+    assert wait_until(lambda: viewer.actions_by_key["ai_prompt"].isEnabled())
+    assert wait_until(lambda: "ai" in viewer.status_labels and bool(viewer.status_labels["ai"].text()))
+
+    # Toggle prompt dock
+    viewer.actions_by_key["ai_prompt"].trigger()
+    assert viewer.prompt_dock.isVisible()
+    viewer.actions_by_key["ai_prompt"].trigger()
+    assert not viewer.prompt_dock.isVisible()
+
+    # Move to plain image
+    viewer.step(1)
+    assert wait_until(lambda: not viewer.actions_by_key["ai_prompt"].isEnabled())
+
+    viewer.close()
+
+
+def test_git_user_dialog_and_set_user(tmp_path, app):
+    import subprocess
+    from directory_commander_tux_tux.core import git_tools
+    from directory_commander_tux_tux.ui.git_user_dialog import GitUserDialog
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git = git_tools.git_program()
+    assert git != "", "git is required for this test"
+    subprocess.run([git, "init"], cwd=str(repo), capture_output=True, check=True)
+
+    # Set user
+    git_tools.set_user(git, str(repo), "Test Name", "test@example.com")
+    name, email = git_tools.current_user(git, str(repo))
+    assert name == "Test Name"
+    assert email == "test@example.com"
+
+    # Test dialog
+    dlg = GitUserDialog(git, str(repo), name, email, parent=None)
+    assert dlg.name_edit.text() == "Test Name"
+    assert dlg.email_edit.text() == "test@example.com"
+
+    dlg.name_edit.setText("Updated User")
+    dlg.email_edit.setText("updated@example.com")
+    dlg.save()
+    assert dlg.result() == GitUserDialog.DialogCode.Accepted
+
+    name, email = git_tools.current_user(git, str(repo))
+    assert name == "Updated User"
+    assert email == "updated@example.com"
+
+
+def test_viewer_window_mode_preferences(window):
+    from directory_commander_tux_tux.ui.dialogs import PreferencesDialog
+
+    dialog = PreferencesDialog(window.config)
+    dialog.viewer_window_mode.setCurrentIndex(dialog.viewer_window_mode.findData("default"))
+    dialog.viewer_default_width.setValue(1200)
+    dialog.viewer_default_height.setValue(800)
+    dialog.apply_to(window.config)
+    dialog.close()
+
+    assert window.config["viewer_window_mode"] == "default"
+    assert window.config["viewer_default_width"] == 1200
+    assert window.config["viewer_default_height"] == 800
+
+

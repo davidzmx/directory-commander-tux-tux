@@ -6,16 +6,17 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import QByteArray, QEvent, Qt
 from PySide6.QtGui import QAction
 from PySide6.QtMultimedia import QMediaPlayer, QtVideo, QVideoFrame
 from PySide6.QtWidgets import (QFileDialog, QFrame, QLabel, QMainWindow, QMenu, QMessageBox, QPushButton, QStackedWidget, QToolBar,
                                QToolButton, QVBoxLayout, QWidget)
 
 from .. import APP_NAME
-from ..core import bar_buttons
+from ..core import ai_metadata, bar_buttons
 from ..core.listing import format_size
 from . import image_ops, theme
+from .ai_prompt_dock import AIPromptDock
 from .open_external import open_externally
 from .background import run_bg
 from .icons import app_icon, themed
@@ -36,13 +37,13 @@ class VideoViewer(QMainWindow):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setWindowIcon(app_icon())
-        self.resize(1040, 720)
         self.host = host
         self.origin = origin
         self.paths = paths
         self.index = max(0, min(start, len(paths) - 1))
         self._was_maximized = False
         self.config = config
+        self._apply_initial_geometry()
         self._double_click = False
 
         self.media = MediaPlayer(config, windowed=True)
@@ -69,6 +70,13 @@ class VideoViewer(QMainWindow):
         self.stack.addWidget(self.failure_page)
         self.setCentralWidget(self.stack)
 
+        self.prompt_dock = AIPromptDock(self)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.prompt_dock)
+        self.prompt_dock.hide()
+        self.prompt_dock.visibilityChanged.connect(
+            lambda v: self.actions_by_key["ai_prompt"].setChecked(v) if "ai_prompt" in self.actions_by_key else None
+        )
+
         self.actions_by_key: dict[str, QAction] = {}
         self._icons: dict[str, str] = {}
         self._build_actions()
@@ -76,6 +84,26 @@ class VideoViewer(QMainWindow):
         self._build_toolbar()
         self._build_status_bar()
         self.load_current()
+
+    def _apply_initial_geometry(self) -> None:
+        mode = self.config.get("viewer_window_mode", "remember")
+        if mode == "remember":
+            geom = self.config.get("viewer_geometry", "")
+            if geom:
+                self.restoreGeometry(QByteArray.fromHex(geom.encode()))
+                return
+        w = int(self.config.get("viewer_default_width", 1040))
+        h = int(self.config.get("viewer_default_height", 720))
+        self.resize(w, h)
+
+    def closeEvent(self, event) -> None:
+        if self.config.get("viewer_window_mode", "remember") == "remember":
+            if not self.isFullScreen() and not self.isMinimized():
+                geom_str = bytes(self.saveGeometry().toHex()).decode()
+                self.config["viewer_geometry"] = geom_str
+                if self.host is not None and hasattr(self.host, "config"):
+                    self.host.config["viewer_geometry"] = geom_str
+        super().closeEvent(event)
 
     # ---------------------------------------------------------------- interfaz
     def _action(self, key: str, label: str, icon: str, slot, shortcut: str = "", checkable: bool = False) -> None:
@@ -102,19 +130,21 @@ class VideoViewer(QMainWindow):
         add("seek_back", tr("Retroceder 5 segundos"), "", lambda: self.seek_by(-SEEK_STEP_MS), "Shift+Left")
         add("seek_forward", tr("Avanzar 5 segundos"), "", lambda: self.seek_by(SEEK_STEP_MS), "Shift+Right")
         add("save_frame", tr("Guardar fotograma…"), "saveframe", self.save_frame, "Ctrl+S")
+        add("ai_prompt", tr("Prompt de IA"), "comment", self.toggle_prompt_panel, checkable=True)
         add("fullscreen", tr("Pantalla completa"), "fullscreen", self.toggle_fullscreen, "F11", True)
         add("reveal", tr("Mostrar en la lista"), "folder", self.reveal_current)
         add("open_system", tr("Abrir con la aplicación del sistema"), "", self.open_with_system)
         add("close", tr("Cerrar"), "", self.close)
         self.actions_by_key["reveal"].setEnabled(self.host is not None)
         self.actions_by_key["save_frame"].setEnabled(False)
+        self.actions_by_key["ai_prompt"].setEnabled(False)
 
     def _build_menus(self) -> None:
         by_key = self.actions_by_key
         bar = self.menuBar()
         for title, keys in ((tr("&Archivo"), ("save_frame", None, "open_system", "reveal", None, "close")),
                             (tr("&Reproducción"), ("play", "stop", None, "frame_back", "frame_forward", None, "seek_back", "seek_forward")),
-                            (tr("&Ver"), ("previous", "next", None, "fullscreen"))):
+                            (tr("&Ver"), ("previous", "next", None, "fullscreen", None, "ai_prompt"))):
             menu = bar.addMenu(title)
             for key in keys:
                 menu.addSeparator() if key is None else menu.addAction(by_key[key])
@@ -153,7 +183,7 @@ class VideoViewer(QMainWindow):
         bar = self.statusBar()
         bar.setSizeGripEnabled(True)
         bar.setStyleSheet("QStatusBar::item { border: none; }")  # los separadores ya son propios
-        for position, key in enumerate(("name", "position", "format", "size", "time")):
+        for position, key in enumerate(("name", "position", "format", "size", "time", "ai")):
             if position:
                 line = QFrame()
                 line.setFrameShape(QFrame.Shape.VLine)
@@ -164,6 +194,13 @@ class VideoViewer(QMainWindow):
             label.setTextFormat(Qt.TextFormat.PlainText)
             bar.addWidget(label)
             self.status_labels[key] = label
+        self.status_labels["ai"].setCursor(Qt.CursorShape.PointingHandCursor)
+        self.status_labels["ai"].mousePressEvent = lambda _e: self.toggle_prompt_panel() if self.actions_by_key["ai_prompt"].isEnabled() else None
+
+    def toggle_prompt_panel(self) -> None:
+        visible = not self.prompt_dock.isVisible()
+        self.prompt_dock.setVisible(visible)
+        self.actions_by_key["ai_prompt"].setChecked(visible)
 
     def apply_icons(self) -> None:
         for key, icon in self._icons.items():
@@ -182,12 +219,31 @@ class VideoViewer(QMainWindow):
         labels = self.status_labels
         labels["name"].setText(os.path.basename(path))
         labels["position"].setText(f"{self.index + 1}/{len(self.paths)}")
-        labels["format"].setText("")
-        labels["time"].setText("")
+        for key in ("format", "time", "ai"):
+            if key in labels:
+                labels[key].setText("")
         try:
             labels["size"].setText(format_size(os.path.getsize(path)))
         except OSError:
             labels["size"].setText("")
+
+        ext = os.path.splitext(path)[1].lstrip(".").lower()
+        gen = ai_metadata.read_generation(path, ext)
+        has_prompt = gen is not None and bool(gen.prompt)
+        has_ai = gen is not None and (gen.has_prompt or gen.workflow)
+        self.actions_by_key["ai_prompt"].setEnabled(has_prompt)
+        if "ai" in labels:
+            if has_ai:
+                tool = gen.tool or tr("IA")
+                labels["ai"].setText(f"✨ {tool}")
+                tip = gen.prompt if gen.prompt else tool
+                if has_prompt:
+                    tip += f"\n{tr('Haz clic para ver/copiar el prompt')}"
+                labels["ai"].setToolTip(tip)
+            else:
+                labels["ai"].setText("")
+        self.prompt_dock.set_generation(gen)
+
         self.actions_by_key["save_frame"].setEnabled(False)
         self.media.load(path, True)
         for key in ("frame_back", "frame_forward"):
@@ -203,6 +259,10 @@ class VideoViewer(QMainWindow):
     def _failed(self, message: str) -> None:
         self.media.clear()
         self.actions_by_key["save_frame"].setEnabled(False)
+        if "ai" in self.status_labels:
+            self.status_labels["ai"].setText("")
+        self.actions_by_key["ai_prompt"].setEnabled(False)
+        self.prompt_dock.set_generation(None)
         self.message.setText(tr("No se pudo reproducir {basename}\n{message}", basename=os.path.basename(self.current_path), message=message))
         self.stack.setCurrentWidget(self.failure_page)
 
