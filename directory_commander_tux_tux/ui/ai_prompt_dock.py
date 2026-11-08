@@ -29,6 +29,8 @@ class AIPromptDock(QDockWidget):
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll.setMinimumWidth(380)
 
         container = QWidget()
         self.layout = QVBoxLayout(container)
@@ -202,7 +204,14 @@ class AIPromptDock(QDockWidget):
                 widget.deleteLater()
 
         for key, value in gen.settings:
-            val_label = QLabel(str(value))
+            # Si es LoRA, mostrar cada LoRA en su propia línea, en columna
+            if "lora" in key.lower():
+                loras = [p.strip() for p in str(value).replace("\n", ",").split(",") if p.strip()]
+                val_text = "\n".join(loras) if loras else str(value)
+            else:
+                val_text = str(value)
+            val_label = QLabel(val_text)
+            val_label.setWordWrap(True)
             val_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             self.settings_form.addRow(tr(f"{key}:"), val_label)
 

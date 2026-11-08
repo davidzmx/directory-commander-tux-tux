@@ -76,11 +76,14 @@ def _png_texts(handle) -> dict[str, str]:
         length, kind = struct.unpack(">I4s", header)
         if kind == b"IEND":
             break
-        if kind in (b"tEXt", b"zTXt", b"iTXt", b"eXIf") and length <= MAX_TEXT:
+        if kind in (b"tEXt", b"zTXt", b"iTXt", b"eXIf", b"caBX") and length <= MAX_TEXT:
             data = handle.read(length)
             handle.seek(4, 1)
             if kind == b"eXIf":
                 texts.update(_exif_texts(data))
+                continue
+            if kind == b"caBX":
+                texts["c2pa"] = texts.get("c2pa", "") + data.decode("latin-1", "replace")
                 continue
             keyword, _, rest = data.partition(b"\0")
             key = keyword.decode("latin-1").lower()
@@ -188,6 +191,8 @@ def _jpeg_texts(handle) -> dict[str, str]:
             texts.update(_exif_texts(data))
         elif marker[1] == 0xE1 and b"xmpmeta" in data[:400]:
             texts.update(_xmp_texts(data))
+        elif marker[1] == 0xEB and (data.startswith(b"JP\0") or b"c2pa" in data[:100] or b"jumb" in data[:100]):
+            texts["c2pa"] = texts.get("c2pa", "") + data.decode("latin-1", "replace")
         elif marker[1] == 0xFE:
             texts["comment"] = data.decode("utf-8", "replace")
     return texts
@@ -204,9 +209,14 @@ def _webp_texts(handle) -> dict[str, str]:
         if len(chunk) < 8:
             break
         kind, length = chunk[:4], struct.unpack("<I", chunk[4:])[0]
-        if kind in (b"EXIF", b"XMP ") and length <= MAX_TEXT:
+        if kind in (b"EXIF", b"XMP ", b"c2pa", b"caBX") and length <= MAX_TEXT:
             data = handle.read(length)
-            texts.update(_exif_texts(data) if kind == b"EXIF" else _xmp_texts(data))
+            if kind == b"EXIF":
+                texts.update(_exif_texts(data))
+            elif kind == b"XMP ":
+                texts.update(_xmp_texts(data))
+            else:
+                texts["c2pa"] = texts.get("c2pa", "") + data.decode("latin-1", "replace")
             handle.seek(length & 1, 1)
         else:
             handle.seek(length + (length & 1), 1)
@@ -423,7 +433,7 @@ def _comfy(prompt_graph, workflow) -> Generation:
     if model:
         settings[N_("Modelo")] = model
     if loras:
-        settings["LoRA"] = ", ".join(dict.fromkeys(loras))
+        settings["LoRA"] = "\n".join(dict.fromkeys(loras))
     if samplers:
         inputs = samplers[0]["inputs"]
         positive = _comfy_text(nodes, inputs["positive"], set())
@@ -615,8 +625,8 @@ def _detect_ai_service(texts: dict[str, str], raw_data: bytes = b"") -> Generati
     # 2. ChatGPT / OpenAI / DALL-E / Sora
     elif any(k in corpus for k in ("dall-e", "dall·e", "dalle")):
         tool = "ChatGPT (DALL-E)"
-    elif "chatgpt" in corpus:
-        tool = "ChatGPT"
+    elif "chatgpt" in corpus or ("openai" in corpus and ("dall" in corpus or has_algo or "c2pa" in corpus)):
+        tool = "ChatGPT (DALL-E)"
     elif "sora" in corpus and ("openai" in corpus or has_algo or "video" in corpus):
         tool = "OpenAI Sora"
     elif "openai" in corpus and (has_algo or "software" in corpus or "creatortool" in corpus):

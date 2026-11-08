@@ -40,7 +40,7 @@ _FIXED_BARS: dict[str, tuple[str, list[tuple[str, str]]]] = {
                                          ("save_crop", tr("Guardar selección")), _LINE, ("rename", tr("Renombrar")), ("delete", tr("Eliminar")), _LINE,
                                          ("ai_prompt", tr("Info de IA")), ("reveal", tr("Mostrar en el panel"))]),
     VIDEO_VIEWER: (tr("Ventana de vídeo: barra superior"), [("previous", tr("Vídeo anterior")), ("next", tr("Vídeo siguiente")), _LINE, ("save_frame", tr("Guardar fotograma")),
-                                                            ("ai_prompt", tr("Info de IA")), _LINE, ("fullscreen", tr("Pantalla completa")), _LINE, ("reveal", tr("Mostrar en el panel"))]),
+                                                            _LINE, ("fullscreen", tr("Pantalla completa")), _LINE, ("ai_prompt", tr("Info de IA")), ("reveal", tr("Mostrar en el panel"))]),
     VIDEO_CONTROLS: (tr("Ventana de vídeo: controles"), [("play", tr("Reproducir o pausar")), ("stop", tr("Detener")), ("repeat", tr("Repetir")),
                                                      ("frame_back", tr("Fotograma anterior")), ("frame_forward", tr("Fotograma siguiente")), (SEEK, tr("Barra de progreso")),
                                                      ("mute", tr("Silenciar")), ("volume", tr("Volumen"))]),

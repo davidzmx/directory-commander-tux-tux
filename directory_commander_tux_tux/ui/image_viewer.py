@@ -135,9 +135,7 @@ class ImageViewer(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.prompt_dock)
         self.resizeDocks([self.prompt_dock], [420], Qt.Orientation.Horizontal)
         self.prompt_dock.hide()
-        self.prompt_dock.visibilityChanged.connect(
-            lambda v: self.actions_by_key["ai_prompt"].setChecked(v) if "ai_prompt" in self.actions_by_key else None
-        )
+        self.prompt_dock.visibilityChanged.connect(self._on_prompt_dock_visibility_changed)
 
         self.timer = QTimer(self)
         self.timer.setInterval(SLIDESHOW_MS)
@@ -385,6 +383,12 @@ class ImageViewer(QMainWindow):
             else:
                 labels["ai"].setText("")
         self.prompt_dock.set_generation(gen, path)
+        cfg = getattr(self.host, "config", self.config)
+        if has_ai and bool(cfg.get("viewer_ai_prompt_open", False)) and not self.prompt_dock.isVisible():
+            self.prompt_dock.show()
+            self.resizeDocks([self.prompt_dock], [420], Qt.Orientation.Horizontal)
+        elif not has_ai and self.prompt_dock.isVisible():
+            self.prompt_dock.hide()
         self._apply_zoom()
 
     def _failed(self, generation: int, path: str, reason: str) -> None:
@@ -565,12 +569,19 @@ class ImageViewer(QMainWindow):
             QApplication.clipboard().setPixmap(self._shown)
             self.statusBar().showMessage(tr("Imagen copiada"), 2000)
 
+    def _on_prompt_dock_visibility_changed(self, visible: bool) -> None:
+        if "ai_prompt" in self.actions_by_key:
+            self.actions_by_key["ai_prompt"].setChecked(visible)
+        cfg = getattr(self.host, "config", self.config)
+        cfg["viewer_ai_prompt_open"] = visible
+        if self.host is not None:
+            self.host.config["viewer_ai_prompt_open"] = visible
+
     def toggle_prompt_panel(self) -> None:
         visible = not self.prompt_dock.isVisible()
         self.prompt_dock.setVisible(visible)
         if visible:
             self.resizeDocks([self.prompt_dock], [420], Qt.Orientation.Horizontal)
-        self.actions_by_key["ai_prompt"].setChecked(visible)
 
     def _show_context_menu(self, global_pos: QPoint) -> None:
         if self._shown is None:

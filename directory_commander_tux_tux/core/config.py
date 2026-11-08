@@ -234,6 +234,7 @@ DEFAULTS: dict = {
     "viewer_default_width": 1120,
     "viewer_default_height": 720,
     "viewer_geometry": "",
+    "viewer_ai_prompt_open": False,
     "ffmpeg_dir": "",
     "exiftool_dir": "",
     "terminal_shell": "",

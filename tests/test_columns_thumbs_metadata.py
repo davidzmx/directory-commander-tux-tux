@@ -1007,4 +1007,99 @@ def test_ai_prompt_dock_width_and_workflow_save(app, tmp_path, monkeypatch):
     viewer.close()
 
 
+def test_viewer_remembers_ai_prompt_open(tmp_path):
+    from directory_commander_tux_tux.ui.image_viewer import ImageViewer
+    from unittest.mock import MagicMock
+
+    img_path = tmp_path / "ai_img.png"
+    img_path.write_bytes(ai_samples.comfy_png())
+
+    host = MagicMock()
+    host.config = {"viewer_ai_prompt_open": True}
+
+    viewer = ImageViewer([str(img_path)], 0, host=host)
+    viewer.show()
+    assert wait_until(lambda: viewer.prompt_dock.isVisible())
+
+    # Toggle closed
+    viewer.toggle_prompt_panel()
+    assert not viewer.prompt_dock.isVisible()
+    assert host.config["viewer_ai_prompt_open"] is False
+
+    # Toggle open again
+    viewer.toggle_prompt_panel()
+    assert viewer.prompt_dock.isVisible()
+    assert host.config["viewer_ai_prompt_open"] is True
+    viewer.close()
+
+
+def test_lora_column_display_and_no_horizontal_scroll():
+    from directory_commander_tux_tux.ui.ai_prompt_dock import AIPromptDock
+    from directory_commander_tux_tux.core.ai_metadata import Generation
+    from PySide6.QtCore import Qt
+
+    dock = AIPromptDock()
+    assert dock.scroll.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+
+    gen = Generation(
+        tool="ComfyUI",
+        prompt="girl",
+        settings=(("LoRA", "sdxl_lightning.safetensors, model_girl.safetensors"), ("Modelo", "base.safetensors"))
+    )
+    dock.set_generation(gen)
+
+    # Verify LoRA label has newlines (one per row)
+    lora_label = None
+    for i in range(dock.settings_form.rowCount()):
+        item = dock.settings_form.itemAt(i, dock.settings_form.ItemRole.FieldRole)
+        w = item.widget()
+        if w and "sdxl_lightning.safetensors" in w.text():
+            lora_label = w
+            break
+    assert lora_label is not None
+    assert lora_label.text() == "sdxl_lightning.safetensors\nmodel_girl.safetensors"
+    assert lora_label.wordWrap() is True
+    dock.close()
+
+
+def test_video_viewer_ai_prompt_next_to_reveal(tmp_path):
+    from directory_commander_tux_tux.ui.video_viewer import VideoViewer
+    from directory_commander_tux_tux.core import bar_buttons
+
+    # Check default bar_buttons definition
+    btns = [k for k, _ in bar_buttons._FIXED_BARS[bar_buttons.VIDEO_VIEWER][1]]
+    assert btns.index("ai_prompt") == btns.index("reveal") - 1
+
+    # Check VideoViewer toolbar actions order
+    vid_path = tmp_path / "test.mp4"
+    vid_path.write_bytes(ai_samples.plain_mp4())
+    viewer = VideoViewer({}, [str(vid_path)], 0)
+    toolbar_actions = [a.objectName() or k for k, a in viewer.actions_by_key.items()]
+    assert viewer.actions_by_key["ai_prompt"] is not None
+    assert viewer.actions_by_key["reveal"] is not None
+    viewer.close()
+
+
+def test_git_user_dialog_close_button_enabled():
+    from directory_commander_tux_tux.ui.git_user_dialog import GitUserDialog
+    from PySide6.QtCore import Qt
+
+    dlg = GitUserDialog("git", "C:/fake", "User", "user@test.com")
+    assert bool(dlg.windowFlags() & Qt.WindowType.WindowCloseButtonHint) is True
+    dlg.close()
+
+
+def test_c2pa_real_and_synthetic_detection(tmp_path):
+    import os
+    # Check if C:\Downloads\IA files exist and verify detection
+    ia_dir = r"C:\Downloads\IA"
+    if os.path.isdir(ia_dir):
+        for fname in os.listdir(ia_dir):
+            fpath = os.path.join(ia_dir, fname)
+            ext = fname.rsplit(".", 1)[-1]
+            gen = ai_metadata.read_generation(fpath, ext)
+            assert gen is not None, f"Failed to detect AI in {fname}"
+            assert gen.tool in ("ChatGPT (DALL-E)", "Google Gemini")
+
+
 

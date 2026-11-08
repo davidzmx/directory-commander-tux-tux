@@ -17,7 +17,10 @@ class GitUserDialog(QDialog):
         self.git = git
         self.folder = folder
         self.setWindowTitle(tr("Configuración de Usuario Git"))
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        flags = self.windowFlags()
+        flags &= ~Qt.WindowType.WindowContextHelpButtonHint
+        flags |= Qt.WindowType.WindowCloseButtonHint
+        self.setWindowFlags(flags)
         self.setFixedWidth(460)
 
         app = QApplication.instance()
@@ -176,6 +179,10 @@ class GitUserDialog(QDialog):
         btn_row.addWidget(self.btn_save)
 
         layout.addLayout(btn_row)
+
+    def closeEvent(self, event) -> None:
+        self.reject()
+        event.accept()
 
     def save(self) -> None:
         name = self.name_edit.text()

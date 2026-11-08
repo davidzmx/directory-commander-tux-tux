@@ -74,9 +74,7 @@ class VideoViewer(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.prompt_dock)
         self.resizeDocks([self.prompt_dock], [420], Qt.Orientation.Horizontal)
         self.prompt_dock.hide()
-        self.prompt_dock.visibilityChanged.connect(
-            lambda v: self.actions_by_key["ai_prompt"].setChecked(v) if "ai_prompt" in self.actions_by_key else None
-        )
+        self.prompt_dock.visibilityChanged.connect(self._on_prompt_dock_visibility_changed)
 
         self.actions_by_key: dict[str, QAction] = {}
         self._icons: dict[str, str] = {}
@@ -184,7 +182,11 @@ class VideoViewer(QMainWindow):
         show_text = config.get("viewer_button_text", True)
         removed = bar_buttons.hidden(config, bar_buttons.VIDEO_VIEWER)
         self.toolbar.clear()
-        for key in bar_buttons.arranged(config, bar_buttons.VIDEO_VIEWER):
+        keys = list(bar_buttons.arranged(config, bar_buttons.VIDEO_VIEWER))
+        if "ai_prompt" in keys and "reveal" in keys:
+            keys.remove("ai_prompt")
+            keys.insert(keys.index("reveal"), "ai_prompt")
+        for key in keys:
             if key == bar_buttons.SEPARATOR:
                 self.toolbar.addSeparator()
             elif key not in removed:
@@ -250,12 +252,19 @@ class VideoViewer(QMainWindow):
         self.status_labels["ai"].setCursor(Qt.CursorShape.PointingHandCursor)
         self.status_labels["ai"].mousePressEvent = lambda _e: self.toggle_prompt_panel() if self.actions_by_key["ai_prompt"].isEnabled() else None
 
+    def _on_prompt_dock_visibility_changed(self, visible: bool) -> None:
+        if "ai_prompt" in self.actions_by_key:
+            self.actions_by_key["ai_prompt"].setChecked(visible)
+        cfg = getattr(self.host, "config", self.config)
+        cfg["viewer_ai_prompt_open"] = visible
+        if self.host is not None:
+            self.host.config["viewer_ai_prompt_open"] = visible
+
     def toggle_prompt_panel(self) -> None:
         visible = not self.prompt_dock.isVisible()
         self.prompt_dock.setVisible(visible)
         if visible:
             self.resizeDocks([self.prompt_dock], [420], Qt.Orientation.Horizontal)
-        self.actions_by_key["ai_prompt"].setChecked(visible)
 
     def apply_icons(self) -> None:
         for key, icon in self._icons.items():
@@ -306,6 +315,12 @@ class VideoViewer(QMainWindow):
             else:
                 labels["ai"].setText("")
         self.prompt_dock.set_generation(gen, path)
+        cfg = getattr(self.host, "config", self.config)
+        if has_ai and bool(cfg.get("viewer_ai_prompt_open", False)) and not self.prompt_dock.isVisible():
+            self.prompt_dock.show()
+            self.resizeDocks([self.prompt_dock], [420], Qt.Orientation.Horizontal)
+        elif not has_ai and self.prompt_dock.isVisible():
+            self.prompt_dock.hide()
 
         self.actions_by_key["save_frame"].setEnabled(False)
         self.media.load(path, True)
@@ -433,5 +448,6 @@ class VideoViewer(QMainWindow):
             super().keyPressEvent(event)
 
     def closeEvent(self, event) -> None:
-        self.media.clear()  # deja de sonar y suelta el archivo
+        if hasattr(self, "media"):
+            self.media.clear()  # deja de sonar y suelta el archivo
         super().closeEvent(event)
