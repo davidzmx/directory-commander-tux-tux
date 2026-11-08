@@ -288,6 +288,80 @@ def _mp4_metadata(handle, size: int) -> bytes:
     return found
 
 
+def _mp4_meta_texts(data: bytes) -> dict[str, str]:
+    """Extrae metadatos de las cajas 'keys' e 'ilst' de QuickTime/MP4 (como los guardados por ComfyUI/FFmpeg)."""
+    texts: dict[str, str] = {}
+    if not data:
+        return texts
+    key_names: list[str] = []
+    keys_idx = data.find(b"keys")
+    while keys_idx != -1:
+        if keys_idx >= 4:
+            k_sz = struct.unpack(">I", data[keys_idx - 4:keys_idx])[0]
+            if 8 <= k_sz <= len(data) - (keys_idx - 4):
+                try:
+                    count = struct.unpack(">I", data[keys_idx + 8:keys_idx + 12])[0]
+                    pos = keys_idx + 12
+                    keys_end = keys_idx - 4 + k_sz
+                    for _ in range(count):
+                        if pos + 8 > keys_end:
+                            break
+                        e_sz = struct.unpack(">I", data[pos:pos + 4])[0]
+                        if e_sz < 8 or pos + e_sz > keys_end:
+                            break
+                        name = data[pos + 8:pos + e_sz].decode("utf-8", "replace")
+                        if name.startswith("mdta"):
+                            name = name[4:]
+                        key_names.append(name.lower())
+                        pos += e_sz
+                    break
+                except (struct.error, UnicodeDecodeError):
+                    pass
+        keys_idx = data.find(b"keys", keys_idx + 4)
+
+    itunes_tags = {
+        b"\xa9cmt": "comment", b"\xa9des": "description", b"\xa9nam": "title",
+        b"\xa9too": "software", b"desc": "description", b"cprt": "copyright",
+    }
+    ilst_idx = data.find(b"ilst")
+    while ilst_idx != -1:
+        if ilst_idx >= 4:
+            i_sz = struct.unpack(">I", data[ilst_idx - 4:ilst_idx])[0]
+            if 8 <= i_sz <= len(data) - (ilst_idx - 4):
+                ilst_end = ilst_idx - 4 + i_sz
+                pos = ilst_idx + 4
+                while pos + 8 < ilst_end:
+                    item_sz = struct.unpack(">I", data[pos:pos + 4])[0]
+                    if item_sz < 8 or pos + item_sz > ilst_end:
+                        break
+                    item_tag = data[pos + 4:pos + 8]
+                    key_name = ""
+                    tag_idx = struct.unpack(">I", item_tag)[0]
+                    if 1 <= tag_idx <= len(key_names):
+                        key_name = key_names[tag_idx - 1]
+                    elif item_tag in itunes_tags:
+                        key_name = itunes_tags[item_tag]
+
+                    d_pos = pos + 8
+                    while d_pos + 16 <= pos + item_sz:
+                        d_sz = struct.unpack(">I", data[d_pos:d_pos + 4])[0]
+                        if d_sz < 16 or d_pos + d_sz > pos + item_sz:
+                            break
+                        if data[d_pos + 4:d_pos + 8] == b"data":
+                            val = data[d_pos + 16:d_pos + d_sz].decode("utf-8", "replace").strip("\x00")
+                            if key_name:
+                                texts[key_name] = val
+                            elif val.startswith("{") and ("prompt" in val or "workflow" in val):
+                                texts["comment"] = val
+                            break
+                        d_pos += d_sz
+                    pos += item_sz
+                break
+        ilst_idx = data.find(b"ilst", ilst_idx + 4)
+
+    return texts
+
+
 def _read_texts(path: str, extension: str) -> tuple[dict[str, str], bytes]:
     """Los textos con nombre y, de los formatos que no se recorren, los bytes donde buscar."""
     with open(path, "rb") as handle:
@@ -299,6 +373,7 @@ def _read_texts(path: str, extension: str) -> tuple[dict[str, str], bytes]:
             if extension in _MP4_EXTENSIONS:
                 found = _mp4_metadata(handle, size)
                 if found:
+                    texts.update(_mp4_meta_texts(found))
                     xmp_idx = found.find(b"<x:xmpmeta")
                     if xmp_idx != -1:
                         end_idx = found.find(b"</x:xmpmeta>", xmp_idx)
@@ -312,6 +387,7 @@ def _read_texts(path: str, extension: str) -> tuple[dict[str, str], bytes]:
                 handle.seek(max(VIDEO_EDGE_BYTES, size - VIDEO_EDGE_BYTES))
                 tail = handle.read()
             raw_vid = head + b"\n" + tail
+            texts.update(_mp4_meta_texts(raw_vid))
             xmp_idx = raw_vid.find(b"<x:xmpmeta")
             if xmp_idx != -1:
                 end_idx = raw_vid.find(b"</x:xmpmeta>", xmp_idx)
@@ -550,8 +626,14 @@ def _novelai(texts: dict[str, str]) -> Generation | None:
 
 
 def _comfy_in_texts(texts: dict[str, str]) -> Generation | None:
-    """Los textos «prompt» y «workflow» del PNG, o su versión en el EXIF de un WebP: «prompt:{…}» en el modelo y «workflow:{…}» en la marca."""
+    """Los textos «prompt» y «workflow» del PNG, o su versión en el EXIF de un WebP: «prompt:{…}» en el modelo y «workflow:{…}» en la marca,
+    o en el comentario de un vídeo MP4."""
     graph, workflow = _json(texts.get("prompt")), _json(texts.get("workflow"))
+    for key in ("comment", "usercomment", "description"):
+        c = _json(texts.get(key))
+        if isinstance(c, dict) and ("prompt" in c or "workflow" in c):
+            graph = graph if isinstance(graph, dict) else _json(c.get("prompt"))
+            workflow = workflow if isinstance(workflow, dict) else _json(c.get("workflow"))
     for value in (texts.get(key, "") for key in ("make", "model", "description", "usercomment")):
         found = _PREFIXED_JSON.match(value.encode("utf-8", "replace"))
         if found:

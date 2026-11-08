@@ -1178,5 +1178,18 @@ def test_viewer_ai_prompt_persistence(tmp_path):
     viewer.close()
 
 
+def test_mp4_comfy_keys_ilst_workflow(tmp_path):
+    import os
+    p = r"C:\Downloads\MiniMax_H3_00951_.mp4"
+    if os.path.isfile(p):
+        gen = ai_metadata.read_generation(p, "mp4")
+        assert gen is not None
+        assert gen.tool == "ComfyUI"
+        assert gen.workflow is True
+        assert gen.nodes == 25
+        assert bool(gen.prompt) is True
+        assert bool(gen.workflow_data) is True
+
+
 
 
