@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QAbstractSlider, QApplication,
                                QStyleOptionViewItem, QStyledItemDelegate, QTableView, QToolButton, QToolTip, QVBoxLayout,
                                QWidget)
 
-from ..core import archive, git_tools, remote
+from ..core import archive, fsops, git_tools, remote
 from ..core.config import THUMB_SIZES
 from ..core.bar_buttons import PATH
 from ..core.listing import COMPUTER_LABEL, COMPUTER_PATH, format_size, has_computer_view, is_results, list_dir, location_label, results_name, sort_entries
@@ -631,11 +631,13 @@ class _DropMixin:
     def content_offset(self) -> QPoint:
         return QPoint(self.horizontalOffset(), self.verticalOffset())
 
-    def _drop_folder_at(self, position: QPoint):
-        """La carpeta bajo ese punto. Solo cuenta su nombre, como al seleccionar."""
+    def _drop_target_at(self, position: QPoint):
+        """El elemento bajo ese punto: una carpeta o un archivo ejecutable."""
         index = self.name_index_at(position)
         entry = index.data(EntryRole) if index.isValid() else None
-        return (index, entry) if entry is not None and entry.is_dir else (QModelIndex(), None)
+        return (index, entry) if entry is not None and (entry.is_dir or fsops.is_executable_target(entry.path)) else (QModelIndex(), None)
+
+    _drop_folder_at = _drop_target_at
 
     def _drop_destination(self, entry) -> str:
         return entry.path if entry is not None else self.model().path
@@ -649,7 +651,7 @@ class _DropMixin:
     def dragMoveEvent(self, event) -> None:
         if not self._decider.paths:
             self._decider.begin(event)
-        index, entry = self._drop_folder_at(event.position().toPoint())
+        index, entry = self._drop_target_at(event.position().toPoint())
         self.set_hover_row(index.row() if index.isValid() else -1)
         show_operation(event, self._decider.operation(event, self._drop_destination(entry)))
 
@@ -660,7 +662,7 @@ class _DropMixin:
     def dropEvent(self, event) -> None:
         self.set_hover_row(-1)
         self._decider.begin(event)
-        _index, entry = self._drop_folder_at(event.position().toPoint())
+        _index, entry = self._drop_target_at(event.position().toPoint())
         operation = self._decider.operation(event, self._drop_destination(entry))
         ask = self._decider.take_right_button()
         if operation is None or not self.drop_handler:

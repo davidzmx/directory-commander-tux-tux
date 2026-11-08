@@ -263,3 +263,19 @@ class AIPromptDock(QDockWidget):
             except OSError:
                 pass
 
+    def closeEvent(self, event) -> None:
+        parent = self.parent()
+        if parent is not None and not getattr(parent, "_closing", False):
+            cfg = getattr(parent, "config", None)
+            host = getattr(parent, "host", None)
+            if host is not None and hasattr(host, "config"):
+                cfg = host.config
+            if cfg is not None:
+                cfg["viewer_ai_prompt_open"] = False
+                if hasattr(cfg, "save"):
+                    try:
+                        cfg.save()
+                    except OSError:
+                        pass
+        super().closeEvent(event)
+

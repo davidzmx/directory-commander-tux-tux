@@ -619,7 +619,7 @@ def _detect_ai_service(texts: dict[str, str], raw_data: bytes = b"") -> Generati
         tool = "Google Veo"
     elif has_synthid or (is_google and has_algo):
         tool = "Google Gemini"
-    elif is_google and ("ai" in corpus or "generat" in corpus):
+    elif any(phrase in corpus for phrase in ("made with google ai", "generated with google ai", "google generative ai", "google imagen", "google veo")):
         tool = "Google AI"
 
     # 2. ChatGPT / OpenAI / DALL-E / Sora
@@ -627,7 +627,7 @@ def _detect_ai_service(texts: dict[str, str], raw_data: bytes = b"") -> Generati
         tool = "ChatGPT (DALL-E)"
     elif "chatgpt" in corpus or ("openai" in corpus and ("dall" in corpus or has_algo or "c2pa" in corpus)):
         tool = "ChatGPT (DALL-E)"
-    elif "sora" in corpus and ("openai" in corpus or has_algo or "video" in corpus):
+    elif "sora" in corpus and ("openai" in corpus or has_algo):
         tool = "OpenAI Sora"
     elif "openai" in corpus and (has_algo or "software" in corpus or "creatortool" in corpus):
         tool = "OpenAI"
@@ -635,7 +635,7 @@ def _detect_ai_service(texts: dict[str, str], raw_data: bytes = b"") -> Generati
     # 3. Magnific AI (Freepik)
     elif "magnific" in corpus:
         tool = "Magnific AI (Freepik)"
-    elif "freepik" in corpus and any(k in corpus for k in ("ai", "pikaso", "generator", "trainedalgorithmicmedia")):
+    elif "freepik" in corpus and any(k in corpus for k in ("pikaso", "generator", "trainedalgorithmicmedia", "freepik ai")):
         tool = "Freepik AI"
 
     # 4. Higgsfield AI

@@ -255,16 +255,26 @@ class VideoViewer(QMainWindow):
     def _on_prompt_dock_visibility_changed(self, visible: bool) -> None:
         if "ai_prompt" in self.actions_by_key:
             self.actions_by_key["ai_prompt"].setChecked(visible)
-        cfg = getattr(self.host, "config", self.config)
-        cfg["viewer_ai_prompt_open"] = visible
-        if self.host is not None:
-            self.host.config["viewer_ai_prompt_open"] = visible
 
     def toggle_prompt_panel(self) -> None:
         visible = not self.prompt_dock.isVisible()
         self.prompt_dock.setVisible(visible)
         if visible:
             self.resizeDocks([self.prompt_dock], [420], Qt.Orientation.Horizontal)
+        cfg = getattr(self.host, "config", self.config)
+        cfg["viewer_ai_prompt_open"] = visible
+        if self.host is not None and hasattr(self.host, "config"):
+            self.host.config["viewer_ai_prompt_open"] = visible
+            if hasattr(self.host.config, "save"):
+                try:
+                    self.host.config.save()
+                except OSError:
+                    pass
+        elif hasattr(cfg, "save"):
+            try:
+                cfg.save()
+            except OSError:
+                pass
 
     def apply_icons(self) -> None:
         for key, icon in self._icons.items():
@@ -316,10 +326,11 @@ class VideoViewer(QMainWindow):
                 labels["ai"].setText("")
         self.prompt_dock.set_generation(gen, path)
         cfg = getattr(self.host, "config", self.config)
-        if has_ai and bool(cfg.get("viewer_ai_prompt_open", False)) and not self.prompt_dock.isVisible():
-            self.prompt_dock.show()
-            self.resizeDocks([self.prompt_dock], [420], Qt.Orientation.Horizontal)
-        elif not has_ai and self.prompt_dock.isVisible():
+        if has_ai and bool(cfg.get("viewer_ai_prompt_open", False)):
+            if not self.prompt_dock.isVisible():
+                self.prompt_dock.show()
+                self.resizeDocks([self.prompt_dock], [420], Qt.Orientation.Horizontal)
+        elif self.prompt_dock.isVisible():
             self.prompt_dock.hide()
 
         self.actions_by_key["save_frame"].setEnabled(False)
@@ -448,6 +459,23 @@ class VideoViewer(QMainWindow):
             super().keyPressEvent(event)
 
     def closeEvent(self, event) -> None:
+        self._closing = True
         if hasattr(self, "media"):
             self.media.clear()  # deja de sonar y suelta el archivo
+        if self.config.get("viewer_window_mode", "remember") == "remember":
+            if not self.isFullScreen() and not self.isMinimized():
+                geom_str = bytes(self.saveGeometry().toHex()).decode()
+                self.config["viewer_geometry"] = geom_str
+                if self.host is not None and hasattr(self.host, "config"):
+                    self.host.config["viewer_geometry"] = geom_str
+        if self.host is not None and hasattr(self.host, "config") and hasattr(self.host.config, "save"):
+            try:
+                self.host.config.save()
+            except OSError:
+                pass
+        elif hasattr(self.config, "save"):
+            try:
+                self.config.save()
+            except OSError:
+                pass
         super().closeEvent(event)

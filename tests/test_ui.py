@@ -6482,6 +6482,20 @@ def test_drop_on_a_file_name_goes_to_the_pane_folder(window, tree):
     assert wait_until(lambda: (right / "a.txt").exists() and window.jobs.running == 0)
 
 
+def test_drop_on_executable_launches_it(window, tree, monkeypatch):
+    left, right = tree
+    exe = right / "tool.exe"
+    exe.write_bytes(b"MZ")
+    window.dest.refresh()
+    assert wait_until(lambda: "tool.exe" in names(window.dest))
+    called = []
+    monkeypatch.setattr(window, "_execute_with_files", lambda target, paths: called.append((target, paths)))
+    send_to_view(window.dest, drop_event(name_center(window.dest, "tool.exe"), [left / "a.txt"]))
+    assert wait_until(lambda: len(called) == 1)
+    assert called[0][0] == str(exe)
+    assert called[0][1] == [str(left / "a.txt")]
+
+
 def test_dropping_does_not_reach_a_compressed_file(window, tree):
     left, right = tree
     with zipfile.ZipFile(right / "z.zip", "w") as out:

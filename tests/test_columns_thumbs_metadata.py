@@ -1102,4 +1102,81 @@ def test_c2pa_real_and_synthetic_detection(tmp_path):
             assert gen.tool in ("ChatGPT (DALL-E)", "Google Gemini")
 
 
+def test_videoplayback_not_detected_as_ai(tmp_path):
+    import os
+    vp = r"C:\Downloads\videoplayback.mp4"
+    if os.path.isfile(vp):
+        assert ai_metadata.read_generation(vp, "mp4") is None
+
+    # Test synthetic video with Google Inc metadata but not AI
+    dummy_mp4 = tmp_path / "google_normal.mp4"
+    dummy_mp4.write_bytes(ai_samples.plain_mp4() + b"\x00ISO Media file produced by Google Inc.\x00email trailer main\x00")
+    assert ai_metadata.read_generation(str(dummy_mp4), "mp4") is None
+
+
+def test_drop_operation_on_executable(tmp_path):
+    from directory_commander_tux_tux.core import fsops
+    exe_file = tmp_path / "tool.exe"
+    exe_file.write_bytes(b"MZfakeexe")
+    txt_file = tmp_path / "document.txt"
+    txt_file.write_text("hello", encoding="utf-8")
+
+    assert fsops.is_executable_target(str(exe_file)) is True
+    assert fsops.is_executable_target(str(txt_file)) is False
+
+    # Dropping a file onto an executable gives "open_with"
+    assert fsops.drop_operation([str(txt_file)], str(exe_file)) == "open_with"
+
+    # Dropping the executable onto itself is rejected
+    assert fsops.drop_operation([str(exe_file)], str(exe_file)) is None
+
+    # Dropping empty list is rejected
+    assert fsops.drop_operation([], str(exe_file)) is None
+
+
+def test_viewer_ai_prompt_persistence(tmp_path):
+    from directory_commander_tux_tux.ui.image_viewer import ImageViewer
+
+    ai_file = tmp_path / "ai.png"
+    ai_file.write_bytes(ai_samples.comfy_png())
+    plain_file = tmp_path / "plain.png"
+    plain_file.write_bytes(ai_samples.png())
+
+    class FakeHost:
+        def __init__(self):
+            self.config = {"viewer_ai_prompt_open": False}
+        def viewer_reveal(self, path):
+            pass
+        def viewer_image_changed(self, origin, path):
+            pass
+
+    host = FakeHost()
+    viewer = ImageViewer([str(ai_file), str(plain_file)], 0, host=host)
+    viewer.show()
+    assert wait_until(lambda: viewer._shown is not None)
+
+    # Initially False
+    assert host.config["viewer_ai_prompt_open"] is False
+
+    # Toggle open
+    viewer.toggle_prompt_panel()
+    assert host.config["viewer_ai_prompt_open"] is True
+    assert viewer.prompt_dock.isVisible() is True
+
+    # Navigate to plain image (no AI)
+    viewer.step(1)
+    assert wait_until(lambda: not viewer.prompt_dock.isVisible())
+    # The dock hides, but host.config must REMAIN True!
+    assert host.config["viewer_ai_prompt_open"] is True
+
+    # Navigate back to AI image
+    viewer.step(-1)
+    # Dock should automatically show again because user preferred it open!
+    assert wait_until(lambda: viewer.prompt_dock.isVisible())
+    assert host.config["viewer_ai_prompt_open"] is True
+
+    viewer.close()
+
+
+
 

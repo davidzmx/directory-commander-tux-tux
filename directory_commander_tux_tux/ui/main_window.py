@@ -2986,8 +2986,28 @@ class MainWindow(ExtraCommands, QMainWindow):
         dialog.deleteLater()
         return dialog.answer
 
+    def _execute_with_files(self, exe_path: str, paths: list[str]) -> None:
+        import subprocess
+        abs_exe = os.path.abspath(exe_path)
+        abs_paths = [os.path.abspath(p) for p in paths]
+        cwd = os.path.dirname(abs_exe)
+        try:
+            if sys.platform == "win32":
+                try:
+                    cmd_args = subprocess.list2cmdline(abs_paths)
+                    os.startfile(abs_exe, "open", cmd_args, cwd=cwd)
+                    return
+                except OSError:
+                    pass
+            subprocess.Popen([abs_exe, *abs_paths], cwd=cwd, start_new_session=sys.platform != "win32")
+        except OSError as exc:
+            self.statusBar().showMessage(tr("No se pudo ejecutar {exe}: {exc}", exe=os.path.basename(abs_exe), exc=exc), 6000)
+
     def _files_dropped(self, view: FileView, paths: list[str], target: str | None, move: bool) -> None:
         destination = target or view.path
+        if target and fsops.is_executable_target(target):
+            self._execute_with_files(target, paths)
+            return
         if remote.is_remote(destination) or any(remote.is_remote(path) for path in paths):
             if paths and fsops.drop_operation(paths, destination, force_move=move) is not None:
                 try:
@@ -3008,6 +3028,18 @@ class MainWindow(ExtraCommands, QMainWindow):
     def _files_dropped_menu(self, view: FileView, paths: list[str], target: str | None, default_move: bool) -> None:
         """Arrastrar con el botón derecho: se pregunta qué hacer. En negrita, lo que haría arrastrar con el izquierdo."""
         destination = target or view.path
+        if target and fsops.is_executable_target(target):
+            menu = QMenu(self)
+            action = menu.addAction(tr("Abrir con {name}", name=os.path.basename(target)),
+                                    lambda: self._execute_with_files(target, paths))
+            font = action.font()
+            font.setBold(True)
+            action.setFont(font)
+            menu.setDefaultAction(action)
+            menu.addSeparator()
+            menu.addAction(tr("Cancelar"))
+            self._run_menu(menu, QCursor.pos())
+            return
         menu = QMenu(self)
         copy = menu.addAction(tr("Copiar aquí"), lambda: self._files_dropped(view, paths, target, False))
         move = menu.addAction(tr("Mover aquí"), lambda: self._files_dropped(view, paths, target, True))

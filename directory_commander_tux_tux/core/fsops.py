@@ -5,8 +5,9 @@ import enum
 import hashlib
 import os
 import shutil
-import tempfile
 import stat
+import sys
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -253,9 +254,23 @@ def can_move(paths: list[str]) -> bool:
     return not any(not remote.is_remote(path) and (archive.is_inside_archive(path) or is_filesystem_root(path)) for path in paths)
 
 
+def is_executable_target(path: str) -> bool:
+    """Si una ruta es un ejecutable sobre el que se pueden soltar archivos para abrirlos."""
+    if not path or not os.path.isfile(path):
+        return False
+    ext = os.path.splitext(path)[1].lstrip(".").lower()
+    if sys.platform == "win32":
+        return ext in ("exe", "bat", "cmd", "com", "ps1")
+    return ext in ("sh", "bin", "appimage", "run") or os.access(path, os.X_OK)
+
+
 def drop_operation(paths: list[str], dest_dir: str, force_move: bool = False, force_copy: bool = False) -> str | None:
-    """Qué hace soltar esos elementos en una carpeta: "move", "copy" o None si no hay nada que hacer.
+    """Qué hace soltar esos elementos en una carpeta: "move", "copy", "open_with" o None si no hay nada que hacer.
     Como en cualquier explorador: en la misma unidad se mueve y a otra unidad se copia, salvo que se pida lo contrario."""
+    if is_executable_target(dest_dir):
+        if not paths or any(_same_path(path, dest_dir) for path in paths):
+            return None
+        return "open_with"
     if remote.is_remote(dest_dir) or any(remote.is_remote(path) for path in paths):
         from . import remote_ops
         operation = remote_ops.drop_operation(paths, dest_dir, force_move)
