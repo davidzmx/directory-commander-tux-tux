@@ -13,7 +13,7 @@ from directory_commander_tux_tux.core import ai_metadata, devices, media_info
 from directory_commander_tux_tux.core.fsops import OpResult
 from directory_commander_tux_tux.core.listing import format_time
 from directory_commander_tux_tux.ui import model as model_module
-from directory_commander_tux_tux.ui.file_view import (PROMPT_MARK_COLOR, WORKFLOW_MARK_COLOR, FileView, generation_badges, inline_marks_width)
+from directory_commander_tux_tux.ui.file_view import (AI_MARK_COLOR, PROMPT_MARK_COLOR, WORKFLOW_MARK_COLOR, FileView, generation_badges, inline_marks_width)
 from directory_commander_tux_tux.ui.folder_tree import PATH_ROLE, USAGE_ROLE, FolderTree, device_tooltip
 from directory_commander_tux_tux.ui.model import GenerationRole
 from tests import ai_samples
@@ -139,6 +139,8 @@ def test_the_marks_button_shows_and_hides_them(window, tmp_path):
 def test_badges_say_p_and_w_or_the_whole_word():
     assert generation_badges((True, True, "ComfyUI")) == [("P", PROMPT_MARK_COLOR), ("W", WORKFLOW_MARK_COLOR)]
     assert generation_badges((False, True, ""), long=True) == [("Workflow", WORKFLOW_MARK_COLOR)]
+    assert generation_badges((False, False, "Google Gemini")) == [("IA", AI_MARK_COLOR)]
+    assert generation_badges((False, False, "ChatGPT (DALL-E)"), long=True) == [("IA", AI_MARK_COLOR)]
     assert generation_badges(None) == []
     assert inline_marks_width([], QApplication.font()) == 0 < inline_marks_width(generation_badges((True, False, "")), QApplication.font())
 
@@ -920,6 +922,88 @@ def test_ai_workflow_copy_and_badges(window, tmp_path, monkeypatch):
     if ext:
         overflow = [a for a in viewer.toolbar.actions() if viewer.toolbar.widgetForAction(a) is not None and not viewer.toolbar.widgetForAction(a).isVisible() and a.isVisible()]
         assert len(overflow) > 0
+    viewer.close()
+
+
+def test_ai_detection_services(tmp_path):
+    # 1. Google Gemini via XMP digitalSourceType + Google Credit
+    xmp_gemini = (
+        b'<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+        b'<rdf:Description xmlns:Iptc4xmpExt="http://iptc.org/std/Iptc4xmpExt/2008-02-29/" xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/">'
+        b'<Iptc4xmpExt:digitalSourceType>http://cv.iptc.org/newscodes/digitalsourcetype/trainedAlgorithmicMedia</Iptc4xmpExt:digitalSourceType>'
+        b'<photoshop:Credit>Google</photoshop:Credit>'
+        b'</rdf:Description></rdf:RDF></x:xmpmeta>'
+    )
+    gemini_png = ai_samples.png(itxt={"XML:com.adobe.xmp": xmp_gemini.decode("utf-8")})
+    (tmp_path / "gemini.png").write_bytes(gemini_png)
+    found_gemini = ai_metadata.read_generation(str(tmp_path / "gemini.png"), "png")
+    assert found_gemini is not None
+    assert found_gemini.tool == "Google Gemini"
+    assert found_gemini.has_prompt is False
+    assert found_gemini.workflow is False
+
+    # 2. ChatGPT / DALL-E with prompt
+    dalle_png = ai_samples.png({"Software": "DALL-E 3", "Description": "A cute robot in a cybernetic garden"})
+    (tmp_path / "dalle.png").write_bytes(dalle_png)
+    found_dalle = ai_metadata.read_generation(str(tmp_path / "dalle.png"), "png")
+    assert found_dalle is not None
+    assert found_dalle.tool == "ChatGPT (DALL-E)"
+    assert found_dalle.prompt == "A cute robot in a cybernetic garden"
+
+    # 3. Magnific AI (Freepik)
+    magnific_png = ai_samples.png({"Software": "Magnific AI"})
+    (tmp_path / "magnific.png").write_bytes(magnific_png)
+    found_magnific = ai_metadata.read_generation(str(tmp_path / "magnific.png"), "png")
+    assert found_magnific is not None
+    assert found_magnific.tool == "Magnific AI (Freepik)"
+
+    # 4. Higgsfield AI
+    higgs_png = ai_samples.png({"Software": "Higgsfield AI"})
+    (tmp_path / "higgsfield.png").write_bytes(higgs_png)
+    found_higgs = ai_metadata.read_generation(str(tmp_path / "higgsfield.png"), "png")
+    assert found_higgs is not None
+    assert found_higgs.tool == "Higgsfield AI"
+
+
+def test_ai_prompt_dock_width_and_workflow_save(app, tmp_path, monkeypatch):
+    from directory_commander_tux_tux.ui.ai_prompt_dock import AIPromptDock
+    from directory_commander_tux_tux.core.ai_metadata import Generation
+    from directory_commander_tux_tux.ui.image_viewer import ImageViewer
+
+    dock = AIPromptDock()
+    dock.show()
+    assert dock.minimumWidth() >= 380
+    assert dock.sizeHint().width() >= 420
+
+    source_path = str(tmp_path / "original_art.png")
+    # File with AI tool but no prompt/workflow
+    dock.set_generation(Generation(tool="Google Gemini"), source_path)
+    assert not dock.header_widget.isHidden()
+    assert not dock.no_prompt_label.isHidden()
+    assert dock.prompt_section.isHidden()
+    assert dock.workflow_section.isHidden()
+
+    # File with workflow: test save_workflow suggested filename
+    captured_default_name = []
+    def mock_save_file_name(parent, title, default_name, filter_str):
+        captured_default_name.append(default_name)
+        out_path = tmp_path / default_name
+        return str(out_path), "JSON"
+
+    monkeypatch.setattr("directory_commander_tux_tux.ui.ai_prompt_dock.QFileDialog.getSaveFileName", mock_save_file_name)
+    dock.set_generation(Generation(tool="ComfyUI", workflow=True, workflow_data='{"test": 1}'), source_path)
+    dock.save_workflow()
+    assert captured_default_name == ["workflow_original_art.json"]
+    assert (tmp_path / "workflow_original_art.json").exists()
+    assert (tmp_path / "workflow_original_art.json").read_text(encoding="utf-8") == '{"test": 1}'
+    dock.close()
+
+    # Test viewer shows IA badge in status bar
+    img_path = tmp_path / "gemini_badge.png"
+    img_path.write_bytes(ai_samples.png({"Software": "Magnific AI"}))
+    viewer = ImageViewer([str(img_path)], 0)
+    viewer.show()
+    assert wait_until(lambda: "ai" in viewer.status_labels and "IA" in viewer.status_labels["ai"].text())
     viewer.close()
 
 

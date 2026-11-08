@@ -32,7 +32,8 @@ VIDEO_EXTENSIONS = {"mp4", "m4v", "mov", "mkv", "webm"}
 IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "webp", "avif", "jxl", "heic"}
 _MP4_EXTENSIONS = {"mp4", "m4v", "mov"}
 _TEXT_KEYS = {"prompt", "workflow", "parameters", "comment", "description", "software", "invokeai_metadata", "invokeai_graph",
-              "invokeai_workflow", "sd-metadata", "dream", "fooocus_scheme", "usercomment", "xml:com.adobe.xmp", "exif"}
+              "invokeai_workflow", "sd-metadata", "dream", "fooocus_scheme", "usercomment", "xml:com.adobe.xmp", "exif",
+              "source", "credit", "creatortool", "creator", "digitalsourcetype", "title"}
 _PREFIXED_JSON = re.compile(rb"(?i)(prompt|workflow)\s*:\s*(?=\{)")
 _VIDEO_JSON = re.compile(rb'\{\s*"(?:prompt|workflow)"\s*:')
 _SETTING = re.compile(r'\s*([^:,]+?):\s*("(?:\\.|[^\\"])*"|[^,]*)(?:,|$)')
@@ -98,6 +99,8 @@ def _png_texts(handle) -> dict[str, str]:
             except (zlib.error, ValueError):
                 continue
             texts[key] = value
+            if key == "xml:com.adobe.xmp":
+                texts.update(_xmp_texts(value.encode("utf-8", "replace")))
         else:
             handle.seek(length + 4, 1)
     return texts
@@ -128,7 +131,8 @@ def _exif_texts(data: bytes) -> dict[str, str]:
         return {}
     order = "<" if data[:2] == b"II" else ">"
     texts: dict[str, str] = {}
-    names = {0x010E: "description", 0x010F: "make", 0x0110: "model", 0x0131: "software", 0x9286: "usercomment", 0x9C9C: "xpcomment"}
+    names = {0x010E: "description", 0x010F: "make", 0x0110: "model", 0x0131: "software", 0x013B: "artist",
+             0x8298: "copyright", 0x9286: "usercomment", 0x9C9C: "xpcomment"}
 
     def walk(offset: int, depth: int) -> None:
         if depth > 2 or not 8 <= offset <= len(data) - 2:
@@ -211,12 +215,29 @@ def _webp_texts(handle) -> dict[str, str]:
 
 def _xmp_texts(data: bytes) -> dict[str, str]:
     text = data.decode("utf-8", "replace")
-    texts = {}
-    for key, pattern in (("description", r"<dc:description>.*?<rdf:li[^>]*>(.*?)</rdf:li>"), ("usercomment", r"<exif:UserComment>.*?<rdf:li[^>]*>(.*?)</rdf:li>"),
-                         ("parameters", r'sd-metadata:parameters="([^"]*)"')):
-        found = re.search(pattern, text, re.DOTALL)
-        if found:
-            texts[key] = _unescape_xml(found.group(1))
+    texts: dict[str, str] = {"_xmp_raw": text}
+    patterns = (
+        ("description", r"<dc:description>.*?<rdf:li[^>]*>(.*?)</rdf:li>"),
+        ("usercomment", r"<exif:UserComment>.*?<rdf:li[^>]*>(.*?)</rdf:li>"),
+        ("parameters", r'sd-metadata:parameters="([^"]*)"'),
+        ("creatortool", r"<xmp:CreatorTool>(.*?)</xmp:CreatorTool>"),
+        ("creatortool", r'xmp:CreatorTool="([^"]*)"'),
+        ("software", r"<tiff:Software>(.*?)</tiff:Software>"),
+        ("software", r'tiff:Software="([^"]*)"'),
+        ("credit", r"<photoshop:Credit>(.*?)</photoshop:Credit>"),
+        ("credit", r'photoshop:Credit="([^"]*)"'),
+        ("source", r"<photoshop:Source>(.*?)</photoshop:Source>"),
+        ("source", r'photoshop:Source="([^"]*)"'),
+        ("digitalsourcetype", r"<Iptc4xmpExt:digitalSourceType>.*?<rdf:li[^>]*>(.*?)</rdf:li>"),
+        ("digitalsourcetype", r"<Iptc4xmpExt:digitalSourceType>(.*?)</Iptc4xmpExt:digitalSourceType>"),
+        ("digitalsourcetype", r'digitalSourceType="([^"]*)"'),
+        ("creator", r"<dc:creator>.*?<rdf:li[^>]*>(.*?)</rdf:li>"),
+    )
+    for key, pattern in patterns:
+        if key not in texts:
+            found = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+            if found:
+                texts[key] = _unescape_xml(found.group(1)).strip()
     return texts
 
 
@@ -264,17 +285,29 @@ def _read_texts(path: str, extension: str) -> tuple[dict[str, str], bytes]:
         size = handle.tell()
         handle.seek(0)
         if extension in VIDEO_EXTENSIONS:
+            texts: dict[str, str] = {}
             if extension in _MP4_EXTENSIONS:
                 found = _mp4_metadata(handle, size)
                 if found:
-                    return {}, found
+                    xmp_idx = found.find(b"<x:xmpmeta")
+                    if xmp_idx != -1:
+                        end_idx = found.find(b"</x:xmpmeta>", xmp_idx)
+                        if end_idx != -1:
+                            texts.update(_xmp_texts(found[xmp_idx:end_idx + 12]))
+                    return texts, found
             handle.seek(0)
             head = handle.read(VIDEO_EDGE_BYTES)
             tail = b""
             if size > VIDEO_EDGE_BYTES:
                 handle.seek(max(VIDEO_EDGE_BYTES, size - VIDEO_EDGE_BYTES))
                 tail = handle.read()
-            return {}, head + b"\n" + tail
+            raw_vid = head + b"\n" + tail
+            xmp_idx = raw_vid.find(b"<x:xmpmeta")
+            if xmp_idx != -1:
+                end_idx = raw_vid.find(b"</x:xmpmeta>", xmp_idx)
+                if end_idx != -1:
+                    texts.update(_xmp_texts(raw_vid[xmp_idx:end_idx + 12]))
+            return texts, raw_vid
         start = handle.read(12)
         handle.seek(0)
         if start.startswith(PNG_SIGNATURE):
@@ -551,6 +584,120 @@ def _in_bytes(data: bytes) -> Generation | None:
     return None
 
 
+def _detect_ai_service(texts: dict[str, str], raw_data: bytes = b"") -> Generation | None:
+    """Detecta imágenes y vídeos creados con servicios de IA como Google Gemini, ChatGPT/DALL-E, Magnific (Freepik), Higgsfield, etc."""
+    combined = [v for k, v in texts.items() if isinstance(v, str) and not k.startswith("_")]
+    if "_xmp_raw" in texts:
+        combined.append(texts["_xmp_raw"])
+    if raw_data:
+        combined.append(raw_data[:512 * 1024].decode("utf-8", "replace"))
+    corpus = " ".join(combined).lower()
+    if not corpus.strip():
+        return None
+
+    tool = ""
+    is_google = any(k in corpus for k in ("google", "deepmind", "alphabet"))
+    has_synthid = "synthid" in corpus
+    has_algo = "trainedalgorithmicmedia" in corpus or "compositewithtrainedalgorithmicmedia" in corpus
+
+    # 1. Google Gemini / Imagen / Google AI
+    if "gemini" in corpus:
+        tool = "Google Gemini"
+    elif "imagen" in corpus and (is_google or has_algo or has_synthid):
+        tool = "Google Imagen"
+    elif "veo" in corpus and (is_google or has_algo):
+        tool = "Google Veo"
+    elif has_synthid or (is_google and has_algo):
+        tool = "Google Gemini"
+    elif is_google and ("ai" in corpus or "generat" in corpus):
+        tool = "Google AI"
+
+    # 2. ChatGPT / OpenAI / DALL-E / Sora
+    elif any(k in corpus for k in ("dall-e", "dall·e", "dalle")):
+        tool = "ChatGPT (DALL-E)"
+    elif "chatgpt" in corpus:
+        tool = "ChatGPT"
+    elif "sora" in corpus and ("openai" in corpus or has_algo or "video" in corpus):
+        tool = "OpenAI Sora"
+    elif "openai" in corpus and (has_algo or "software" in corpus or "creatortool" in corpus):
+        tool = "OpenAI"
+
+    # 3. Magnific AI (Freepik)
+    elif "magnific" in corpus:
+        tool = "Magnific AI (Freepik)"
+    elif "freepik" in corpus and any(k in corpus for k in ("ai", "pikaso", "generator", "trainedalgorithmicmedia")):
+        tool = "Freepik AI"
+
+    # 4. Higgsfield AI
+    elif "higgsfield" in corpus:
+        tool = "Higgsfield AI"
+
+    # 5. Midjourney
+    elif "midjourney" in corpus:
+        tool = "Midjourney"
+
+    # 6. Adobe Firefly
+    elif "firefly" in corpus or ("adobe" in corpus and has_algo):
+        tool = "Adobe Firefly"
+
+    # 7. Runway
+    elif any(k in corpus for k in ("runwayml", "runway", "gen-2", "gen-3", "gen-4")):
+        tool = "Runway"
+
+    # 8. Luma AI
+    elif "luma" in corpus or "dream machine" in corpus:
+        tool = "Luma AI"
+
+    # 9. Kling AI
+    elif any(k in corpus for k in ("kling", "klingai", "kuaishou")):
+        tool = "Kling AI"
+
+    # 10. MiniMax / Hailuo
+    elif "hailuo" in corpus or ("minimax" in corpus and any(k in corpus for k in ("ai", "video"))):
+        tool = "Hailuo AI (MiniMax)"
+
+    # 11. Pika
+    elif "pika labs" in corpus or "pika.art" in corpus:
+        tool = "Pika"
+
+    # 12. Leonardo.Ai
+    elif any(k in corpus for k in ("leonardo.ai", "leonardo ai", "leonardoai")):
+        tool = "Leonardo.Ai"
+
+    # 13. General IPTC / C2PA AI tag
+    elif has_algo:
+        tool = tr("IA generativa")
+
+    if not tool:
+        return None
+
+    desc = texts.get("description", "").strip()
+    ucomment = texts.get("usercomment", "").strip()
+    prompt = ""
+    if desc and not desc.startswith("<") and len(desc) > 3 and desc.lower() not in (tool.lower(), "google", "openai"):
+        prompt = _clip(desc)
+    elif ucomment and not ucomment.startswith("<") and len(ucomment) > 3 and ucomment.lower() not in (tool.lower(), "trainedalgorithmicmedia"):
+        prompt = _clip(ucomment)
+
+    settings = []
+    if texts.get("model"):
+        settings.append((tr("Modelo"), texts["model"]))
+    if texts.get("software"):
+        settings.append((tr("Software"), texts["software"]))
+    if texts.get("credit"):
+        settings.append((tr("Crédito"), texts["credit"]))
+
+    return Generation(
+        tool=tool,
+        prompt=prompt,
+        negative="",
+        workflow=False,
+        nodes=0,
+        settings=tuple(settings),
+        workflow_data=""
+    )
+
+
 def read_generation(path: str, extension: str) -> Generation | None:
     """Lo que dejó el programa con que se generó, o None si no hay nada o no se puede leer."""
     try:
@@ -573,10 +720,18 @@ def read_generation(path: str, extension: str) -> Generation | None:
             return Generation("Midjourney", _clip(texts["description"].split("Job ID:", 1)[0].strip()))
         if "parameters" in texts:
             return Generation(tr("Automatic1111 o compatible"), _clip(texts["parameters"]))
+        ai_serv = _detect_ai_service(texts, data)
+        if ai_serv is not None:
+            return ai_serv
         return None
-    return _in_bytes(data) if data else None
+    res = _in_bytes(data) if data else None
+    if res is not None:
+        return res
+    if data:
+        return _detect_ai_service({}, data)
+    return None
 
 
 def has_generation_data(path: str, extension: str) -> bool:
     found = read_generation(path, extension)
-    return found is not None and (found.has_prompt or found.workflow)
+    return found is not None and (found.has_prompt or found.workflow or bool(found.tool))

@@ -1,7 +1,7 @@
 """Panel lateral con el prompt y metadatos de IA para imágenes y vídeos en el visualizador interno."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtWidgets import (QApplication, QDockWidget, QFileDialog, QFormLayout, QFrame, QGroupBox, QHBoxLayout,
                                QLabel, QPlainTextEdit, QPushButton, QScrollArea, QVBoxLayout, QWidget)
 
@@ -17,8 +17,10 @@ class AIPromptDock(QDockWidget):
         super().__init__(tr("Info de IA"), parent)
         self.setObjectName("aiPromptDock")
         self.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
+        self.setMinimumWidth(380)
 
         self._generation: Generation | None = None
+        self._source_path = ""
         self._current_prompt = ""
         self._current_negative = ""
         self._current_workflow = ""
@@ -45,6 +47,12 @@ class AIPromptDock(QDockWidget):
         header_layout.addWidget(self.tool_label)
         header_layout.addWidget(self.model_label)
         self.layout.addWidget(self.header_widget)
+
+        # Aviso cuando no hay prompt ni workflow pero sí herramienta/IA
+        self.no_prompt_label = QLabel(tr("Este archivo fue identificado como generado por IA, pero no incluye el prompt ni el flujo de trabajo en sus metadatos."))
+        self.no_prompt_label.setWordWrap(True)
+        self.no_prompt_label.setStyleSheet("color: #888888; font-style: italic; padding: 4px 0;")
+        self.layout.addWidget(self.no_prompt_label)
 
         # Sección Prompt
         self.prompt_section = QWidget()
@@ -140,15 +148,20 @@ class AIPromptDock(QDockWidget):
         self.scroll.setWidget(container)
         self.setWidget(self.scroll)
 
-    def set_generation(self, gen: Generation | None) -> None:
+    def sizeHint(self) -> QSize:
+        return QSize(420, 600)
+
+    def set_generation(self, gen: Generation | None, source_path: str = "") -> None:
         self._generation = gen
-        has_ai = gen is not None and (gen.has_prompt or gen.workflow)
+        self._source_path = source_path
+        has_ai = gen is not None and (gen.has_prompt or gen.workflow or bool(gen.tool))
         self.empty_label.setVisible(not has_ai)
         self.header_widget.setVisible(has_ai)
         self.prompt_section.setVisible(has_ai and bool(gen.prompt))
         self.negative_section.setVisible(has_ai and bool(gen.negative))
         self.workflow_section.setVisible(has_ai and bool(gen.workflow))
         self.settings_group.setVisible(has_ai and bool(gen.settings))
+        self.no_prompt_label.setVisible(has_ai and not gen.has_prompt and not gen.workflow)
 
         if not has_ai or gen is None:
             self._current_prompt = ""
@@ -197,24 +210,42 @@ class AIPromptDock(QDockWidget):
         if self._current_prompt:
             QApplication.clipboard().setText(self._current_prompt)
             self.copy_prompt_btn.setText(tr("¡Copiado!"))
-            QTimer.singleShot(1500, lambda: self.copy_prompt_btn.setText(tr("Copiar prompt")))
+            def _reset():
+                try:
+                    self.copy_prompt_btn.setText(tr("Copiar prompt"))
+                except RuntimeError:
+                    pass
+            QTimer.singleShot(1500, _reset)
 
     def copy_negative(self) -> None:
         if self._current_negative:
             QApplication.clipboard().setText(self._current_negative)
             self.copy_negative_btn.setText(tr("¡Copiado!"))
-            QTimer.singleShot(1500, lambda: self.copy_negative_btn.setText(tr("Copiar prompt negativo")))
+            def _reset():
+                try:
+                    self.copy_negative_btn.setText(tr("Copiar prompt negativo"))
+                except RuntimeError:
+                    pass
+            QTimer.singleShot(1500, _reset)
 
     def copy_workflow(self) -> None:
         if self._current_workflow:
             QApplication.clipboard().setText(self._current_workflow)
             self.copy_workflow_btn.setText(tr("¡Copiado!"))
-            QTimer.singleShot(1500, lambda: self.copy_workflow_btn.setText(tr("Copiar workflow")))
+            def _reset():
+                try:
+                    self.copy_workflow_btn.setText(tr("Copiar workflow"))
+                except RuntimeError:
+                    pass
+            QTimer.singleShot(1500, _reset)
 
     def save_workflow(self) -> None:
         if not self._current_workflow:
             return
-        path, _filter = QFileDialog.getSaveFileName(self, tr("Guardar workflow como archivo JSON"), "workflow.json",
+        from pathlib import Path
+        stem = Path(self._source_path).stem if self._source_path else "workflow"
+        default_name = f"workflow_{stem}.json"
+        path, _filter = QFileDialog.getSaveFileName(self, tr("Guardar workflow como archivo JSON"), default_name,
                                                     tr("Archivos JSON (*.json)"))
         if path:
             try:

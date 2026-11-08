@@ -127,7 +127,7 @@ def card_details(entry: Entry, image: tuple[int, int, int] | None, media: MediaI
 
 def generation_rows(generated) -> list[tuple[str, str]]:
     """Con qué programa de IA se generó y con qué modelo, si lo dejó escrito."""
-    if generated is None or not (generated.has_prompt or generated.workflow):
+    if generated is None or not (generated.has_prompt or generated.workflow or bool(generated.tool)):
         return []
     rows = [(tr("Generada con IA"), generated.tool or tr("No se sabe con qué programa"))]
     return rows + ([(tr("Modelo"), generated.model)] if generated.model else [])

@@ -373,7 +373,7 @@ class MetadataPanel(QWidget):
         if extension not in ai_metadata.IMAGE_EXTENSIONS | ai_metadata.VIDEO_EXTENSIONS:
             return []
         found = ai_metadata.read_generation(path, extension)
-        if found is None or not (found.has_prompt or found.workflow):
+        if found is None or not (found.has_prompt or found.workflow or bool(found.tool)):
             return []
         rows = [(tr("Programa"), found.tool or tr("No se sabe")), (tr("Prompt"), found.prompt), (tr("Prompt negativo"), found.negative), *found.settings]
         if found.workflow:

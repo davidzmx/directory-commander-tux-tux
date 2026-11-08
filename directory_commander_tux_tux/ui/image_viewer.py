@@ -133,6 +133,7 @@ class ImageViewer(QMainWindow):
 
         self.prompt_dock = AIPromptDock(self)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.prompt_dock)
+        self.resizeDocks([self.prompt_dock], [420], Qt.Orientation.Horizontal)
         self.prompt_dock.hide()
         self.prompt_dock.visibilityChanged.connect(
             lambda v: self.actions_by_key["ai_prompt"].setChecked(v) if "ai_prompt" in self.actions_by_key else None
@@ -364,7 +365,8 @@ class ImageViewer(QMainWindow):
         gen = ai_metadata.read_generation(path, ext)
         has_prompt = gen is not None and bool(gen.prompt)
         has_workflow = gen is not None and bool(gen.workflow)
-        has_ai = gen is not None and (gen.has_prompt or gen.workflow)
+        has_tool = gen is not None and bool(gen.tool)
+        has_ai = gen is not None and (has_prompt or has_workflow or has_tool)
         self.actions_by_key["ai_prompt"].setVisible(has_ai)
         self.actions_by_key["ai_prompt"].setEnabled(has_ai)
         if "ai" in labels:
@@ -374,13 +376,15 @@ class ImageViewer(QMainWindow):
                     badges.append('<span style="background-color: #8e44ad; color: #ffffff; font-weight: bold; border-radius: 3px; padding: 1px 4px; font-size: 11px;">P</span>')
                 if has_workflow:
                     badges.append('<span style="background-color: #16a085; color: #ffffff; font-weight: bold; border-radius: 3px; padding: 1px 4px; font-size: 11px;">W</span>')
+                if not badges and has_tool:
+                    badges.append(f'<span style="background-color: #2980b9; color: #ffffff; font-weight: bold; border-radius: 3px; padding: 1px 4px; font-size: 11px;">{tr("IA")}</span>')
                 labels["ai"].setText("&nbsp;".join(badges))
                 tip = gen.prompt if gen.prompt else (gen.tool or tr("IA"))
                 tip += f"\n{tr('Haz clic para ver/copiar la información de IA')}"
                 labels["ai"].setToolTip(tip)
             else:
                 labels["ai"].setText("")
-        self.prompt_dock.set_generation(gen)
+        self.prompt_dock.set_generation(gen, path)
         self._apply_zoom()
 
     def _failed(self, generation: int, path: str, reason: str) -> None:
@@ -564,6 +568,8 @@ class ImageViewer(QMainWindow):
     def toggle_prompt_panel(self) -> None:
         visible = not self.prompt_dock.isVisible()
         self.prompt_dock.setVisible(visible)
+        if visible:
+            self.resizeDocks([self.prompt_dock], [420], Qt.Orientation.Horizontal)
         self.actions_by_key["ai_prompt"].setChecked(visible)
 
     def _show_context_menu(self, global_pos: QPoint) -> None:

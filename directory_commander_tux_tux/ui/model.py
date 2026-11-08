@@ -55,6 +55,9 @@ def generation_text(marks) -> str:
     if not marks:
         return ""
     has_prompt, workflow, tool, model = (tuple(marks) + ("",))[:4]
+    if not has_prompt and not workflow:
+        text = tr("Generada con IA ({tool})", tool=tool) if tool else tr("Generada con IA")
+        return text + ("\n" + tr("Modelo: {model}", model=model) if model else "")
     carries = tr("prompt y workflow") if has_prompt and workflow else tr("prompt") if has_prompt else tr("workflow")
     text = tr("Generada con IA ({tool}): lleva {carries}", tool=tool, carries=carries) if tool else tr("Generada con IA: lleva {carries}", carries=carries)
     return text + ("\n" + tr("Modelo: {model}", model=model) if model else "")
@@ -808,11 +811,13 @@ class FileModel(QAbstractTableModel):
         if not marks:
             return None
         has_prompt, workflow, tool = marks[:3]
-        has_prompt, workflow = has_prompt and self.generation_kinds != "workflow", workflow and self.generation_kinds != "prompt"
-        return (has_prompt, workflow, tool) if has_prompt or workflow else None
+        has_prompt = has_prompt and self.generation_kinds != "workflow"
+        workflow = workflow and self.generation_kinds != "prompt"
+        has_ai_badge = bool(tool) and self.generation_kinds == "both" and not marks[0] and not marks[1]
+        return (has_prompt, workflow, tool) if (has_prompt or workflow or has_ai_badge) else None
 
     def has_ai_tags(self, entry: Entry) -> bool:
-        """Indica si una entrada tiene marcas de IA (prompt y/o workflow). Las carpetas siempre pasan."""
+        """Indica si una entrada tiene marcas de IA (prompt, workflow o generada con IA). Las carpetas siempre pasan."""
         if entry.is_dir:
             return True
         if entry.in_archive or remote.is_remote(entry.path):
@@ -822,7 +827,7 @@ class FileModel(QAbstractTableModel):
         key = (entry.path, entry.mtime)
         if key in self._generated:
             marks = self._generated[key]
-            return bool(marks and (marks[0] or marks[1]))
+            return bool(marks and (marks[0] or marks[1] or (len(marks) > 2 and marks[2])))
         self._generation_mark(entry)
         return False
 
@@ -847,7 +852,7 @@ class FileModel(QAbstractTableModel):
 
         def found(generation) -> None:
             self._generated_pending.discard(key)
-            marks = generation.marks if generation is not None and (generation.has_prompt or generation.workflow) else None
+            marks = generation.marks if generation is not None and (generation.has_prompt or generation.workflow or bool(generation.tool)) else None
             self._generated[key] = marks
             if "ai" in self._content_types:
                 self._rebuild()

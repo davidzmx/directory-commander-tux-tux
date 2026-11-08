@@ -70,6 +70,7 @@ def keep_at(view, index: QModelIndex, place: QPoint, axes=("x", "y")) -> None:
 MAX_FOLDER_VIEWS = 2000
 PROMPT_MARK_COLOR = "#8e44ad"
 WORKFLOW_MARK_COLOR = "#16a085"
+AI_MARK_COLOR = "#2980b9"
 LONG_MARKS_FROM = 120  # en miniaturas desde este tamaño, «Prompt» y «Workflow»; en las más pequeñas y en la lista, «P» y «W»
 DRIVE_COLUMN_WIDTHS = {"filesystem": 130, "type": 190, "used": 150, "free": 92}  # en el orden en que se ocultan
 SIZE_COLUMN_WIDTH = 72
@@ -167,12 +168,17 @@ def reserved_badges(index) -> list[tuple[str, str]]:
 
 
 def generation_badges(marks, long: bool = False) -> list[tuple[str, str]]:
-    """Las marcas de una imagen o un vídeo generado con IA: una si lleva el prompt y otra si lleva el flujo (workflow)."""
+    """Las marcas de una imagen o un vídeo generado con IA: una si lleva el prompt y otra si lleva el flujo (workflow), o IA si no tiene ninguno."""
     if not marks:
         return []
-    has_prompt, workflow, _tool = marks
+    has_prompt, workflow = marks[0], marks[1]
+    tool = marks[2] if len(marks) > 2 else ""
     badges = [(tr("Prompt") if long else "P", PROMPT_MARK_COLOR)] if has_prompt else []
-    return badges + ([(tr("Workflow") if long else "W", WORKFLOW_MARK_COLOR)] if workflow else [])
+    if workflow:
+        badges.append((tr("Workflow") if long else "W", WORKFLOW_MARK_COLOR))
+    if not badges and tool:
+        badges.append((tr("IA") if long else "IA", AI_MARK_COLOR))
+    return badges
 
 
 def _badge_font(base: QFont, pixels: int) -> QFont:
