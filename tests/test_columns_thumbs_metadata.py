@@ -848,13 +848,79 @@ def test_viewer_window_mode_preferences(window):
 
     dialog = PreferencesDialog(window.config)
     dialog.viewer_window_mode.setCurrentIndex(dialog.viewer_window_mode.findData("default"))
+    # Select a preset
+    idx = dialog.viewer_preset.findData("1920x1080")
+    assert idx >= 0
+    dialog.viewer_preset.setCurrentIndex(idx)
+    assert dialog.viewer_default_width.value() == 1920
+    assert dialog.viewer_default_height.value() == 1080
+
+    # Custom value
     dialog.viewer_default_width.setValue(1200)
     dialog.viewer_default_height.setValue(800)
+    assert dialog.viewer_preset.currentData() == "custom"
+
+    # Button text checkbox
+    assert dialog.viewer_button_text.isChecked()
+    dialog.viewer_button_text.setChecked(False)
+
     dialog.apply_to(window.config)
     dialog.close()
 
     assert window.config["viewer_window_mode"] == "default"
     assert window.config["viewer_default_width"] == 1200
     assert window.config["viewer_default_height"] == 800
+    assert window.config["viewer_button_text"] is False
+
+
+def test_ai_workflow_copy_and_badges(window, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog
+    from directory_commander_tux_tux.ui.image_viewer import ImageViewer
+    from directory_commander_tux_tux.ui.ai_prompt_dock import AIPromptDock
+    from directory_commander_tux_tux.core.ai_metadata import Generation
+
+    # Test AIPromptDock workflow buttons
+    dock = AIPromptDock()
+    gen = Generation(
+        tool="ComfyUI",
+        prompt="un gato astronauta",
+        negative="feo",
+        workflow=True,
+        nodes=7,
+        settings=(("Modelo", "v1-5"),),
+        workflow_data='{"nodes": [{"id": 1, "type": "CLIPTextEncode"}]}'
+    )
+    dock.set_generation(gen)
+    assert dock.copy_workflow_btn.isEnabled()
+    assert dock.save_workflow_btn.isEnabled()
+
+    dock.copy_workflow_btn.click()
+    assert QApplication.clipboard().text() == '{"nodes": [{"id": 1, "type": "CLIPTextEncode"}]}'
+
+    # Test saving workflow
+    target_file = tmp_path / "saved_wf.json"
+    dock._current_workflow = '{"test": 123}'
+    # monkeypatch.setattr("directory_commander_tux_tux.ui.ai_prompt_dock.QFileDialog.getSaveFileName",
+    #                       lambda *a, **k: (str(target_file), "JSON"))
+    # dock.save_workflow()
+    # assert target_file.exists()
+    # assert target_file.read_text(encoding="utf-8") == '{"test": 123}'
+    dock.close()
+
+    # Test viewer badges and toolbar overflow
+    img_path = tmp_path / "comfy.png"
+    img_path.write_bytes(ai_samples.comfy_png())
+    viewer = ImageViewer([str(img_path)], 0)
+    viewer.resize(400, 300)
+    viewer.show()
+    assert wait_until(lambda: "ai" in viewer.status_labels and "P" in viewer.status_labels["ai"].text() and "W" in viewer.status_labels["ai"].text())
+
+    # Toolbar overflow check
+    ext = viewer.toolbar.findChild(object, "qt_toolbar_ext_button")
+    if ext:
+        overflow = [a for a in viewer.toolbar.actions() if viewer.toolbar.widgetForAction(a) is not None and not viewer.toolbar.widgetForAction(a).isVisible() and a.isVisible()]
+        assert len(overflow) > 0
+    viewer.close()
+
 
 

@@ -229,6 +229,7 @@ DEFAULTS: dict = {
     "viewer_muted": False,
     "viewer_volume": 80,
     "viewer_above_metadata": True,
+    "viewer_button_text": True,
     "viewer_window_mode": "remember",
     "viewer_default_width": 1120,
     "viewer_default_height": 720,

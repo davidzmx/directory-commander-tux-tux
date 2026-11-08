@@ -48,6 +48,7 @@ class Generation:
     workflow: bool = False  # lleva el flujo con que se generó, para volver a abrirlo en el programa
     nodes: int = 0  # los nodos de ese flujo, si se sabe
     settings: tuple[tuple[str, str], ...] = ()  # (dato, valor): modelo, pasos, semilla…
+    workflow_data: str = ""  # el texto o JSON del flujo de trabajo
 
     @property
     def has_prompt(self) -> bool:
@@ -420,8 +421,19 @@ def _comfy(prompt_graph, workflow) -> Generation:
                 if "TextEncode" in str(node.get("type", "") if isinstance(node, dict) else "") and isinstance(values, list) and values and isinstance(values[0], str):
                     positive = values[0]
                     break
+    wf_raw = ""
+    if isinstance(workflow, dict) and workflow:
+        try:
+            wf_raw = json.dumps(workflow, indent=2, ensure_ascii=False)
+        except Exception:
+            wf_raw = ""
+    elif isinstance(prompt_graph, dict) and prompt_graph:
+        try:
+            wf_raw = json.dumps(prompt_graph, indent=2, ensure_ascii=False)
+        except Exception:
+            wf_raw = ""
     return Generation("ComfyUI", _clip(positive), _clip(negative), bool(nodes) or isinstance(workflow, dict), count or len(nodes),
-                      tuple((tr(label), value) for label, value in settings.items()))
+                      tuple((tr(label), value) for label, value in settings.items()), wf_raw)
 
 
 def _a1111(text: str) -> Generation | None:
@@ -460,25 +472,26 @@ def _from_json_parameters(data: dict) -> Generation | None:
 
 
 def _invoke(texts: dict[str, str]) -> Generation | None:
-    workflow = "invokeai_workflow" in texts or "invokeai_graph" in texts
+    wf_raw = texts.get("invokeai_workflow") or texts.get("invokeai_graph") or ""
+    workflow = bool(wf_raw)
     data = _json(texts.get("invokeai_metadata"))
     if isinstance(data, dict):
         model = data.get("model")
         settings = [(tr("Modelo"), _plain(model.get("name") if isinstance(model, dict) else model)), (tr("Semilla"), _plain(data.get("seed"))),
                     (tr("Pasos"), _plain(data.get("steps"))), ("CFG", _plain(data.get("cfg_scale"))), (tr("Planificador"), _plain(data.get("scheduler")))]
         return Generation("InvokeAI", _clip(_plain(data.get("positive_prompt"))), _clip(_plain(data.get("negative_prompt"))), workflow, 0,
-                          tuple((label, value) for label, value in settings if value))
+                          tuple((label, value) for label, value in settings if value), wf_raw)
     old = _json(texts.get("sd-metadata"))
     if isinstance(old, dict) and isinstance(old.get("image"), dict):
         prompt = old["image"].get("prompt")
         if isinstance(prompt, list):
             prompt = " ".join(_plain(part.get("prompt")) for part in prompt if isinstance(part, dict))
-        return Generation("InvokeAI", _clip(_plain(prompt)), "", workflow)
+        return Generation("InvokeAI", _clip(_plain(prompt)), "", workflow, 0, (), wf_raw)
     if "dream" in texts:
         found = re.match(r'\s*"(.*?)"', texts["dream"], re.DOTALL)
-        return Generation("InvokeAI", _clip(found.group(1) if found else texts["dream"]), "", workflow)
+        return Generation("InvokeAI", _clip(found.group(1) if found else texts["dream"]), "", workflow, 0, (), wf_raw)
     if workflow:
-        return Generation("InvokeAI", "", "", True)
+        return Generation("InvokeAI", "", "", True, 0, (), wf_raw)
     return None
 
 

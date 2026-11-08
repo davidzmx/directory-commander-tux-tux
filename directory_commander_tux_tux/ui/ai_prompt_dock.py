@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import (QApplication, QDockWidget, QFormLayout, QFrame, QGroupBox, QHBoxLayout,
+from PySide6.QtWidgets import (QApplication, QDockWidget, QFileDialog, QFormLayout, QFrame, QGroupBox, QHBoxLayout,
                                QLabel, QPlainTextEdit, QPushButton, QScrollArea, QVBoxLayout, QWidget)
 
 from ..core.ai_metadata import Generation
@@ -14,13 +14,14 @@ class AIPromptDock(QDockWidget):
     """Panel lateral en el visor de imágenes/vídeos para consultar y copiar el prompt y parámetros de IA."""
 
     def __init__(self, parent=None) -> None:
-        super().__init__(tr("Prompt de IA"), parent)
+        super().__init__(tr("Info de IA"), parent)
         self.setObjectName("aiPromptDock")
         self.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
 
         self._generation: Generation | None = None
         self._current_prompt = ""
         self._current_negative = ""
+        self._current_workflow = ""
 
         # Contenedor con scroll
         self.scroll = QScrollArea()
@@ -96,9 +97,31 @@ class AIPromptDock(QDockWidget):
         self.layout.addWidget(self.negative_section)
 
         # Sección Workflow
+        self.workflow_section = QWidget()
+        wf_layout = QVBoxLayout(self.workflow_section)
+        wf_layout.setContentsMargins(0, 0, 0, 0)
+        wf_layout.setSpacing(6)
+
         self.workflow_label = QLabel()
         self.workflow_label.setStyleSheet("font-size: 12px; color: #4dabf7;")
-        self.layout.addWidget(self.workflow_label)
+        wf_layout.addWidget(self.workflow_label)
+
+        wf_btns_layout = QHBoxLayout()
+        wf_btns_layout.setContentsMargins(0, 0, 0, 0)
+        wf_btns_layout.setSpacing(6)
+
+        self.copy_workflow_btn = QPushButton(themed("copy"), tr("Copiar workflow"))
+        self.copy_workflow_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.copy_workflow_btn.clicked.connect(self.copy_workflow)
+        wf_btns_layout.addWidget(self.copy_workflow_btn)
+
+        self.save_workflow_btn = QPushButton(themed("save"), tr("Guardar workflow…"))
+        self.save_workflow_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.save_workflow_btn.clicked.connect(self.save_workflow)
+        wf_btns_layout.addWidget(self.save_workflow_btn)
+
+        wf_layout.addLayout(wf_btns_layout)
+        self.layout.addWidget(self.workflow_section)
 
         # Sección Parámetros/Ajustes
         self.settings_group = QGroupBox(tr("Parámetros"))
@@ -124,12 +147,13 @@ class AIPromptDock(QDockWidget):
         self.header_widget.setVisible(has_ai)
         self.prompt_section.setVisible(has_ai and bool(gen.prompt))
         self.negative_section.setVisible(has_ai and bool(gen.negative))
-        self.workflow_label.setVisible(has_ai and bool(gen.workflow))
+        self.workflow_section.setVisible(has_ai and bool(gen.workflow))
         self.settings_group.setVisible(has_ai and bool(gen.settings))
 
         if not has_ai or gen is None:
             self._current_prompt = ""
             self._current_negative = ""
+            self._current_workflow = ""
             return
 
         tool = gen.tool or tr("IA")
@@ -145,6 +169,11 @@ class AIPromptDock(QDockWidget):
 
         self._current_negative = gen.negative
         self.negative_edit.setPlainText(gen.negative)
+
+        self._current_workflow = gen.workflow_data
+        has_wf_data = bool(gen.workflow_data)
+        self.copy_workflow_btn.setEnabled(has_wf_data)
+        self.save_workflow_btn.setEnabled(has_wf_data)
 
         if gen.workflow:
             if gen.nodes:
@@ -175,4 +204,22 @@ class AIPromptDock(QDockWidget):
             QApplication.clipboard().setText(self._current_negative)
             self.copy_negative_btn.setText(tr("¡Copiado!"))
             QTimer.singleShot(1500, lambda: self.copy_negative_btn.setText(tr("Copiar prompt negativo")))
+
+    def copy_workflow(self) -> None:
+        if self._current_workflow:
+            QApplication.clipboard().setText(self._current_workflow)
+            self.copy_workflow_btn.setText(tr("¡Copiado!"))
+            QTimer.singleShot(1500, lambda: self.copy_workflow_btn.setText(tr("Copiar workflow")))
+
+    def save_workflow(self) -> None:
+        if not self._current_workflow:
+            return
+        path, _filter = QFileDialog.getSaveFileName(self, tr("Guardar workflow como archivo JSON"), "workflow.json",
+                                                    tr("Archivos JSON (*.json)"))
+        if path:
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(self._current_workflow)
+            except OSError:
+                pass
 

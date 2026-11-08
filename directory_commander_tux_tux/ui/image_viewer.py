@@ -6,7 +6,7 @@ import os
 import time
 
 from PySide6.QtCore import QByteArray, QEvent, QPoint, QRect, QSize, Qt, QTimer
-from PySide6.QtGui import QAction, QImageReader, QPixmap, QTransform
+from PySide6.QtGui import QAction, QCursor, QImageReader, QPixmap, QTransform
 from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QScrollArea,
                                QSizePolicy, QSlider, QToolBar, QToolButton, QWidgetAction)
 
@@ -123,6 +123,7 @@ class ImageViewer(QMainWindow):
                 }
             """)
             btn.clicked.connect(lambda _=False, d=delta: self.step(d))
+            btn.installEventFilter(self)
             btn.hide()
 
         self.crop = CropOverlay(self.label)
@@ -191,16 +192,17 @@ class ImageViewer(QMainWindow):
         add("crop", tr("Recortar"), "crop", lambda: self.set_cropping(not self.crop.isVisible()), "C", True)
         add("save_crop", tr("Guardar selección…"), "savecrop", self.save_crop, "Ctrl+S")
         add("copy", tr("Copiar la imagen"), "copy", self.copy_image, "Ctrl+C")
-        add("ai_prompt", tr("Prompt de IA"), "comment", self.toggle_prompt_panel, checkable=True)
+        add("ai_prompt", tr("Info de IA"), "comment", self.toggle_prompt_panel, checkable=True)
         add("rename", tr("Renombrar"), "rename", self.rename_current, "F2")
         add("delete", tr("Eliminar"), "delete", self.delete_current, "Del")
-        add("reveal", tr("Mostrar en la lista"), "folder", self.reveal_current)
+        add("reveal", tr("Mostrar en el panel"), "folder", self.reveal_current)
         add("open_system", tr("Abrir con la aplicación del sistema"), "", self.open_with_system)
         add("close", tr("Cerrar"), "", self.close)
         for key in ("rename", "delete", "reveal"):
             self.actions_by_key[key].setEnabled(self.host is not None)
         self.actions_by_key["save_crop"].setEnabled(False)
         self.actions_by_key["ai_prompt"].setEnabled(False)
+        self.actions_by_key["ai_prompt"].setVisible(False)
 
     def _build_menus(self) -> None:
         by_key = self.actions_by_key
@@ -216,6 +218,7 @@ class ImageViewer(QMainWindow):
     def _build_toolbar(self) -> None:
         self.toolbar = QToolBar(tr("Visor"))
         self.toolbar.setMovable(False)
+        self.toolbar.installEventFilter(self)
         self.addToolBar(self.toolbar)
         self.zoom_slider = QSlider(Qt.Orientation.Horizontal)
         self.zoom_slider.setRange(0, SLIDER_STEPS)
@@ -231,14 +234,27 @@ class ImageViewer(QMainWindow):
     def createPopupMenu(self) -> QMenu:
         """Clic derecho en la barra."""
         menu = QMenu(self)
+        cfg = getattr(self.host, "config", self.config)
+        show_text = cfg.get("viewer_button_text", True)
+        text_act = menu.addAction(tr("Mostrar texto en los botones"))
+        text_act.setCheckable(True)
+        text_act.setChecked(show_text)
+        text_act.toggled.connect(self._toggle_button_text)
+        menu.addSeparator()
         customize = menu.addAction(themed("prefs"), tr("Personalizar…"), lambda: self.host.customize_bars(bar_buttons.IMAGE_VIEWER, self))
         customize.setEnabled(self.host is not None)
         return menu
 
+    def _toggle_button_text(self, checked: bool) -> None:
+        cfg = getattr(self.host, "config", self.config)
+        cfg["viewer_button_text"] = checked
+        self.apply_bar_buttons()
+
     def apply_bar_buttons(self) -> None:
         """Pone en la barra los botones elegidos en las preferencias. Lo que se quite sigue en los menús y con su atajo."""
         by_key = {**self.actions_by_key, "zoom_slider": self._zoom_action}
-        config = getattr(self.host, "config", {})
+        config = getattr(self.host, "config", self.config)
+        show_text = config.get("viewer_button_text", True)
         removed = bar_buttons.hidden(config, bar_buttons.IMAGE_VIEWER)
         self.toolbar.clear()
         for key in bar_buttons.arranged(config, bar_buttons.IMAGE_VIEWER):
@@ -247,9 +263,28 @@ class ImageViewer(QMainWindow):
             elif key not in removed:
                 self.toolbar.addAction(by_key[key])
                 button = self.toolbar.widgetForAction(by_key[key])
-                if isinstance(button, QToolButton) and key in ("fullscreen", "crop", "save_crop", "rename", "delete", "reveal", "ai_prompt"):
-                    button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+                if isinstance(button, QToolButton):
+                    if show_text and key in ("fullscreen", "crop", "save_crop", "rename", "delete", "reveal", "ai_prompt"):
+                        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+                    else:
+                        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         tidy_separators(self.toolbar)
+        ext = self.toolbar.findChild(QToolButton, "qt_toolbar_ext_button")
+        if ext is not None:
+            ext.installEventFilter(self)
+
+    def _show_toolbar_overflow_menu(self, ext_btn: QWidget) -> None:
+        menu = QMenu(self)
+        for action in self.toolbar.actions():
+            w = self.toolbar.widgetForAction(action)
+            if w is not None and not w.isVisible() and action.isVisible():
+                if action.isSeparator():
+                    menu.addSeparator()
+                else:
+                    menu.addAction(action)
+        if menu.actions():
+            pt = ext_btn.mapToGlobal(QPoint(0, ext_btn.height()))
+            menu.exec(pt)
 
     def _build_status_bar(self) -> None:
         self.status_labels: dict[str, QLabel] = {}
@@ -264,7 +299,7 @@ class ImageViewer(QMainWindow):
                 bar.addWidget(line)
             label = QLabel()
             label.setContentsMargins(4, 0, 4, 0)
-            label.setTextFormat(Qt.TextFormat.PlainText)
+            label.setTextFormat(Qt.TextFormat.RichText if key == "ai" else Qt.TextFormat.PlainText)
             bar.addWidget(label)
             self.status_labels[key] = label
         self.status_labels["ai"].setCursor(Qt.CursorShape.PointingHandCursor)
@@ -328,15 +363,20 @@ class ImageViewer(QMainWindow):
         ext = os.path.splitext(path)[1].lstrip(".").lower()
         gen = ai_metadata.read_generation(path, ext)
         has_prompt = gen is not None and bool(gen.prompt)
+        has_workflow = gen is not None and bool(gen.workflow)
         has_ai = gen is not None and (gen.has_prompt or gen.workflow)
-        self.actions_by_key["ai_prompt"].setEnabled(has_prompt)
+        self.actions_by_key["ai_prompt"].setVisible(has_ai)
+        self.actions_by_key["ai_prompt"].setEnabled(has_ai)
         if "ai" in labels:
             if has_ai:
-                tool = gen.tool or tr("IA")
-                labels["ai"].setText(f"✨ {tool}")
-                tip = gen.prompt if gen.prompt else tool
+                badges = []
                 if has_prompt:
-                    tip += f"\n{tr('Haz clic para ver/copiar el prompt')}"
+                    badges.append('<span style="background-color: #8e44ad; color: #ffffff; font-weight: bold; border-radius: 3px; padding: 1px 4px; font-size: 11px;">P</span>')
+                if has_workflow:
+                    badges.append('<span style="background-color: #16a085; color: #ffffff; font-weight: bold; border-radius: 3px; padding: 1px 4px; font-size: 11px;">W</span>')
+                labels["ai"].setText("&nbsp;".join(badges))
+                tip = gen.prompt if gen.prompt else (gen.tool or tr("IA"))
+                tip += f"\n{tr('Haz clic para ver/copiar la información de IA')}"
                 labels["ai"].setToolTip(tip)
             else:
                 labels["ai"].setText("")
@@ -350,6 +390,7 @@ class ImageViewer(QMainWindow):
             self.label.setText(tr("No se pudo abrir {basename}: {reason}", basename=os.path.basename(path), reason=reason))
             if "ai" in self.status_labels:
                 self.status_labels["ai"].setText("")
+            self.actions_by_key["ai_prompt"].setVisible(False)
             self.actions_by_key["ai_prompt"].setEnabled(False)
             self.prompt_dock.set_generation(None)
             self._update_zoom_controls()
@@ -619,29 +660,55 @@ class ImageViewer(QMainWindow):
     # ---------------------------------------------------------------- ratón y teclado
     def eventFilter(self, watched, event) -> bool:
         kind = event.type()
+        toolbar = getattr(self, "toolbar", None)
+        if toolbar is not None and watched is toolbar:
+            if kind == QEvent.Type.ChildAdded and hasattr(event, "child"):
+                child = event.child()
+                if getattr(child, "objectName", lambda: "")() == "qt_toolbar_ext_button":
+                    child.installEventFilter(self)
+        elif getattr(watched, "objectName", lambda: "")() == "qt_toolbar_ext_button":
+            if kind in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonDblClick):
+                self._show_toolbar_overflow_menu(watched)
+                return True
+            if kind == QEvent.Type.KeyPress and event.key() in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                self._show_toolbar_overflow_menu(watched)
+                return True
+
         if kind == QEvent.Type.ContextMenu and watched in (self.label, self.scroll.viewport(), self.scroll):
             self._show_context_menu(event.globalPosition().toPoint() if hasattr(event, "globalPosition") else event.globalPos())
             return True
         if kind == QEvent.Type.Wheel and watched is self.scroll.viewport():
             return self._wheel(event)
-        if watched in (self.label, self.scroll.viewport()):
+        btn_prev = getattr(self, "btn_side_prev", None)
+        btn_next = getattr(self, "btn_side_next", None)
+        side_targets = tuple(w for w in (self.label, self.scroll.viewport(), btn_prev, btn_next) if w is not None)
+        if watched in side_targets:
             if kind == QEvent.Type.MouseMove:
                 vp = self.scroll.viewport()
-                pos = vp.mapFromGlobal(event.globalPosition().toPoint() if hasattr(event, "globalPosition") else event.globalPos())
+                global_pos = event.globalPosition().toPoint() if hasattr(event, "globalPosition") else event.globalPos()
+                pos = vp.mapFromGlobal(global_pos)
                 margin = 120
                 can_step = len(self.paths) > 1
                 near_left = 0 <= pos.x() <= margin and 0 <= pos.y() <= vp.height()
                 near_right = vp.width() - margin <= pos.x() <= vp.width() and 0 <= pos.y() <= vp.height()
-                self.btn_side_prev.setVisible(can_step and (near_left or self.btn_side_prev.geometry().contains(pos)))
-                self.btn_side_next.setVisible(can_step and (near_right or self.btn_side_next.geometry().contains(pos)))
+                if btn_prev is not None:
+                    btn_prev.setVisible(can_step and (near_left or btn_prev.geometry().contains(pos)))
+                if btn_next is not None:
+                    btn_next.setVisible(can_step and (near_right or btn_next.geometry().contains(pos)))
             elif kind == QEvent.Type.Leave:
-                self.btn_side_prev.hide()
-                self.btn_side_next.hide()
+                vp = self.scroll.viewport()
+                cursor_pos = vp.mapFromGlobal(QCursor.pos())
+                if not vp.rect().contains(cursor_pos):
+                    if btn_prev is not None:
+                        btn_prev.hide()
+                    if btn_next is not None:
+                        btn_next.hide()
             elif kind == QEvent.Type.Resize and watched is self.scroll.viewport():
                 vp = self.scroll.viewport()
-                y = max(10, (vp.height() - self.btn_side_prev.height()) // 2)
-                self.btn_side_prev.move(14, y)
-                self.btn_side_next.move(vp.width() - self.btn_side_next.width() - 14, y)
+                if btn_prev is not None and btn_next is not None:
+                    y = max(10, (vp.height() - btn_prev.height()) // 2)
+                    btn_prev.move(14, y)
+                    btn_next.move(vp.width() - btn_next.width() - 14, y)
 
         if watched is self.label:
             if kind == QEvent.Type.Resize:

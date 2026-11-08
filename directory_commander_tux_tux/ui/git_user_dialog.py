@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QApplication, QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout
 
 from ..core import git_tools
 from ..core.i18n import tr
@@ -20,56 +20,87 @@ class GitUserDialog(QDialog):
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         self.setFixedWidth(460)
 
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #1e222d;
-                color: #e2e8f0;
+        app = QApplication.instance()
+        palette = app.palette() if app else self.palette()
+        is_dark = palette.window().color().lightness() < 128
+
+        if is_dark:
+            bg_dialog = "#1e222d"
+            text_color = "#cbd5e1"
+            title_color = "#ffffff"
+            sub_color = "#94a3b8"
+            bg_edit = "#11141c"
+            border_edit = "#2d3748"
+            text_edit = "#ffffff"
+            bg_cancel = "#232936"
+            border_cancel = "#334155"
+            text_cancel = "#cbd5e1"
+            hover_cancel = "#2d3748"
+            border_dialog = "none"
+        else:
+            bg_dialog = "#ffffff"
+            text_color = "#1e293b"
+            title_color = "#0f172a"
+            sub_color = "#64748b"
+            bg_edit = "#f8fafc"
+            border_edit = "#cbd5e1"
+            text_edit = "#0f172a"
+            bg_cancel = "#f1f5f9"
+            border_cancel = "#cbd5e1"
+            text_cancel = "#334155"
+            hover_cancel = "#e2e8f0"
+            border_dialog = "1px solid #cbd5e1"
+
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {bg_dialog};
+                color: {text_color};
+                border: {border_dialog};
                 border-radius: 8px;
-            }
-            QLabel {
-                color: #cbd5e1;
+            }}
+            QLabel {{
+                color: {text_color};
                 font-size: 13px;
-            }
-            QLabel#dialogTitle {
-                color: #ffffff;
+            }}
+            QLabel#dialogTitle {{
+                color: {title_color};
                 font-size: 15px;
                 font-weight: bold;
-            }
-            QLabel#dialogSubtitle {
-                color: #94a3b8;
+            }}
+            QLabel#dialogSubtitle {{
+                color: {sub_color};
                 font-size: 12px;
                 margin-bottom: 6px;
-            }
-            QLabel#fieldLabel {
-                color: #94a3b8;
+            }}
+            QLabel#fieldLabel {{
+                color: {sub_color};
                 font-size: 12px;
                 font-weight: 500;
-            }
-            QLineEdit {
-                background-color: #11141c;
-                border: 1px solid #2d3748;
+            }}
+            QLineEdit {{
+                background-color: {bg_edit};
+                border: 1px solid {border_edit};
                 border-radius: 6px;
-                color: #ffffff;
+                color: {text_edit};
                 padding: 7px 10px;
                 font-size: 13px;
                 selection-background-color: #2563eb;
-            }
-            QLineEdit:focus {
+            }}
+            QLineEdit:focus {{
                 border: 1px solid #3b82f6;
-            }
-            QPushButton#btnCancel {
-                background-color: #232936;
-                color: #cbd5e1;
-                border: 1px solid #334155;
+            }}
+            QPushButton#btnCancel {{
+                background-color: {bg_cancel};
+                color: {text_cancel};
+                border: 1px solid {border_cancel};
                 border-radius: 6px;
                 padding: 7px 18px;
                 font-size: 13px;
-            }
-            QPushButton#btnCancel:hover {
-                background-color: #2d3748;
-                color: #ffffff;
-            }
-            QPushButton#btnSave {
+            }}
+            QPushButton#btnCancel:hover {{
+                background-color: {hover_cancel};
+            }}
+            QPushButton#btnSave {{
                 background-color: #2563eb;
                 color: #ffffff;
                 border: none;
@@ -77,10 +108,10 @@ class GitUserDialog(QDialog):
                 padding: 7px 20px;
                 font-size: 13px;
                 font-weight: bold;
-            }
-            QPushButton#btnSave:hover {
+            }}
+            QPushButton#btnSave:hover {{
                 background-color: #1d4ed8;
-            }
+            }}
         """)
 
         layout = QVBoxLayout(self)

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import QByteArray, QEvent, Qt
+from PySide6.QtCore import QByteArray, QEvent, QPoint, Qt
 from PySide6.QtGui import QAction
 from PySide6.QtMultimedia import QMediaPlayer, QtVideo, QVideoFrame
 from PySide6.QtWidgets import (QFileDialog, QFrame, QLabel, QMainWindow, QMenu, QMessageBox, QPushButton, QStackedWidget, QToolBar,
@@ -130,14 +130,15 @@ class VideoViewer(QMainWindow):
         add("seek_back", tr("Retroceder 5 segundos"), "", lambda: self.seek_by(-SEEK_STEP_MS), "Shift+Left")
         add("seek_forward", tr("Avanzar 5 segundos"), "", lambda: self.seek_by(SEEK_STEP_MS), "Shift+Right")
         add("save_frame", tr("Guardar fotograma…"), "saveframe", self.save_frame, "Ctrl+S")
-        add("ai_prompt", tr("Prompt de IA"), "comment", self.toggle_prompt_panel, checkable=True)
+        add("ai_prompt", tr("Info de IA"), "comment", self.toggle_prompt_panel, checkable=True)
         add("fullscreen", tr("Pantalla completa"), "fullscreen", self.toggle_fullscreen, "F11", True)
-        add("reveal", tr("Mostrar en la lista"), "folder", self.reveal_current)
+        add("reveal", tr("Mostrar en el panel"), "folder", self.reveal_current)
         add("open_system", tr("Abrir con la aplicación del sistema"), "", self.open_with_system)
         add("close", tr("Cerrar"), "", self.close)
         self.actions_by_key["reveal"].setEnabled(self.host is not None)
         self.actions_by_key["save_frame"].setEnabled(False)
         self.actions_by_key["ai_prompt"].setEnabled(False)
+        self.actions_by_key["ai_prompt"].setVisible(False)
 
     def _build_menus(self) -> None:
         by_key = self.actions_by_key
@@ -152,31 +153,82 @@ class VideoViewer(QMainWindow):
     def _build_toolbar(self) -> None:
         self.toolbar = QToolBar(tr("Visor de vídeo"))
         self.toolbar.setMovable(False)
+        self.toolbar.installEventFilter(self)
         self.addToolBar(self.toolbar)
         self.apply_bar_buttons()
 
     def createPopupMenu(self) -> QMenu:
         """Clic derecho en la barra."""
         menu = QMenu(self)
+        cfg = getattr(self.host, "config", self.config)
+        show_text = cfg.get("viewer_button_text", True)
+        text_act = menu.addAction(tr("Mostrar texto en los botones"))
+        text_act.setCheckable(True)
+        text_act.setChecked(show_text)
+        text_act.toggled.connect(self._toggle_button_text)
+        menu.addSeparator()
         customize = menu.addAction(themed("prefs"), tr("Personalizar…"), lambda: self.host.customize_bars(bar_buttons.VIDEO_VIEWER, self))
         customize.setEnabled(self.host is not None)
         return menu
 
+    def _toggle_button_text(self, checked: bool) -> None:
+        cfg = getattr(self.host, "config", self.config)
+        cfg["viewer_button_text"] = checked
+        self.apply_bar_buttons()
+
     def apply_bar_buttons(self) -> None:
         """Pone en la barra los botones elegidos en las preferencias. Lo que se quite sigue en los menús y con su atajo."""
         by_key = self.actions_by_key
-        removed = bar_buttons.hidden(self.config, bar_buttons.VIDEO_VIEWER)
+        config = getattr(self.host, "config", self.config)
+        show_text = config.get("viewer_button_text", True)
+        removed = bar_buttons.hidden(config, bar_buttons.VIDEO_VIEWER)
         self.toolbar.clear()
-        for key in bar_buttons.arranged(self.config, bar_buttons.VIDEO_VIEWER):
+        for key in bar_buttons.arranged(config, bar_buttons.VIDEO_VIEWER):
             if key == bar_buttons.SEPARATOR:
                 self.toolbar.addSeparator()
             elif key not in removed:
                 self.toolbar.addAction(by_key[key])
                 button = self.toolbar.widgetForAction(by_key[key])
-                if isinstance(button, QToolButton) and key not in ("previous", "next"):
-                    button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+                if isinstance(button, QToolButton):
+                    if show_text and key not in ("previous", "next"):
+                        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+                    else:
+                        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         tidy_separators(self.toolbar)
         self.media.apply_bar_buttons()
+        ext = self.toolbar.findChild(QToolButton, "qt_toolbar_ext_button")
+        if ext is not None:
+            ext.installEventFilter(self)
+
+    def _show_toolbar_overflow_menu(self, ext_btn: QWidget) -> None:
+        menu = QMenu(self)
+        for action in self.toolbar.actions():
+            w = self.toolbar.widgetForAction(action)
+            if w is not None and not w.isVisible() and action.isVisible():
+                if action.isSeparator():
+                    menu.addSeparator()
+                else:
+                    menu.addAction(action)
+        if menu.actions():
+            pt = ext_btn.mapToGlobal(QPoint(0, ext_btn.height()))
+            menu.exec(pt)
+
+    def eventFilter(self, watched, event) -> bool:
+        kind = event.type()
+        toolbar = getattr(self, "toolbar", None)
+        if toolbar is not None and watched is toolbar:
+            if kind == QEvent.Type.ChildAdded and hasattr(event, "child"):
+                child = event.child()
+                if getattr(child, "objectName", lambda: "")() == "qt_toolbar_ext_button":
+                    child.installEventFilter(self)
+        elif getattr(watched, "objectName", lambda: "")() == "qt_toolbar_ext_button":
+            if kind in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonDblClick):
+                self._show_toolbar_overflow_menu(watched)
+                return True
+            if kind == QEvent.Type.KeyPress and event.key() in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                self._show_toolbar_overflow_menu(watched)
+                return True
+        return super().eventFilter(watched, event)
 
     def _build_status_bar(self) -> None:
         self.status_labels: dict[str, QLabel] = {}
@@ -191,7 +243,7 @@ class VideoViewer(QMainWindow):
                 bar.addWidget(line)
             label = QLabel()
             label.setContentsMargins(4, 0, 4, 0)
-            label.setTextFormat(Qt.TextFormat.PlainText)
+            label.setTextFormat(Qt.TextFormat.RichText if key == "ai" else Qt.TextFormat.PlainText)
             bar.addWidget(label)
             self.status_labels[key] = label
         self.status_labels["ai"].setCursor(Qt.CursorShape.PointingHandCursor)
@@ -230,15 +282,20 @@ class VideoViewer(QMainWindow):
         ext = os.path.splitext(path)[1].lstrip(".").lower()
         gen = ai_metadata.read_generation(path, ext)
         has_prompt = gen is not None and bool(gen.prompt)
+        has_workflow = gen is not None and bool(gen.workflow)
         has_ai = gen is not None and (gen.has_prompt or gen.workflow)
-        self.actions_by_key["ai_prompt"].setEnabled(has_prompt)
+        self.actions_by_key["ai_prompt"].setVisible(has_ai)
+        self.actions_by_key["ai_prompt"].setEnabled(has_ai)
         if "ai" in labels:
             if has_ai:
-                tool = gen.tool or tr("IA")
-                labels["ai"].setText(f"✨ {tool}")
-                tip = gen.prompt if gen.prompt else tool
+                badges = []
                 if has_prompt:
-                    tip += f"\n{tr('Haz clic para ver/copiar el prompt')}"
+                    badges.append('<span style="background-color: #8e44ad; color: #ffffff; font-weight: bold; border-radius: 3px; padding: 1px 4px; font-size: 11px;">P</span>')
+                if has_workflow:
+                    badges.append('<span style="background-color: #16a085; color: #ffffff; font-weight: bold; border-radius: 3px; padding: 1px 4px; font-size: 11px;">W</span>')
+                labels["ai"].setText("&nbsp;".join(badges))
+                tip = gen.prompt if gen.prompt else (gen.tool or tr("IA"))
+                tip += f"\n{tr('Haz clic para ver/copiar la información de IA')}"
                 labels["ai"].setToolTip(tip)
             else:
                 labels["ai"].setText("")

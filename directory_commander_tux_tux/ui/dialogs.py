@@ -235,14 +235,55 @@ class PreferencesDialog(QDialog):
         self.viewer_default_height.setSingleStep(20)
         self.viewer_default_height.setSuffix(" px")
         self.viewer_default_height.setValue(int(config.get("viewer_default_height", 720)))
+        self.viewer_preset = QComboBox()
+        self.viewer_preset.addItem(tr("Personalizado"), "custom")
+        self.viewer_preset.addItem("800 × 600 (SVGA)", "800x600")
+        self.viewer_preset.addItem("1024 × 768 (XGA)", "1024x768")
+        self.viewer_preset.addItem(f"1120 × 720 ({tr('Predeterminado')})", "1120x720")
+        self.viewer_preset.addItem("1280 × 720 (720p HD)", "1280x720")
+        self.viewer_preset.addItem("1366 × 768 (WXGA)", "1366x768")
+        self.viewer_preset.addItem("1600 × 900 (HD+)", "1600x900")
+        self.viewer_preset.addItem("1920 × 1080 (1080p FHD)", "1920x1080")
+        self.viewer_preset.addItem("2560 × 1440 (2K QHD)", "2560x1440")
+        self.viewer_preset.addItem("3840 × 2160 (4K UHD)", "3840x2160")
+
+        current_key = f"{self.viewer_default_width.value()}x{self.viewer_default_height.value()}"
+        match_idx = self.viewer_preset.findData(current_key)
+        self.viewer_preset.setCurrentIndex(match_idx if match_idx >= 0 else 0)
+
+        def _on_preset_changed(idx: int) -> None:
+            data = self.viewer_preset.itemData(idx)
+            if isinstance(data, str) and "x" in data:
+                parts = data.split("x")
+                self.viewer_default_width.blockSignals(True)
+                self.viewer_default_height.blockSignals(True)
+                self.viewer_default_width.setValue(int(parts[0]))
+                self.viewer_default_height.setValue(int(parts[1]))
+                self.viewer_default_width.blockSignals(False)
+                self.viewer_default_height.blockSignals(False)
+
+        def _on_dimensions_changed() -> None:
+            key = f"{self.viewer_default_width.value()}x{self.viewer_default_height.value()}"
+            f_idx = self.viewer_preset.findData(key)
+            self.viewer_preset.blockSignals(True)
+            self.viewer_preset.setCurrentIndex(f_idx if f_idx >= 0 else 0)
+            self.viewer_preset.blockSignals(False)
+
+        self.viewer_preset.currentIndexChanged.connect(_on_preset_changed)
+        self.viewer_default_width.valueChanged.connect(_on_dimensions_changed)
+        self.viewer_default_height.valueChanged.connect(_on_dimensions_changed)
+
         self.viewer_size_widget = QWidget()
         viewer_size_row = QHBoxLayout(self.viewer_size_widget)
         viewer_size_row.setContentsMargins(0, 0, 0, 0)
+        viewer_size_row.addWidget(self.viewer_preset)
         viewer_size_row.addWidget(QLabel(tr("Ancho:")))
         viewer_size_row.addWidget(self.viewer_default_width)
         viewer_size_row.addWidget(QLabel(tr("Alto:")))
         viewer_size_row.addWidget(self.viewer_default_height)
         viewer_size_row.addStretch(1)
+        self.viewer_button_text = QCheckBox(tr("Mostrar texto en los botones de la barra del visor"))
+        self.viewer_button_text.setChecked(bool(config.get("viewer_button_text", True)))
         self.viewer_window_mode.currentIndexChanged.connect(
             lambda: self.viewer_size_widget.setEnabled(self.viewer_window_mode.currentData() == "default")
         )
@@ -293,6 +334,7 @@ class PreferencesDialog(QDialog):
         opening.addRow(tr("Con el visor y los metadatos a la vez:"), self.panel_order)
         opening.addRow(tr("Tamaño y posición del visualizador interno:"), self.viewer_window_mode)
         opening.addRow(tr("Dimensiones por defecto:"), self.viewer_size_widget)
+        opening.addRow("", self.viewer_button_text)
         self._custom_schemes = pane_colors.clean_customs(config.get("pane_color_customs"))
         self.pane_scheme = QComboBox()
         for key, (label, _colors) in pane_colors.BUILTIN_SCHEMES.items():
@@ -644,6 +686,7 @@ class PreferencesDialog(QDialog):
         config["open_json"] = self.open_json.currentData()
         config["tree_level_colors"] = self.level_colors.isChecked()
         config["viewer_above_metadata"] = bool(self.panel_order.currentData())
+        config["viewer_button_text"] = self.viewer_button_text.isChecked()
         config["viewer_window_mode"] = self.viewer_window_mode.currentData()
         config["viewer_default_width"] = self.viewer_default_width.value()
         config["viewer_default_height"] = self.viewer_default_height.value()
