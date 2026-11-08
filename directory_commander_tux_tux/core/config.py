@@ -11,7 +11,7 @@ from . import favorites
 from .i18n import AUTO, LANGUAGE_FOLDER, N_, tr
 from .pane_colors import DEFAULT_SCHEME, adopt_old_colors
 
-CONFIG_VERSION = 21
+CONFIG_VERSION = 22
 PORTABLE_MARKER = "portable.txt"
 VISIT_POINTS = 3
 
@@ -70,6 +70,8 @@ OLD_TERMINAL_BUTTON = "Panel de terminal"
 COMPARE_COMMAND = "Compare FILES"
 FRAMES_TOGGLE_COMMAND = "Set PANEFRAMES=Toggle"
 GENERATION_MARKS_COMMAND = "Set GENERATIONMARKS=Toggle"
+OPEN_VIDEOS_COMMAND = "Set OPENVIDEOS=Toggle"
+OPEN_IMAGES_COMMAND = "Set OPENIMAGES=Toggle"
 DISK_USAGE_COMMAND = "DiskUsage"
 OLD_SIZES_COMMAND = "GetSizes"
 OLD_SIZES_LABEL = "Tamaños de carpeta"
@@ -121,6 +123,14 @@ DEFAULT_TOOLBAR = [
     _btn(N_("Deshacer"), "undo", "Undo", N_("Deshacer la última operación (Ctrl+Z)")),
     _sep(),
     _btn(N_("Marcas de IA"), "aimarks", GENERATION_MARKS_COMMAND, N_("Mostrar u ocultar las marcas de prompt y workflow de las imágenes y vídeos generados con IA")),
+    _btn(N_("Abrir vídeos"), "openvideos", OPEN_VIDEOS_COMMAND, N_("Cambiar entre abrir vídeos con el visor interno o con la aplicación del sistema"), [
+        _item(N_("Abrir vídeos con el visor interno"), "openvideos", "Set OPENVIDEOS=viewer"),
+        _item(N_("Abrir vídeos con la aplicación del sistema"), "openvideossystem", "Set OPENVIDEOS=system"),
+    ]),
+    _btn(N_("Abrir imágenes"), "openimages", OPEN_IMAGES_COMMAND, N_("Cambiar entre abrir imágenes con el visor interno o con la aplicación del sistema"), [
+        _item(N_("Abrir imágenes con el visor interno"), "openimages", "Set OPENIMAGES=viewer"),
+        _item(N_("Abrir imágenes con la aplicación del sistema"), "openimagessystem", "Set OPENIMAGES=system"),
+    ]),
     _btn(N_("Mostrar imágenes"), "show", IMAGE_VIEWER_COMMAND, N_("Abrir el visor de imágenes"), [
         _item(N_("Abrir el visor"), "show", "Show"),
         _item(N_("Presentación a pantalla completa"), "slideshow", "Show SLIDESHOW FULLSCREEN"),
@@ -446,6 +456,21 @@ def _add_marks_button(stored: dict) -> None:
     toolbar.insert(len(toolbar) if viewer is None else viewer, button)
 
 
+def _add_open_media_buttons(stored: dict) -> None:
+    """Detrás del botón de marcas de IA: botones para alternar cómo se abren vídeos e imágenes."""
+    toolbar = stored.get("toolbar")
+    if not isinstance(toolbar, list):
+        return
+    marks = next((pos for pos, item in enumerate(toolbar) if _runs(item, GENERATION_MARKS_COMMAND)), None)
+    insert_at = (marks + 1) if marks is not None else len(toolbar)
+
+    for cmd in (OPEN_VIDEOS_COMMAND, OPEN_IMAGES_COMMAND):
+        if not any(_runs(item, cmd) for item in toolbar):
+            btn = next(json.loads(json.dumps(item)) for item in DEFAULT_TOOLBAR if _runs(item, cmd))
+            toolbar.insert(insert_at, btn)
+            insert_at += 1
+
+
 def _add_verified_copy(stored: dict) -> None:
     """En el menú del botón Copiar, detrás de «Duplicar aquí»: copiar comprobando la copia."""
     toolbar = stored.get("toolbar")
@@ -592,6 +617,8 @@ class Config:
             _add_verified_copy(stored)
         if version < 21:
             _swap_sizes_for_disk_usage(stored)
+        if version < 22:
+            _add_open_media_buttons(stored)
         if version < 17:
             stored.pop("find_window_geometry", None)  # era de otra forma de colocar el panel, con otras medidas
         if version < 15:

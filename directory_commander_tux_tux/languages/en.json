@@ -1850,6 +1850,24 @@
     "Copiar todos los metadatos": "Copy all metadata",
     "Mostrar metadatos tal como vienen de ExifTool": "Show metadata as it comes from ExifTool",
     "Organizado": "Organized",
-    "Ver como tabla organizada": "View as organized table"
+    "Ver como tabla organizada": "View as organized table",
+    "Abrir vídeos": "Open videos",
+    "Cambiar entre abrir vídeos con el visor interno o con la aplicación del sistema": "Switch between opening videos with the internal viewer or the system default application",
+    "Abrir imágenes": "Open images",
+    "Cambiar entre abrir imágenes con el visor interno o con la aplicación del sistema": "Switch between opening images with the internal viewer or the system default application",
+    "Abrir vídeos con el visor interno": "Open videos with the internal viewer",
+    "Abrir vídeos con la aplicación del sistema": "Open videos with the system application",
+    "Abrir imágenes con el visor interno": "Open images with the internal viewer",
+    "Abrir imágenes con la aplicación del sistema": "Open images with the system application",
+    "Vídeos: se abren con el visualizador interno": "Videos: opened with the internal viewer",
+    "Vídeos: se abren con la aplicación del sistema": "Videos: opened with the system application",
+    "Imágenes: se abren con el visualizador interno": "Images: opened with the internal viewer",
+    "Imágenes: se abren con la aplicación del sistema": "Images: opened with the system application",
+    "Valor no válido para OPENVIDEOS: {value}": "Invalid value for OPENVIDEOS: {value}",
+    "Valor no válido para OPENIMAGES: {value}": "Invalid value for OPENIMAGES: {value}",
+    "Abrir vídeos: Visualizador interno (clic para usar la aplicación del sistema)": "Open videos: Internal viewer (click to use system application)",
+    "Abrir vídeos: Aplicación del sistema (clic para usar el visualizador interno)": "Open videos: System application (click to use internal viewer)",
+    "Abrir imágenes: Visualizador interno (clic para usar la aplicación del sistema)": "Open images: Internal viewer (click to use system application)",
+    "Abrir imágenes: Aplicación del sistema (clic para usar el visualizador interno)": "Open images: System application (click to use internal viewer)"
   }
 }

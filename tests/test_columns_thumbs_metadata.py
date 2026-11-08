@@ -129,7 +129,10 @@ def test_the_marks_button_shows_and_hides_them(window, tmp_path):
 
     assert window.config.get("show_generation_marks") is False and window.source.model.generation_marks is False
     labels = [button.get("label") for button in window.config["toolbar"]]
-    assert labels.index("Marcas de IA") == labels.index("Mostrar imágenes") - 1  # delante del visor de imágenes
+    assert labels.index("Marcas de IA") < labels.index("Mostrar imágenes")
+    assert labels.index("Abrir vídeos") == labels.index("Marcas de IA") + 1
+    assert labels.index("Abrir imágenes") == labels.index("Abrir vídeos") + 1
+    assert labels.index("Mostrar imágenes") == labels.index("Abrir imágenes") + 1
     window.run_command(GENERATION_MARKS_COMMAND)
     assert window.config["show_generation_marks"] is True and all(view.model.generation_marks for view in window.all_views())
     window.run_command(GENERATION_MARKS_COMMAND)
@@ -1249,6 +1252,39 @@ def test_video_viewer_bar_buttons_ai_prompt_adjacent_to_reveal():
     assert "reveal" in arranged
     # ai_prompt must be immediately before reveal
     assert arranged.index("ai_prompt") == arranged.index("reveal") - 1
+
+
+def test_open_videos_and_images_switch(window):
+    from directory_commander_tux_tux.core.config import OPEN_IMAGES_COMMAND, OPEN_VIDEOS_COMMAND
+
+    # Default is "viewer"
+    assert window.config.get("open_videos") == "viewer"
+    assert window.config.get("open_images") == "viewer"
+
+    # Toggle videos
+    window.run_command(OPEN_VIDEOS_COMMAND)
+    assert window.config["open_videos"] == "system"
+    window.run_command(OPEN_VIDEOS_COMMAND)
+    assert window.config["open_videos"] == "viewer"
+
+    # Direct set
+    window.run_command("Set OPENVIDEOS=system")
+    assert window.config["open_videos"] == "system"
+    window.run_command("Set OPENVIDEOS=viewer")
+    assert window.config["open_videos"] == "viewer"
+
+    # Toggle images
+    window.run_command(OPEN_IMAGES_COMMAND)
+    assert window.config["open_images"] == "system"
+    window.run_command(OPEN_IMAGES_COMMAND)
+    assert window.config["open_images"] == "viewer"
+
+    # Direct set
+    window.run_command("Set OPENIMAGES=system")
+    assert window.config["open_images"] == "system"
+    window.run_command("Set OPENIMAGES=viewer")
+    assert window.config["open_images"] == "viewer"
+
 
 
 

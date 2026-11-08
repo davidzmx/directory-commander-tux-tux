@@ -144,6 +144,38 @@ class ExtraCommands:
             self._apply_previews(view)
         self.statusBar().showMessage(tr("Marcas de IA visibles") if self.config["show_generation_marks"] else tr("Marcas de IA ocultas"), 3000)
 
+    def _set_openvideos(self, value: str) -> None:
+        val = value.lower().strip()
+        if val in ("toggle", "cycle"):
+            new_mode = "system" if self.config.get("open_videos", "viewer") == "viewer" else "viewer"
+        elif val in ("viewer", "internal", "on", "yes", "1"):
+            new_mode = "viewer"
+        elif val in ("system", "default", "off", "no", "0"):
+            new_mode = "system"
+        else:
+            raise ValueError(tr("Valor no válido para OPENVIDEOS: {value}", value=value))
+        self.config["open_videos"] = new_mode
+        if hasattr(self, "_update_media_open_buttons"):
+            self._update_media_open_buttons()
+        self.statusBar().showMessage(tr("Vídeos: se abren con el visualizador interno") if new_mode == "viewer"
+                                     else tr("Vídeos: se abren con la aplicación del sistema"), 3000)
+
+    def _set_openimages(self, value: str) -> None:
+        val = value.lower().strip()
+        if val in ("toggle", "cycle"):
+            new_mode = "system" if self.config.get("open_images", "viewer") == "viewer" else "viewer"
+        elif val in ("viewer", "internal", "on", "yes", "1"):
+            new_mode = "viewer"
+        elif val in ("system", "default", "off", "no", "0"):
+            new_mode = "system"
+        else:
+            raise ValueError(tr("Valor no válido para OPENIMAGES: {value}", value=value))
+        self.config["open_images"] = new_mode
+        if hasattr(self, "_update_media_open_buttons"):
+            self._update_media_open_buttons()
+        self.statusBar().showMessage(tr("Imágenes: se abren con el visualizador interno") if new_mode == "viewer"
+                                     else tr("Imágenes: se abren con la aplicación del sistema"), 3000)
+
     def _set_checkboxmode(self, value: str) -> None:
         for view in self.all_views():
             view.set_check_mode(_turn(value, view.model.check_mode))

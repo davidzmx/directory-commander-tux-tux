@@ -116,6 +116,8 @@ MENU_ITEMS = [
     (N_("&Ver"), N_("Mostrar ocultos"), None, "Ctrl+H", "Set HIDDEN=Toggle", False),
     (N_("&Ver"), N_("Filtrar…"), "filter", "Ctrl+F", "Set FILTER=Show", False),
     (N_("&Ver"), N_("Marcas de IA"), "aimarks", None, "Set GENERATIONMARKS=Toggle", False),
+    (N_("&Ver"), N_("Abrir vídeos con el visor interno"), "openvideos", None, "Set OPENVIDEOS=Toggle", False),
+    (N_("&Ver"), N_("Abrir imágenes con el visor interno"), "openimages", None, "Set OPENIMAGES=Toggle", False),
     (N_("&Ver"), N_("Líneas entre filas"), None, None, "Set GRIDLINESH=Toggle", False),
     (N_("&Ver"), N_("Seleccionar la fila completa"), None, None, "Set FULLROWSELECT=Toggle", False),
     (N_("&Ver"), N_("Fechas relativas"), None, None, "Set FRIENDLYDATES=normal", False),
@@ -785,6 +787,7 @@ class MainWindow(ExtraCommands, QMainWindow):
         self.main_menu.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._compare_menu_action: QAction | None = None
         self._compare_bar_actions: list[QAction] = []
+        self._open_media_actions: list[tuple[QAction, str]] = []
         self._build_menus()
         horizontal = Qt.ToolBarArea.TopToolBarArea | Qt.ToolBarArea.BottomToolBarArea
         # El menú, los estilos y la ruta solo tienen sentido en horizontal; la ruta necesita ancho.
@@ -1705,6 +1708,12 @@ class MainWindow(ExtraCommands, QMainWindow):
             "Set FLATVIEW=Toggle": lambda: self.source.flat,
             "Set HIDDEN=Toggle": lambda: bool(self.config.get("show_hidden", False)),
             "Set GENERATIONMARKS=Toggle": lambda: self.config.get("show_generation_marks") is True,
+            "Set OPENVIDEOS=Toggle": lambda: self.config.get("open_videos", "viewer") == "viewer",
+            "Set OPENVIDEOS=viewer": lambda: self.config.get("open_videos", "viewer") == "viewer",
+            "Set OPENVIDEOS=system": lambda: self.config.get("open_videos", "viewer") == "system",
+            "Set OPENIMAGES=Toggle": lambda: self.config.get("open_images", "viewer") == "viewer",
+            "Set OPENIMAGES=viewer": lambda: self.config.get("open_images", "viewer") == "viewer",
+            "Set OPENIMAGES=system": lambda: self.config.get("open_images", "viewer") == "system",
             "Set GRIDLINESH=Toggle": lambda: self.source.grid_lines,
             "Set FULLROWSELECT=Toggle": lambda: bool(self.config.get("full_row_select", False)),
             "Set FRIENDLYDATES=normal": lambda: self.config.get("friendly_dates", "off") == "normal",
@@ -1966,11 +1975,13 @@ class MainWindow(ExtraCommands, QMainWindow):
     def _build_toolbar(self) -> None:
         self.toolbar.clear()
         self._compare_bar_actions.clear()
+        self._open_media_actions.clear()
         items = self.config.get("toolbar", [])
         removed = bar_buttons.hidden(self.config, bar_buttons.TOOLBAR)
         self._add_toolbar_items(self.toolbar, [item for item in bar_buttons.arrange_toolbar(self.config, items) if bar_buttons.toolbar_key(item) not in removed]
                                 if isinstance(items, list) else [])
         tidy_separators(self.toolbar)
+        self._update_media_open_buttons()
 
     def _add_toolbar_items(self, bar: QToolBar, items) -> None:
         for item in items if isinstance(items, list) else []:
@@ -2003,6 +2014,16 @@ class MainWindow(ExtraCommands, QMainWindow):
         if COMPARE_COMMAND in lines:
             self._compare_bar_actions.append(action)
             action.setEnabled(self.compare_pair() is not None)
+        from ..core.config import OPEN_IMAGES_COMMAND, OPEN_VIDEOS_COMMAND
+        if OPEN_VIDEOS_COMMAND in lines:
+            action.setCheckable(True)
+            self._open_media_actions.append((action, "open_videos"))
+        elif OPEN_IMAGES_COMMAND in lines:
+            action.setCheckable(True)
+            self._open_media_actions.append((action, "open_images"))
+        elif lines and lines[0] in self._menu_states():
+            action.setCheckable(True)
+            self._checked_menu_actions.append((action, lines[0]))
         if lines:
             action.triggered.connect(lambda _=False, c=lines: self.run_commands(c))
         bar.addAction(action)
@@ -2050,9 +2071,33 @@ class MainWindow(ExtraCommands, QMainWindow):
             reason = self.commands_unavailable(lines) if lines else tr("sin función")
             action.setEnabled(reason is None)
             action.setToolTip(tr("No disponible: {reason}", reason=reason) if reason else tr(child.get("tip") or "") or label)
+            if lines and lines[0] in self._menu_states():
+                action.setCheckable(True)
+                self._checked_menu_actions.append((action, lines[0]))
             if reason is None:
                 action.triggered.connect(lambda _=False, c=lines: self.run_commands(c))
-        menu.setToolTipsVisible(True)
+        menu.aboutToShow.connect(self._update_menu_checks)
+
+    def _update_media_open_buttons(self) -> None:
+        v_mode = self.config.get("open_videos", "viewer")
+        i_mode = self.config.get("open_images", "viewer")
+        for action, kind in getattr(self, "_open_media_actions", []):
+            try:
+                if kind == "open_videos":
+                    is_viewer = (v_mode == "viewer")
+                    action.setIcon(themed("openvideos" if is_viewer else "openvideossystem"))
+                    tip = tr("Abrir vídeos: Visualizador interno (clic para usar la aplicación del sistema)") if is_viewer else tr("Abrir vídeos: Aplicación del sistema (clic para usar el visualizador interno)")
+                    action.setToolTip(tip)
+                    action.setChecked(is_viewer)
+                elif kind == "open_images":
+                    is_viewer = (i_mode == "viewer")
+                    action.setIcon(themed("openimages" if is_viewer else "openimagessystem"))
+                    tip = tr("Abrir imágenes: Visualizador interno (clic para usar la aplicación del sistema)") if is_viewer else tr("Abrir imágenes: Aplicación del sistema (clic para usar el visualizador interno)")
+                    action.setToolTip(tip)
+                    action.setChecked(is_viewer)
+            except (AttributeError, RuntimeError):
+                pass
+        self._update_menu_checks()
 
     @staticmethod
     def _button_commands(item: dict) -> list[str]:
@@ -4267,6 +4312,7 @@ class MainWindow(ExtraCommands, QMainWindow):
         self._apply_bar_buttons()
         self._rebuild_favorites_bar()
         self.metadata.exiftool_dir = self.config.get("exiftool_dir", "")
+        self._update_media_open_buttons()
         self._place_general_terminal()
         if self._terminal_preference_now() != self._terminal_preference:
             self._terminal_preference = self._terminal_preference_now()

@@ -33,6 +33,10 @@ _SHAPES = {
                  '<rect x="3.800" y="3.800" width="7.400" height="8.400" fill="{a}" stroke="none"/>',
     "aimarks": '<path d="M3 4h8l10 10-7 7L3 11z"/><circle cx="7.500" cy="8.500" r="1.300"/>'
                '<path d="M18.500 1l1.200 2.800L22.500 5l-2.800 1.200L18.500 9l-1.200-2.800L14.500 5l2.800-1.200z" fill="{a}" stroke="{a}" stroke-width="1"/>',
+    "openvideos": '<rect x="3" y="5" width="18" height="14" rx="1"/><path d="M10 8.5v7l6-3.5z" fill="{a}"/>',
+    "openvideossystem": '<rect x="3" y="5" width="18" height="14" rx="1"/><path d="M9 9.5v5l4.5-2.5z"/><path d="M14 4h7v7M21 4l-7 7" stroke="{a}" stroke-width="2"/>',
+    "openimages": '<rect x="3" y="5" width="18" height="14" rx="1"/><circle cx="8.500" cy="10" r="1.700" fill="{a}" stroke="none"/><path d="M4 18l6-5 3 3 3-3 4 4"/>',
+    "openimagessystem": '<rect x="3" y="5" width="18" height="14" rx="1"/><circle cx="8.500" cy="10" r="1.700"/><path d="M4 18l5-4 2.5 2.5 2.5-2.5 3 4"/><path d="M14 4h7v7M21 4l-7 7" stroke="{a}" stroke-width="2"/>',
     "makedir": _FOLDER + '<path d="M12 11v6M9 14h6" stroke="#ffffff" stroke-width="2"/>',
     "copy": '<rect x="9" y="8" width="11" height="13" rx="1"/><path d="M5 16V4h11"/>',
     "move": '<path d="M6 3h8l4 4v5"/><path d="M6 3v18h6"/><path d="M14 18h7M18 15l3 3-3 3" stroke="{a}" stroke-width="2.200"/>',
