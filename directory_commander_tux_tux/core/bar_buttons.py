@@ -81,6 +81,13 @@ def ordered(config, bar: str, default: list[str]) -> list[str]:
             continue
         before = next((other for other in reversed(default[:position]) if other not in REPEATABLE and other in result), None)
         result.insert(result.index(before) + 1 if before else 0, key)
+    if bar == VIDEO_VIEWER and "ai_prompt" in result and "reveal" in result:
+        ai_idx = result.index("ai_prompt")
+        rev_idx = result.index("reveal")
+        if ai_idx != rev_idx - 1:
+            result.pop(ai_idx)
+            rev_idx = result.index("reveal")
+            result.insert(rev_idx, "ai_prompt")
     return result
 
 

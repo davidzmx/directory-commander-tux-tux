@@ -1191,5 +1191,66 @@ def test_mp4_comfy_keys_ilst_workflow(tmp_path):
         assert bool(gen.workflow_data) is True
 
 
+def test_read_raw_metadata_and_panel_mode(tmp_path):
+    from directory_commander_tux_tux.core import exiftool
+    from directory_commander_tux_tux.core.listing import Entry
+    from directory_commander_tux_tux.ui import preview
+
+    tool = exiftool.find_exiftool()
+    test_img = tmp_path / "test.png"
+    test_img.write_bytes(ai_samples.comfy_png())
+
+    if tool:
+        raw = exiftool.read_raw_metadata(str(test_img), tool)
+        assert "File Name" in raw or "ExifTool Version Number" in raw or "Prompt" in raw or "SourceFile" in raw
+
+    # Test MetadataPanel mode switching and config persistence
+    cfg = {"metadata_raw_view": False, "metadata_raw_wrap": False}
+    panel = preview.MetadataPanel(config=cfg)
+    assert panel._raw_mode is False
+    assert panel.stack.currentIndex() == 0
+
+    # Switch to raw mode
+    panel.set_raw_mode(True)
+    assert panel._raw_mode is True
+    assert panel.stack.currentIndex() == 1
+    assert cfg["metadata_raw_view"] is True
+
+    # Wrap toggle
+    panel._set_raw_wrap(True)
+    assert panel._raw_wrap is True
+    assert cfg["metadata_raw_wrap"] is True
+
+    # Show entry
+    entry = Entry("test.png", str(test_img), False, size=test_img.stat().st_size)
+    panel.show_entry(entry)
+
+    # Test copy_all
+    panel.raw_view.setPlainText("ExifTool raw metadata line 1\nLine 2")
+    panel.copy_all()
+    from PySide6.QtGui import QGuiApplication
+    assert "ExifTool raw metadata line 1" in QGuiApplication.clipboard().text()
+
+    panel.set_raw_mode(False)
+    assert cfg["metadata_raw_view"] is False
+    assert panel.stack.currentIndex() == 0
+
+
+def test_video_viewer_bar_buttons_ai_prompt_adjacent_to_reveal():
+    from directory_commander_tux_tux.core import bar_buttons
+    # Simulate a user config with ai_prompt in older position (e.g. right after save_frame)
+    cfg = {
+        "bar_order": {
+            bar_buttons.VIDEO_VIEWER: ["previous", "next", "|", "save_frame", "ai_prompt", "|", "fullscreen", "|", "reveal"]
+        }
+    }
+    arranged = bar_buttons.arranged(cfg, bar_buttons.VIDEO_VIEWER)
+    assert "ai_prompt" in arranged
+    assert "reveal" in arranged
+    # ai_prompt must be immediately before reveal
+    assert arranged.index("ai_prompt") == arranged.index("reveal") - 1
+
+
+
 
 

@@ -122,3 +122,21 @@ def read_metadata(path: str, tool: str, language: str = "es") -> list[tuple[str,
     except OSError as exc:
         raise ExifToolError(str(exc)) from exc
     return parse(done.stdout)
+
+
+def read_raw_metadata(path: str, tool: str) -> str:
+    """La salida de texto original de ExifTool, tal como la genera el programa."""
+    found = version(tool)
+    if found is None:
+        raise ExifToolError(tr("No se pudo ejecutar ExifTool: {tool}", tool=tool))
+    if found < MIN_VERSION:
+        raise ExifToolError(tr("ExifTool {found} es demasiado antiguo y no es seguro: hace falta la versión {needed} o posterior", found=found, needed=MIN_VERSION))
+    if "\n" in path or "\r" in path or path.startswith("-"):
+        raise ExifToolError(tr("ExifTool no puede leer un archivo con este nombre"))
+    try:
+        done = _run(tool, ["-a", "-charset", "filename=utf8", "-@", "-"], path.encode("utf-8") + b"\n")
+    except subprocess.TimeoutExpired as exc:
+        raise ExifToolError(tr("ExifTool tardó demasiado")) from exc
+    except OSError as exc:
+        raise ExifToolError(str(exc)) from exc
+    return done.stdout.decode("utf-8", "replace").strip()

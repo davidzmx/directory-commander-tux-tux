@@ -1844,6 +1844,12 @@
     "✘ El servidor responde, pero no acepta la contraseña": "✘ The server answers, but does not accept the password",
     "✘ Sin comprobar: no se confió en el servidor": "✘ Not checked: the server was not trusted",
     "✘ {error}": "✘ {error}",
-    "👤 sin usuario": "👤 no user"
+    "👤 sin usuario": "👤 no user",
+    "Ajustar": "Wrap",
+    "Ajustar líneas al ancho": "Wrap lines to width",
+    "Copiar todos los metadatos": "Copy all metadata",
+    "Mostrar metadatos tal como vienen de ExifTool": "Show metadata as it comes from ExifTool",
+    "Organizado": "Organized",
+    "Ver como tabla organizada": "View as organized table"
   }
 }

@@ -1135,7 +1135,7 @@ class MainWindow(ExtraCommands, QMainWindow):
         self.preview.jsonRequested.connect(self.open_json_viewer)
         self.viewer_dock = self._dock(tr("Visor"), "viewer", self.preview, Qt.DockWidgetArea.RightDockWidgetArea)
         self.viewer_dock.visibilityChanged.connect(lambda _v: self._update_preview())
-        self.metadata = MetadataPanel()
+        self.metadata = MetadataPanel(self, config=self.config)
         self.metadata.exiftool_dir = self.config.get("exiftool_dir", "")
         self.meta_dock = self._dock(tr("Metadatos"), "metadata", self.metadata, Qt.DockWidgetArea.RightDockWidgetArea)
         self.meta_dock.visibilityChanged.connect(lambda _v: self._update_preview())

@@ -235,6 +235,8 @@ DEFAULTS: dict = {
     "viewer_default_height": 720,
     "viewer_geometry": "",
     "viewer_ai_prompt_open": False,
+    "metadata_raw_view": False,
+    "metadata_raw_wrap": False,
     "ffmpeg_dir": "",
     "exiftool_dir": "",
     "terminal_shell": "",

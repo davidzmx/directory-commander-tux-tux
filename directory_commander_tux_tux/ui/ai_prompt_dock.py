@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtWidgets import (QApplication, QDockWidget, QFileDialog, QFormLayout, QFrame, QGroupBox, QHBoxLayout,
-                               QLabel, QPlainTextEdit, QPushButton, QScrollArea, QVBoxLayout, QWidget)
+                               QLabel, QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
 from ..core.ai_metadata import Generation
 from ..core.i18n import tr
@@ -138,6 +138,7 @@ class AIPromptDock(QDockWidget):
         self.settings_form = QFormLayout(self.settings_group)
         self.settings_form.setContentsMargins(8, 8, 8, 8)
         self.settings_form.setSpacing(6)
+        self.settings_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         self.layout.addWidget(self.settings_group)
 
         # Mensaje vacío
@@ -212,6 +213,8 @@ class AIPromptDock(QDockWidget):
                 val_text = str(value)
             val_label = QLabel(val_text)
             val_label.setWordWrap(True)
+            val_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+            val_label.setMinimumWidth(0)
             val_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             self.settings_form.addRow(tr(f"{key}:"), val_label)
 

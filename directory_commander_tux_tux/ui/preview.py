@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (QButtonGroup, QFormLayout, QHBoxLayout, QHeaderVi
                                QVBoxLayout, QWidget)
 
 from ..core import ai_metadata, archive, media_info
-from ..core.exiftool import DOWNLOAD_URL, find_exiftool, language_for, read_metadata
+from ..core.exiftool import DOWNLOAD_URL, find_exiftool, language_for, read_metadata, read_raw_metadata
 from ..core.listing import Entry, format_size, format_time
 from .background import run_bg
 from .code_view import CodeHighlighter, JsonTree, MarkdownView, is_json, is_markdown, json_lexer, lexer_for, pretty_json
@@ -296,9 +296,48 @@ class MetadataPanel(QWidget):
     """Datos del elemento seleccionado. De un archivo los lee ExifTool, en segundo plano. Sin ExifTool, o en
     carpetas y dentro de comprimidos, se muestra lo que da el sistema de archivos."""
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent=None, config=None) -> None:
         super().__init__(parent)
-        self.exiftool_dir = ""
+        self.config = config if config is not None else {}
+        self.exiftool_dir = self.config.get("exiftool_dir", "")
+        self._raw_mode = bool(self.config.get("metadata_raw_view", False))
+        self._raw_wrap = bool(self.config.get("metadata_raw_wrap", False))
+        self._raw_text = ""
+
+        # Barra superior con selector de modo, ajuste de línea y copiar todo
+        self.header_bar = QWidget()
+        header_layout = QHBoxLayout(self.header_bar)
+        header_layout.setContentsMargins(6, 4, 6, 4)
+        header_layout.setSpacing(4)
+
+        self.mode_group = QButtonGroup(self)
+        self.btn_tree = QToolButton(text=tr("Organizado"), checkable=True, autoRaise=True)
+        self.btn_tree.setToolTip(tr("Ver como tabla organizada"))
+        self.btn_tree.clicked.connect(lambda: self.set_raw_mode(False))
+        self.mode_group.addButton(self.btn_tree)
+        header_layout.addWidget(self.btn_tree)
+
+        self.btn_raw = QToolButton(text="ExifTool", checkable=True, autoRaise=True)
+        self.btn_raw.setToolTip(tr("Mostrar metadatos tal como vienen de ExifTool"))
+        self.btn_raw.clicked.connect(lambda: self.set_raw_mode(True))
+        self.mode_group.addButton(self.btn_raw)
+        header_layout.addWidget(self.btn_raw)
+
+        header_layout.addStretch(1)
+
+        self.btn_wrap = QToolButton(text=tr("Ajustar"), checkable=True, autoRaise=True)
+        self.btn_wrap.setToolTip(tr("Ajustar líneas al ancho"))
+        self.btn_wrap.setCheckable(True)
+        self.btn_wrap.setChecked(self._raw_wrap)
+        self.btn_wrap.toggled.connect(self._set_raw_wrap)
+        header_layout.addWidget(self.btn_wrap)
+
+        self.btn_copy = QToolButton(autoRaise=True)
+        self.btn_copy.setIcon(themed("copy"))
+        self.btn_copy.setToolTip(tr("Copiar todos los metadatos"))
+        self.btn_copy.clicked.connect(self.copy_all)
+        header_layout.addWidget(self.btn_copy)
+
         self.tree = QTreeWidget()
         self.tree.setColumnCount(2)
         self.tree.setHeaderLabels([tr("Dato"), tr("Valor")])
@@ -312,20 +351,65 @@ class MetadataPanel(QWidget):
         self.tree.header().sectionResized.connect(lambda *_sizes: self.tree.doItemsLayout())  # la altura de cada fila depende del ancho
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._context_menu)
+
+        self.raw_view = QPlainTextEdit()
+        self.raw_view.setReadOnly(True)
+        self.raw_view.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        self.raw_view.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth if self._raw_wrap else QPlainTextEdit.LineWrapMode.NoWrap)
+        self.raw_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.raw_view.customContextMenuRequested.connect(self._raw_context_menu)
+
+        self.stack = QStackedWidget()
+        self.stack.addWidget(self.tree)
+        self.stack.addWidget(self.raw_view)
+
         self.note = QLabel()
         self.note.setWordWrap(True)
         self.note.setOpenExternalLinks(True)
         self.note.setTextFormat(Qt.TextFormat.RichText)
         self.note.setContentsMargins(8, 4, 8, 4)
         self.note.hide()
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(self.tree, 1)
+        layout.addWidget(self.header_bar)
+        layout.addWidget(self.stack, 1)
         layout.addWidget(self.note)
+
         self._entry: Entry | None = None
         self._timer = QTimer(self, singleShot=True, interval=METADATA_DELAY_MS)  # recorrer la lista con las flechas no lanza un proceso por fila
         self._timer.timeout.connect(self._start_reading)
+
+        self.set_raw_mode(self._raw_mode)
+
+    def set_raw_mode(self, raw: bool) -> None:
+        self._raw_mode = raw
+        self.config["metadata_raw_view"] = raw
+        self.btn_raw.setChecked(raw)
+        self.btn_tree.setChecked(not raw)
+        self.btn_wrap.setVisible(raw)
+        self.stack.setCurrentIndex(1 if raw else 0)
+
+    def _set_raw_wrap(self, wrap: bool) -> None:
+        self._raw_wrap = wrap
+        self.config["metadata_raw_wrap"] = wrap
+        self.btn_wrap.setChecked(wrap)
+        self.raw_view.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth if wrap else QPlainTextEdit.LineWrapMode.NoWrap)
+
+    def copy_all(self) -> None:
+        if self._raw_mode:
+            text = self.raw_view.toPlainText()
+        else:
+            lines = []
+            for name, rows in self.groups():
+                lines.append(f"[{name}]")
+                for tag, value in rows:
+                    lines.append(f"  {tag}: {value}")
+                lines.append("")
+            text = "\n".join(lines).strip()
+        if text:
+            QGuiApplication.clipboard().setText(text)
 
     def groups(self) -> list[tuple[str, list[tuple[str, str]]]]:
         """Lo que se está mostrando."""
@@ -336,12 +420,30 @@ class MetadataPanel(QWidget):
         return result
 
     def _context_menu(self, position: QPoint) -> None:
+        menu = QMenu(self)
         item = self.tree.itemAt(position)
         if item is not None and item.parent() is not None:
-            menu = QMenu(self)
             menu.addAction(themed("copy"), tr("Copiar el valor"), lambda: QGuiApplication.clipboard().setText(item.text(1)))
             menu.addAction(tr("Copiar el dato y el valor"), lambda: QGuiApplication.clipboard().setText(f"{item.text(0)}: {item.text(1)}"))
-            menu.exec(self.tree.viewport().mapToGlobal(position))
+            menu.addSeparator()
+        menu.addAction(themed("copy"), tr("Copiar todos los metadatos"), self.copy_all)
+        menu.addSeparator()
+        menu.addAction(tr("Mostrar metadatos tal como vienen de ExifTool"), lambda: self.set_raw_mode(True))
+        menu.exec(self.tree.viewport().mapToGlobal(position))
+
+    def _raw_context_menu(self, position: QPoint) -> None:
+        menu = QMenu(self)
+        if self.raw_view.textCursor().hasSelection():
+            menu.addAction(themed("copy"), tr("Copiar selección"), self.raw_view.copy)
+        menu.addAction(themed("copy"), tr("Copiar todos los metadatos"), self.copy_all)
+        menu.addSeparator()
+        wrap_act = menu.addAction(tr("Ajustar líneas al ancho"))
+        wrap_act.setCheckable(True)
+        wrap_act.setChecked(self._raw_wrap)
+        wrap_act.toggled.connect(self._set_raw_wrap)
+        menu.addSeparator()
+        menu.addAction(tr("Ver como tabla organizada"), lambda: self.set_raw_mode(False))
+        menu.exec(self.raw_view.viewport().mapToGlobal(position))
 
     def _show_groups(self, groups: list[tuple[str, list[tuple[str, str]]]]) -> None:
         self.tree.clear()
@@ -358,6 +460,17 @@ class MetadataPanel(QWidget):
                     row.setTextAlignment(column, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
             top.setExpanded(True)
         self.tree.doItemsLayout()
+
+    def _show_basic(self, entry: Entry) -> None:
+        groups = self._basic_groups(entry)
+        self._show_groups(groups)
+        lines = []
+        for name, rows in groups:
+            lines.append(f"[{name}]")
+            for tag, val in rows:
+                lines.append(f"{tag:<16}: {val}")
+        self._raw_text = "\n".join(lines)
+        self.raw_view.setPlainText(self._raw_text)
 
     @staticmethod
     def _basic_groups(entry: Entry) -> list[tuple[str, list[tuple[str, str]]]]:
@@ -386,10 +499,12 @@ class MetadataPanel(QWidget):
         self.note.hide()
         if entry is None:
             self.tree.clear()
+            self.raw_view.clear()
+            self._raw_text = ""
         elif entry.is_dir or not os.path.isfile(entry.path):
-            self._show_groups(self._basic_groups(entry))  # ExifTool recorrería todos los archivos de una carpeta
+            self._show_basic(entry)  # ExifTool recorrería todos los archivos de una carpeta
         elif find_exiftool(self.exiftool_dir) is None:
-            self._show_groups(self._basic_groups(entry))
+            self._show_basic(entry)
             self._show_note(tr('No se encontró ExifTool, que es quien lee los metadatos. <a href="{url}">Descárgalo de su web</a> e indica su carpeta en Preferencias → General.', url=DOWNLOAD_URL))
             path, extension = entry.path, entry.extension
             run_bg(lambda _sink: self.generation_groups(path, extension),
@@ -408,19 +523,38 @@ class MetadataPanel(QWidget):
         path, language = entry.path, language_for(current_language())
 
         def done(value) -> None:
-            generated, groups = value
+            generated, groups, raw_text = value
             if self._entry is entry:
                 self._show_groups(generated + (groups or self._basic_groups(entry)))
-                if not groups:
+                self._raw_text = raw_text or ""
+                self.raw_view.setPlainText(self._raw_text)
+                if not groups and not raw_text:
                     self._show_note(tr("ExifTool no encontró datos en este archivo."))
 
         def failed(exc) -> None:
             if self._entry is entry:
-                self._show_groups(self._basic_groups(entry))
+                self._show_basic(entry)
+                self._raw_text = str(exc)
+                self.raw_view.setPlainText(self._raw_text)
                 self._show_note(_escape(str(exc)))
 
         extension = entry.extension
-        run_bg(lambda _sink: (self.generation_groups(path, extension), read_metadata(path, tool, language)), done, failed)
+
+        def _fetch(_sink):
+            gen = self.generation_groups(path, extension)
+            groups = None
+            try:
+                groups = read_metadata(path, tool, language)
+            except Exception:
+                pass
+            raw = ""
+            try:
+                raw = read_raw_metadata(path, tool)
+            except Exception as e:
+                raw = str(e)
+            return gen, groups, raw
+
+        run_bg(_fetch, done, failed)
 
 
 def _wrappable(text: str) -> str:
