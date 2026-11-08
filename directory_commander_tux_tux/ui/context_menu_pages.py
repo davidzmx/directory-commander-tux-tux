@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QHBoxLayout, QHeaderView, QLabel, QListWidget, QListWidgetItem, QPushButton,
+                               QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from ..core import context_menu, windows_shell
 from ..core.context_menu import SEPARATOR, SHELL_ITEMS, SHELL_ITEMS_LABEL
@@ -86,6 +86,66 @@ class MenuEditor(QWidget):
                            if item.data(KEY_ROLE) != SEPARATOR and item.checkState() != Qt.CheckState.Checked]}
 
 
+class ShellTreeWidgetItem(QTreeWidgetItem):
+    """Elemento de la lista de opciones del sistema con compatibilidad para la API de QListWidgetItem."""
+
+    def text(self, column: int = 0) -> str:
+        return super().text(column)
+
+    def setText(self, *args) -> None:
+        if len(args) == 1:
+            super().setText(0, args[0])
+        else:
+            super().setText(args[0], args[1])
+
+    def checkState(self, column: int = 0) -> Qt.CheckState:
+        return super().checkState(column)
+
+    def setCheckState(self, *args) -> None:
+        if len(args) == 1:
+            super().setCheckState(0, args[0])
+        else:
+            super().setCheckState(args[0], args[1])
+
+    def data(self, *args):
+        if len(args) == 1:
+            return super().data(0, args[0])
+        return super().data(args[0], args[1])
+
+    def setData(self, *args) -> None:
+        if len(args) == 2:
+            super().setData(0, args[0], args[1])
+        else:
+            super().setData(args[0], args[1], args[2])
+
+
+class ShellTreeWidget(QTreeWidget):
+    """Árbol/tabla de 2 columnas para opciones del sistema y su programa asociado."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setHeaderLabels([tr("Opción"), tr("Programa")])
+        self.setRootIsDecorated(False)
+        self.setSortingEnabled(True)
+        header = self.header()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        self.setColumnWidth(1, 160)
+
+    def count(self) -> int:
+        return self.topLevelItemCount()
+
+    def item(self, row: int) -> ShellTreeWidgetItem | None:
+        return self.topLevelItem(row)  # type: ignore[return-value]
+
+    def addItem(self, item: ShellTreeWidgetItem | QTreeWidgetItem | str) -> None:
+        if isinstance(item, QTreeWidgetItem):
+            self.addTopLevelItem(item)
+        else:
+            text = item.text() if hasattr(item, "text") else str(item)
+            self.addTopLevelItem(ShellTreeWidgetItem([text, ""]))
+
+
 class ContextMenuPages:
     """Crea las páginas y devuelve lo elegido. `sample_paths` son la carpeta abierta y lo seleccionado, para leer
     qué opciones de otros programas hay: leerlas carga sus extensiones, por eso se hace al abrir su página."""
@@ -105,7 +165,7 @@ class ContextMenuPages:
 
         self.shell_items = QCheckBox(tr("Mostrar en los menús las opciones del sistema y de otros programas"))
         self.shell_items.setChecked(config.get("shell_menu_items", True))
-        self.shell_list = QListWidget()
+        self.shell_list = ShellTreeWidget()
         self.shell_list.setEnabled(self.shell_items.isChecked())
         self.shell_items.toggled.connect(self.shell_list.setEnabled)
         hint = QLabel(tr("Desmarca lo que no quieras ver. La lista muestra lo que ofrece la carpeta abierta y lo que tengas seleccionado al abrir las preferencias."))
@@ -120,15 +180,27 @@ class ContextMenuPages:
             self.pages.append((tr("Otros programas"), self.shell_page))
         self._show_shell_options({})
 
-    def _show_shell_options(self, found: dict[str, str]) -> None:
+    def _show_shell_options(self, found: dict[str, str | tuple[str, str]]) -> None:
         self.shell_list.clear()
-        labels = {**found, **self.shell_hidden}
-        for key, label in sorted(labels.items(), key=lambda pair: pair[1].casefold()):
-            item = QListWidgetItem(label)
-            item.setData(KEY_ROLE, key)
+        labels: dict[str, tuple[str, str]] = {}
+        for key, val in found.items():
+            if isinstance(val, tuple):
+                labels[key] = val
+            else:
+                prog = windows_shell.detect_program(val, key)
+                labels[key] = (val, prog)
+        for key, label in self.shell_hidden.items():
+            if key not in labels:
+                prog = windows_shell.detect_program(label, key)
+                labels[key] = (label, prog)
+
+        for key, (label, prog) in sorted(labels.items(), key=lambda pair: pair[1][0].casefold()):
+            item = ShellTreeWidgetItem([label, prog])
+            item.setData(0, KEY_ROLE, key)
             item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(Qt.CheckState.Unchecked if key in self.shell_hidden else Qt.CheckState.Checked)
+            item.setCheckState(0, Qt.CheckState.Unchecked if key in self.shell_hidden else Qt.CheckState.Checked)
             self.shell_list.addItem(item)
+        self.shell_list.sortByColumn(0, Qt.SortOrder.AscendingOrder)
 
     def load_shell_options(self) -> None:
         """Lee las opciones instaladas, solo la primera vez que se abre la página."""
@@ -136,7 +208,7 @@ class ContextMenuPages:
             return
         self.shell_loaded = True
         self.shell_hidden = self._current_hidden()
-        found: dict[str, str] = {}
+        found: dict[str, tuple[str, str]] = {}
         readers = []
         if self.sample_folder:
             readers.append(lambda: windows_shell.menu_for_folder(self.sample_folder))
@@ -154,7 +226,8 @@ class ContextMenuPages:
                 # «Abrir con» ya es una entrada de la página de menús: no se ofrece también aquí.
                 for item in windows_shell.clean_items(menu.items(), hidden_keys=(windows_shell.OPEN_WITH_VERB,)):
                     if not item.separator:
-                        found[windows_shell.shell_key(item)] = item.label.replace("&", "")
+                        prog = getattr(item, "program", "") or windows_shell.detect_program(item.label, item.verb)
+                        found[windows_shell.shell_key(item)] = (item.label.replace("&", ""), prog)
             finally:
                 menu.close()
         self._show_shell_options(found)
@@ -163,6 +236,8 @@ class ContextMenuPages:
         hidden = dict(self.shell_hidden)
         for row in range(self.shell_list.count()):
             item = self.shell_list.item(row)
+            if item is None:
+                continue
             key = item.data(KEY_ROLE)
             if item.checkState() == Qt.CheckState.Checked:
                 hidden.pop(key, None)
