@@ -5063,14 +5063,14 @@ def test_clean_items_keeps_everything_in_submenus():
     assert [i.label for i in clean_items([ShellItem(label="Copiar", verb="copy")], own_verbs=())] == ["Copiar"]
 
 
-def test_shell_items_go_before_the_last_group():
+def test_shell_items_go_before_the_last_group(app):
     menu = menu_with_end()
     add_shell_items(menu, FakeShell())
     labels_ = [("-" if a.isSeparator() else a.text()) for a in menu.actions()]
     assert labels_ == ["Propia", "-", "&Otro programa", "-", "Propiedades"]
 
 
-def test_shell_item_runs_its_command():
+def test_shell_item_runs_its_command(app):
     menu = menu_with_end()
     shell = FakeShell()
     add_shell_items(menu, shell)
@@ -5078,14 +5078,14 @@ def test_shell_item_runs_its_command():
     assert shell.invoked == [7]
 
 
-def test_shell_item_keeps_state():
+def test_shell_item_keeps_state(app):
     menu = menu_with_end()
     add_shell_items(menu, FakeShell([ShellItem(label="Apagada", enabled=False, command=1), ShellItem(label="Marcada", checked=True, command=2)]))
     by_text = {a.text(): a for a in menu.actions()}
     assert not by_text["Apagada"].isEnabled() and by_text["Marcada"].isChecked()
 
 
-def test_failing_program_does_not_break_the_menu():
+def test_failing_program_does_not_break_the_menu(app):
     menu = menu_with_end()
     errors = []
     add_shell_items(menu, FakeShell(invoke_error="fallo del programa"), errors.append)
@@ -5093,7 +5093,7 @@ def test_failing_program_does_not_break_the_menu():
     assert errors == ["fallo del programa"]
 
 
-def test_nothing_is_added_without_items():
+def test_nothing_is_added_without_items(app):
     menu = menu_with_end()
     add_shell_items(menu, FakeShell([ShellItem(label="Cortar", verb="cut")]))
     assert len(menu.actions()) == 3
@@ -7151,6 +7151,34 @@ def test_preferences_shell_list_follows_the_main_checkbox(app):
     assert menus.shell_list.isEnabled()
     menus.shell_items.setChecked(False)
     assert not menus.shell_list.isEnabled()
+
+
+def test_preferences_shell_list_shows_program_column(app, monkeypatch, tmp_path):
+    monkeypatch.setattr(windows_shell, "menu_for_folder", lambda *a: FakeShell([
+        ShellItem(label="&Editar con Notepad++", verb="{B298DCDD-FFC2-42B4-BE59-586E85C7AB5E}", command=1),
+        ShellItem(label="Añadir al archivo...", verb="WinRAR_AddTo", command=2),
+    ]))
+    monkeypatch.setattr(windows_shell, "menu_for_items", lambda *a: None)
+    dialog = PreferencesDialog({}, None, str(tmp_path))
+    dialog.menus.load_shell_options()
+    shell_list = dialog.menus.shell_list
+    assert shell_list.headerItem().text(0) == "Opción"
+    assert shell_list.headerItem().text(1) == "Programa"
+    assert shell_list.count() == 2
+    items = {shell_list.item(i).text(0): shell_list.item(i).text(1) for i in range(shell_list.count())}
+    assert items["Añadir al archivo..."] == "WinRAR"
+    assert items["Editar con Notepad++"] == "Notepad++"
+
+
+def test_detect_program_identifies_known_programs():
+    assert windows_shell.detect_program("Editar con Notepad++") == "Notepad++"
+    assert windows_shell.detect_program("Play with VLC media player") == "VLC media player"
+    assert windows_shell.detect_program("Abrir con Code") == "Visual Studio Code"
+    assert windows_shell.detect_program("7-Zip") == "7-Zip"
+    assert windows_shell.detect_program("TeraCopy...") == "TeraCopy"
+    assert windows_shell.detect_program("Git GUI Here", verb="git_gui") == "Git"
+    assert windows_shell.detect_program("Añadir al archivo...", verb="WinRAR_AddTo") == "WinRAR"
+    assert windows_shell.detect_program("Enviar a", verb="sendto") == "Windows"
 
 
 def test_menu_settings_travel_in_exported_configuration(window, tmp_path):

@@ -8,9 +8,15 @@ from __future__ import annotations
 
 import ctypes
 import os
+import re
 import sys
 from ctypes import POINTER, Structure, byref, c_char_p, c_int, c_uint, c_ulong, c_void_p, c_wchar_p, cast, sizeof
 from dataclasses import dataclass
+
+try:
+    import winreg
+except ImportError:
+    winreg = None
 
 from .i18n import tr
 
@@ -36,6 +42,167 @@ class ShellItem:
     bitmap: int = 0
     submenu: int = 0  # identificador del menú de Windows; sus elementos se leen al abrirlo
     position: int = 0
+    program: str = ""
+
+
+_PROGRAM_CACHE: dict[str, str] = {}
+_CACHE_INITIALIZED = False
+
+
+def _init_program_cache() -> None:
+    global _CACHE_INITIALIZED
+    if _CACHE_INITIALIZED or winreg is None:
+        return
+    _CACHE_INITIALIZED = True
+    for root_path in (r"*\shellex\ContextMenuHandlers", r"Directory\shellex\ContextMenuHandlers",
+                      r"Folder\shellex\ContextMenuHandlers", r"AllFilesystemObjects\shellex\ContextMenuHandlers"):
+        try:
+            k = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, root_path)
+            i = 0
+            while True:
+                try:
+                    name = winreg.EnumKey(k, i)
+                    sk = winreg.OpenKey(k, name)
+                    val = winreg.QueryValue(sk, "")
+                    if val.startswith("{") and val.endswith("}"):
+                        _PROGRAM_CACHE[val.upper()] = name
+                    i += 1
+                except OSError:
+                    break
+        except Exception:
+            pass
+
+    try:
+        k = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, r"PackagedCom\Package")
+        i = 0
+        while True:
+            try:
+                pkg_name = winreg.EnumKey(k, i)
+                try:
+                    ck = winreg.OpenKey(k, f"{pkg_name}\\Class")
+                    j = 0
+                    while True:
+                        clsid = winreg.EnumKey(ck, j)
+                        _PROGRAM_CACHE[clsid.upper()] = pkg_name.split("_")[0]
+                        j += 1
+                except OSError:
+                    pass
+                i += 1
+            except OSError:
+                break
+    except Exception:
+        pass
+
+
+KNOWN_PROGRAM_NAMES = {
+    "NotepadPlusPlus": "Notepad++",
+    "Microsoft.WindowsNotepad": "Bloc de notas",
+    "FileSyncEx": "OneDrive",
+    "Resilio Sync 2.7.3": "Resilio Sync",
+    "FileMenuTools": "FileMenu Tools",
+    "AccExt": "Adobe Creative Cloud",
+    "EPP": "Windows Defender",
+    "OpusZip": "Directory Opus",
+    "ReflectShellExt": "Macrium Reflect",
+    "SendTo": "Windows",
+    "CopyAsPathMenu": "Windows",
+    "ModernSharing": "Windows",
+    "Sharing": "Windows",
+    "WorkFolders": "Windows",
+    "Offline Files": "Windows",
+    "PintoStartScreen": "Windows",
+}
+
+KNOWN_VERBS = {
+    "anycode": "Visual Studio",
+    "git_gui": "Git",
+    "git_shell": "Git",
+    "playwithvlc": "VLC media player",
+    "addtoplaylistvlc": "VLC media player",
+    "{db6bacb1-fc31-4b28-9c53-7240a4f98404}": "Microsoft Copilot",
+}
+
+
+def detect_program(label: str, verb: str = "") -> str:
+    """Identifica el programa al que pertenece una opción del menú contextual."""
+    clean = label.replace("&", "").strip()
+    v_lower = verb.lower().strip()
+
+    if v_lower in KNOWN_VERBS:
+        return KNOWN_VERBS[v_lower]
+
+    if "winrar" in v_lower:
+        return "WinRAR"
+
+    if verb.startswith("{") and verb.endswith("}"):
+        _init_program_cache()
+        guid = verb.upper()
+        if guid in _PROGRAM_CACHE:
+            raw = _PROGRAM_CACHE[guid]
+            return KNOWN_PROGRAM_NAMES.get(raw, raw)
+        if winreg is not None:
+            try:
+                k = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, f"CLSID\\{verb}")
+                desc = winreg.QueryValue(k, "")
+                if desc:
+                    cleaned = re.sub(r"(?i)\s+(class|shell\s+extension|context\s+menu.*)$", "", desc).strip()
+                    if cleaned:
+                        return cleaned
+                srv = winreg.OpenKey(k, "InprocServer32")
+                dll = winreg.QueryValue(srv, "")
+                if dll:
+                    folder = os.path.basename(os.path.dirname(dll))
+                    if folder.lower() not in ("system32", "syswow64", "windows"):
+                        return folder
+            except Exception:
+                pass
+
+    patterns = (
+        (r"\bnotepad\+\+", "Notepad++"),
+        (r"\bbloc de notas\b|\bnotepad\b", "Bloc de notas"),
+        (r"\bvisual studio code\b|\bvs\s*code\b|\bcode\b", "Visual Studio Code"),
+        (r"\bvisual studio\b", "Visual Studio"),
+        (r"\bgit\b", "Git"),
+        (r"\bwinrar\b|añadir al archivo|añadir a \".*?\.rar\"|extraer en |extraer ficheros", "WinRAR"),
+        (r"\b7-zip\b|\bcrc sha\b", "7-Zip"),
+        (r"\bvlc\b", "VLC media player"),
+        (r"\bteracopy\b", "TeraCopy"),
+        (r"\bfilemenu tools\b", "FileMenu Tools"),
+        (r"\bresilio sync\b", "Resilio Sync"),
+        (r"\bonedrive\b", "OneDrive"),
+        (r"\bdropbox\b", "Dropbox"),
+        (r"\bgoogle drive\b", "Google Drive"),
+        (r"\bpowertoys\b|\bpowerrename\b", "PowerToys"),
+        (r"\btortoisegit\b", "TortoiseGit"),
+        (r"\btortoisesvn\b", "TortoiseSVN"),
+        (r"\badobe\b|\bacrobat\b", "Adobe Acrobat"),
+        (r"\bdefender\b", "Windows Defender"),
+        (r"\bcopilot\b", "Microsoft Copilot"),
+        (r"\bclipchamp\b", "Clipchamp"),
+        (r"\bspotify\b", "Spotify"),
+        (r"\bwhatsapp\b", "WhatsApp"),
+        (r"\btelegram\b", "Telegram"),
+        (r"\bskype\b", "Skype"),
+    )
+    for pattern, name in patterns:
+        if re.search(pattern, clean, re.IGNORECASE):
+            return name
+
+    windows_verbs = {
+        "windows.share", "windows.modernshare", "pintohomefile", "pintohome",
+        "copyaspath", "previousversions", "new", "openas", "properties", "cut", "copy", "delete"
+    }
+    if v_lower in windows_verbs:
+        return "Windows"
+
+    windows_labels = {
+        "enviar a", "compartir", "dar acceso a", "agregar a favoritos", "restaurar versiones anteriores",
+        "copiar como ruta de acceso", "nuevo", "abrir", "abrir con", "propiedades", "desanclar", "anclar"
+    }
+    if clean.lower() in windows_labels:
+        return "Windows"
+
+    return "Windows"
 
 
 def shell_key(item: ShellItem) -> str:
@@ -229,7 +396,8 @@ class ShellMenu:
             items.append(ShellItem(label=label, enabled=not info.fState & MFS_DISABLED, checked=bool(info.fState & MFS_CHECKED),
                                    command=info.wID, verb=verb,
                                    bitmap=choose_bitmap(info.hbmpItem or 0, info.hbmpUnchecked or 0),
-                                   submenu=info.hSubMenu or 0, position=position))
+                                   submenu=info.hSubMenu or 0, position=position,
+                                   program=detect_program(label, verb)))
         return items
 
     def prepare_submenu(self, hsubmenu: int, position: int = 0) -> None:
