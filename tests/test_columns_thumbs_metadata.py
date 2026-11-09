@@ -1118,14 +1118,23 @@ def test_videoplayback_not_detected_as_ai(tmp_path):
 
 
 def test_drop_operation_on_executable(tmp_path):
+    import sys
     from directory_commander_tux_tux.core import fsops
-    exe_file = tmp_path / "tool.exe"
-    exe_file.write_bytes(b"MZfakeexe")
+    windows = sys.platform == "win32"
+    exe_file = tmp_path / ("tool.exe" if windows else "tool")
+    exe_file.write_bytes(b"MZfakeexe" if windows else b"#!/bin/sh\n")
+    exe_file.chmod(0o755)
     txt_file = tmp_path / "document.txt"
     txt_file.write_text("hello", encoding="utf-8")
 
     assert fsops.is_executable_target(str(exe_file)) is True
     assert fsops.is_executable_target(str(txt_file)) is False
+    if not windows:
+        # En un disco FAT, exFAT o NTFS todos los archivos tienen permiso de ejecución: una foto no es un programa.
+        photo = tmp_path / "foto.jpg"
+        photo.write_bytes(b"\xff\xd8\xff\xe0")
+        photo.chmod(0o755)
+        assert fsops.is_executable_target(str(photo)) is False
 
     # Dropping a file onto an executable gives "open_with"
     assert fsops.drop_operation([str(txt_file)], str(exe_file)) == "open_with"

@@ -523,12 +523,14 @@ class MetadataPanel(QWidget):
         path, language = entry.path, language_for(current_language())
 
         def done(value) -> None:
-            generated, groups, raw_text = value
+            generated, groups, raw_text, error = value
             if self._entry is entry:
                 self._show_groups(generated + (groups or self._basic_groups(entry)))
                 self._raw_text = raw_text or ""
                 self.raw_view.setPlainText(self._raw_text)
-                if not groups and not raw_text:
+                if error is not None and not groups:
+                    self._show_note(_escape(str(error)))  # qué le pasa a ExifTool, en lugar de una lista vacía
+                elif not groups and not raw_text:
                     self._show_note(tr("ExifTool no encontró datos en este archivo."))
 
         def failed(exc) -> None:
@@ -542,17 +544,17 @@ class MetadataPanel(QWidget):
 
         def _fetch(_sink):
             gen = self.generation_groups(path, extension)
-            groups = None
+            groups, error = None, None
             try:
                 groups = read_metadata(path, tool, language)
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001 - se muestra en el panel
+                error = exc
             raw = ""
             try:
                 raw = read_raw_metadata(path, tool)
             except Exception as e:
                 raw = str(e)
-            return gen, groups, raw
+            return gen, groups, raw, error
 
         run_bg(_fetch, done, failed)
 
