@@ -261,7 +261,15 @@ def is_executable_target(path: str) -> bool:
     ext = os.path.splitext(path)[1].lstrip(".").lower()
     if sys.platform == "win32":
         return ext in ("exe", "bat", "cmd", "com", "ps1")
-    return ext in ("sh", "bin", "appimage", "run") or os.access(path, os.X_OK)
+    # Un programa o un script que se puede ejecutar. El permiso no basta: en un disco FAT, exFAT o NTFS lo tienen todos los archivos.
+    if not os.access(path, os.X_OK):
+        return False
+    try:
+        with open(path, "rb") as source:
+            start = source.read(4)
+    except OSError:
+        return False
+    return start == b"\x7fELF" or start.startswith(b"#!")
 
 
 def drop_operation(paths: list[str], dest_dir: str, force_move: bool = False, force_copy: bool = False) -> str | None:

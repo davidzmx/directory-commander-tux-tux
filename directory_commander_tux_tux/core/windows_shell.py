@@ -13,9 +13,9 @@ import sys
 from ctypes import POINTER, Structure, byref, c_char_p, c_int, c_uint, c_ulong, c_void_p, c_wchar_p, cast, sizeof
 from dataclasses import dataclass
 
-try:
+if sys.platform == "win32":
     import winreg
-except ImportError:
+else:
     winreg = None
 
 from .i18n import tr

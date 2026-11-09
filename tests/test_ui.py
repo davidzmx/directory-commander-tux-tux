@@ -6484,13 +6484,15 @@ def test_drop_on_a_file_name_goes_to_the_pane_folder(window, tree):
 
 def test_drop_on_executable_launches_it(window, tree, monkeypatch):
     left, right = tree
-    exe = right / "tool.exe"
-    exe.write_bytes(b"MZ")
+    windows = sys.platform == "win32"
+    exe = right / ("tool.exe" if windows else "tool")
+    exe.write_bytes(b"MZ" if windows else b"#!/bin/sh\n")
+    exe.chmod(0o755)
     window.dest.refresh()
-    assert wait_until(lambda: "tool.exe" in names(window.dest))
+    assert wait_until(lambda: exe.name in names(window.dest))
     called = []
     monkeypatch.setattr(window, "_execute_with_files", lambda target, paths: called.append((target, paths)))
-    send_to_view(window.dest, drop_event(name_center(window.dest, "tool.exe"), [left / "a.txt"]))
+    send_to_view(window.dest, drop_event(name_center(window.dest, exe.name), [left / "a.txt"]))
     assert wait_until(lambda: len(called) == 1)
     assert called[0][0] == str(exe)
     assert called[0][1] == [str(left / "a.txt")]
