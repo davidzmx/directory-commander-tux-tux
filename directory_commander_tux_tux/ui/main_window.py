@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QDockWidget, QFileDialog
                                QSizePolicy, QSplitter,
                                QTabWidget, QToolBar, QToolButton, QVBoxLayout, QWidget, QWidgetAction)
 
-from .. import APP_NAME, __version__
+from .. import APP_NAME, REPO_URL, __version__
 from ..core import sessions, archive, bar_buttons, commands, context_menu, desktop_apps, devices, favorites, file_compare, frequent, fsops, git_tools, listing, pane_colors, platform_utils, remote, rename, shells, styles, tab_settings, windows_shell
 from ..core.config import COMPARE_COMMAND, DEFAULT_SORTS, GENERATION_MARK_KINDS, STYLE_RENAMES, THUMB_SIZES, VIDEO_THUMBNAILS, Config
 from ..core.fsops import Answer, Collision, OpResult
@@ -151,6 +151,7 @@ MENU_ITEMS = [
     (N_("&Ajustes"), N_("Bloquear las barras"), None, None, "Set LOCKBARS=Toggle", False),
     (N_("&Ajustes"), N_("Información al pasar el ratón"), None, None, "Set HOVERINFO=Toggle", False),
     (N_("&Ajustes"), N_("Barra de favoritos"), "favorites", None, "Toolbar NAME=\"Favorites Bar\" TOGGLE", False),
+    (N_("&Ajustes"), N_("Icono en la esquina superior derecha"), None, None, "Set APPLOGO=Toggle", False),
     (N_("&Ajustes"), None, None, None, None, False),
     (N_("&Ajustes"), N_("Guardar diseño…"), "dualdisplay", None, "Prefs LAYOUTSAVE", False),
     (N_("&Ajustes"), N_("Abrir diseño…"), "dualdisplay", None, "Prefs LAYOUTLIST", False),
@@ -1051,6 +1052,25 @@ class MainWindow(ExtraCommands, QMainWindow):
             view.hover_enabled = self.config["hover_info"]
             view.hover_card.dismiss()
 
+    def _set_applogo(self, value: str) -> None:
+        self.config["show_app_icon"] = _turn(value, bool(self.config.get("show_app_icon", True)))
+        self._apply_app_logo_visibility()
+
+    def _apply_app_logo_visibility(self) -> None:
+        if hasattr(self, "app_logo_button"):
+            self.app_logo_button.setVisible(bool(self.config.get("show_app_icon", True)))
+
+    def _show_app_logo_menu(self, pos: QPoint) -> None:
+        menu = QMenu(self)
+        menu.addAction(app_icon(), tr("Acerca de {APP_NAME}…", APP_NAME=APP_NAME), lambda: self.run_command("Help ABOUT"))
+        menu.addSeparator()
+        menu.addAction(tr("Ocultar este icono"), self._hide_app_logo)
+        menu.exec(self.app_logo_button.mapToGlobal(pos))
+
+    def _hide_app_logo(self) -> None:
+        self.config["show_app_icon"] = False
+        self._apply_app_logo_visibility()
+
     def createPopupMenu(self) -> QMenu:
         """Clic derecho en una barra: mostrar u ocultar barras y paneles, y bloquearlas."""
         menu = super().createPopupMenu() or QMenu(self)
@@ -1720,6 +1740,7 @@ class MainWindow(ExtraCommands, QMainWindow):
             "Set FRIENDLYDATES=off": lambda: self.config.get("friendly_dates", "off") == "off",
             "Set NAVLOCK=Toggle": lambda: self.nav_lock,
             "Set HOVERINFO=Toggle": lambda: bool(self.config.get("hover_info", True)),
+            "Set APPLOGO=Toggle": lambda: bool(self.config.get("show_app_icon", True)),
         })
         for size in THUMB_SIZES:
             states[f"Set THUMBNAILSIZE={size}"] = (lambda s=size: self._thumbnail_size() == s)
@@ -1812,6 +1833,16 @@ class MainWindow(ExtraCommands, QMainWindow):
         row.addWidget(self.save_session_button)
         row.addWidget(self.new_session_button)
         row.addWidget(self.manage_sessions_button)
+        self.app_logo_button = QToolButton()
+        self.app_logo_button.setIcon(app_icon())
+        self.app_logo_button.setIconSize(QSize(22, 22))
+        self.app_logo_button.setAutoRaise(True)
+        self.app_logo_button.setToolTip(tr("Acerca de {APP_NAME}", APP_NAME=APP_NAME))
+        self.app_logo_button.clicked.connect(lambda: self.run_command("Help ABOUT"))
+        self.app_logo_button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.app_logo_button.customContextMenuRequested.connect(self._show_app_logo_menu)
+        row.addWidget(self.app_logo_button)
+        self._apply_app_logo_visibility()
         self.menuBar().setCornerWidget(corner, Qt.Corner.TopRightCorner)
         self._current_session = ""
         self._session_baseline: dict = {}  # cómo estaba la ventana al empezar una sesión sin nombre, para saber si ha cambiado
@@ -4302,6 +4333,7 @@ class MainWindow(ExtraCommands, QMainWindow):
         self._apply_general_status()
         self._apply_pane_frames()
         self._apply_path_options()
+        self._apply_app_logo_visibility()
         self._refresh_session_box()
         for bar in self.git_bars:
             bar.apply_settings()
@@ -4530,7 +4562,8 @@ class MainWindow(ExtraCommands, QMainWindow):
 
     def _cmd_help(self, _cmd: commands.Command) -> None:
         QMessageBox.about(self, tr("Acerca de {APP_NAME}", APP_NAME=APP_NAME),
-                          tr("<b>{APP_NAME} {version__}</b><br>Gestor de archivos de doble panel para Linux y Windows.<br>Proyecto independiente de código abierto.", APP_NAME=APP_NAME, version__=__version__))
+                          tr("<b>{APP_NAME} {version__}</b><br>Gestor de archivos de doble panel para Linux y Windows.<br>Proyecto independiente de código abierto.<br><br>Repositorio:<br><a href=\"{repo_url}\">{repo_url}</a>",
+                             APP_NAME=APP_NAME, version__=__version__, repo_url=REPO_URL))
 
     def _cmd_close(self, cmd: commands.Command) -> None:
         """Salir. Con PROGRAM=confirm se pregunta aunque en las preferencias no se pida confirmar."""

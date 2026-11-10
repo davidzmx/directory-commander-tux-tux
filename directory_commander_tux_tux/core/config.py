@@ -203,6 +203,7 @@ DEFAULTS: dict = {
     "expandable_folders": True,
     "friendly_dates": "off",
     "show_favorites_bar": False,
+    "show_app_icon": True,
     "general_status_bar": True,
     "pane_free_space": "other_disk",  # con la barra general, en qué paneles se ve también el espacio libre: other_disk, always o never
     "list_column_chars": 50,  # el ancho máximo de las columnas de la vista de lista; 0 sin límite

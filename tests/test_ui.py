@@ -7233,3 +7233,33 @@ def test_list_does_not_jump_to_show_a_whole_column_when_the_name_is_visible(app,
     items.scrollTo(index)
     assert bar.value() > 0  # uno que no se ve sí se trae
     view.dispose()
+
+
+def test_app_logo_in_top_right_corner_and_visibility_toggle(window):
+    assert hasattr(window, "app_logo_button")
+    assert window.app_logo_button.isVisible()
+    window.run_command("Set APPLOGO=Toggle")
+    assert not window.app_logo_button.isVisible()
+    assert window.config["show_app_icon"] is False
+    window.run_command("Set APPLOGO=Toggle")
+    assert window.app_logo_button.isVisible()
+    assert window.config["show_app_icon"] is True
+
+
+def test_preferences_show_app_icon_toggle(app):
+    config = {"show_app_icon": True}
+    dialog = PreferencesDialog(config)
+    assert dialog.show_app_icon.isChecked()
+    dialog.show_app_icon.setChecked(False)
+    dialog.apply_to(config)
+    assert config["show_app_icon"] is False
+
+
+def test_about_dialog_contains_repo_url(window, monkeypatch):
+    recorded = []
+    monkeypatch.setattr(QMessageBox, "about", lambda parent, title, text: recorded.append((title, text)))
+    window.run_command("Help ABOUT")
+    assert len(recorded) == 1
+    title, text = recorded[0]
+    assert "Directory Commander Tux Tux" in title
+    assert "https://github.com/davidzmx/directory-commander-tux-tux" in text

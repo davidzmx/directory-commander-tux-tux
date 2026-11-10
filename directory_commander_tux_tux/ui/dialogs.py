@@ -125,6 +125,8 @@ class PreferencesDialog(QDialog):
         self.general_status_bar.setToolTip(tr("El archivo bajo el ratón o lo seleccionado en el panel activo, el espacio libre y los avisos. "
                                               "Sin ella, los avisos van en la fila de estado del panel activo"))
         self.general_status_bar.setChecked(config.get("general_status_bar", True) is not False)
+        self.show_app_icon = QCheckBox(tr("Mostrar el icono de la aplicación en la esquina superior derecha"))
+        self.show_app_icon.setChecked(bool(config.get("show_app_icon", True)))
         self.pane_free_space = QComboBox()
         for label, value in ((tr("Solo en los paneles con una carpeta de otro disco"), "other_disk"), (tr("En todos los paneles"), "always"),
                              (tr("En ninguno: solo en la barra general"), "never")):
@@ -305,6 +307,7 @@ class PreferencesDialog(QDialog):
         basics.addRow("", self.confirm_exit)
         basics.addRow("", self.verify_copies)
         basics.addRow("", self.general_status_bar)
+        basics.addRow("", self.show_app_icon)
         basics.addRow(tr("Espacio libre en los paneles:"), self.pane_free_space)
         in_list.addRow(tr("Ancho máximo de las columnas de la lista:"), self.list_column_chars)
         in_list.addRow(self.level_colors)
@@ -664,6 +667,7 @@ class PreferencesDialog(QDialog):
         config["confirm_exit"] = self.confirm_exit.isChecked()
         config["verify_copies"] = self.verify_copies.isChecked()
         config["general_status_bar"] = self.general_status_bar.isChecked()
+        config["show_app_icon"] = self.show_app_icon.isChecked()
         config["pane_free_space"] = self.pane_free_space.currentData()
         config["list_column_chars"] = self.list_column_chars.value()
         config["thumbnail_size"] = self.thumbnail_size.currentData()

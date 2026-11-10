@@ -32,7 +32,6 @@
     "<b>Al cerrar pestañas</b>": "<b>When closing tabs</b>",
     "<b>Pestañas horizontales</b>": "<b>Horizontal tabs</b>",
     "<b>Pestañas verticales</b>": "<b>Vertical tabs</b>",
-    "<b>{APP_NAME} {version__}</b><br>Gestor de archivos de doble panel para Linux y Windows.<br>Proyecto independiente de código abierto.": "<b>{APP_NAME} {version__}</b><br>Dual-pane file manager for Linux and Windows.<br>Independent open source project.",
     "<b>{value}</b><br>{value2} · {value3}": "<b>{value}</b><br>{value2} · {value3}",
     "A la derecha de su panel": "To the right of its pane",
     "A:": "To:",
@@ -1869,6 +1868,11 @@
     "Abrir vídeos: Aplicación del sistema (clic para usar el visualizador interno)": "Open videos: System application (click to use internal viewer)",
     "Abrir imágenes: Visualizador interno (clic para usar la aplicación del sistema)": "Open images: Internal viewer (click to use system application)",
     "Abrir imágenes: Aplicación del sistema (clic para usar el visualizador interno)": "Open images: System application (click to use internal viewer)",
-    "Opción": "Option"
+    "Opción": "Option",
+    "<b>{APP_NAME} {version__}</b><br>Gestor de archivos de doble panel para Linux y Windows.<br>Proyecto independiente de código abierto.<br><br>Repositorio:<br><a href=\"{repo_url}\">{repo_url}</a>": "<b>{APP_NAME} {version__}</b><br>Dual-pane file manager for Linux and Windows.<br>Independent open source project.<br><br>Repository:<br><a href=\"{repo_url}\">{repo_url}</a>",
+    "Icono en la esquina superior derecha": "Icon in top right corner",
+    "Mostrar el icono de la aplicación en la esquina superior derecha": "Show application icon in top right corner",
+    "Ocultar este icono": "Hide this icon",
+    "Acerca de {APP_NAME}…": "About {APP_NAME}…"
   }
 }
