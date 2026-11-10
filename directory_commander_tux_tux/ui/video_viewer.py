@@ -7,7 +7,7 @@ from __future__ import annotations
 import os
 
 from PySide6.QtCore import QByteArray, QEvent, QPoint, Qt
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QActionGroup, QTransform
 from PySide6.QtMultimedia import QMediaPlayer, QtVideo, QVideoFrame
 from PySide6.QtWidgets import (QFileDialog, QFrame, QLabel, QMainWindow, QMenu, QMessageBox, QPushButton, QStackedWidget, QToolBar,
                                QToolButton, QVBoxLayout, QWidget)
@@ -53,6 +53,9 @@ class VideoViewer(QMainWindow):
         self.media.player.positionChanged.connect(self._position_changed)
         self.media.video.videoSink().videoFrameChanged.connect(self._frame_changed)
         self.media.player.metaDataChanged.connect(self._show_format)
+        self.media.orientationChanged.connect(self._on_orientation_changed)
+        self.media.repeat_button.toggled.connect(lambda c: self.actions_by_key["repeat"].setChecked(c) if "repeat" in self.actions_by_key else None)
+        self.media.mute_button.toggled.connect(lambda c: self.actions_by_key["mute"].setChecked(c) if "mute" in self.actions_by_key else None)
         self.media.video.installEventFilter(self)
         self.message = QLabel(alignment=Qt.AlignmentFlag.AlignCenter)
         self.message.setWordWrap(True)
@@ -128,6 +131,13 @@ class VideoViewer(QMainWindow):
         add("frame_forward", tr("Fotograma siguiente"), "framestepforward", lambda: media.step_frame(1), "Right")
         add("seek_back", tr("Retroceder 5 segundos"), "", lambda: self.seek_by(-SEEK_STEP_MS), "Shift+Left")
         add("seek_forward", tr("Avanzar 5 segundos"), "", lambda: self.seek_by(SEEK_STEP_MS), "Shift+Right")
+        add("rotate_right", tr("Girar a la derecha"), "rotateright", lambda: media.rotate(90), "R")
+        add("rotate_left", tr("Girar a la izquierda"), "rotateleft", lambda: media.rotate(-90), "L")
+        add("flip_h", tr("Voltear horizontalmente"), "fliph", media.toggle_flip_horizontal, "H", checkable=True)
+        add("flip_v", tr("Voltear verticalmente"), "flipv", media.toggle_flip_vertical, "V", checkable=True)
+        add("reset_orientation", tr("Restablecer orientación"), "", media.reset_orientation, "0")
+        add("repeat", tr("Repetir"), "mediarepeat", media.toggle_repeat, checkable=True)
+        add("mute", tr("Silenciar"), "mediamuted", media.toggle_mute, "M", checkable=True)
         add("save_frame", tr("Guardar fotograma…"), "saveframe", self.save_frame, "Ctrl+S")
         add("ai_prompt", tr("Info de IA"), "comment", self.toggle_prompt_panel, checkable=True)
         add("fullscreen", tr("Pantalla completa"), "fullscreen", self.toggle_fullscreen, "F11", True)
@@ -138,16 +148,71 @@ class VideoViewer(QMainWindow):
         self.actions_by_key["save_frame"].setEnabled(False)
         self.actions_by_key["ai_prompt"].setEnabled(False)
         self.actions_by_key["ai_prompt"].setVisible(False)
+        self.actions_by_key["repeat"].setChecked(media.repeat_button.isChecked())
+        self.actions_by_key["mute"].setChecked(media.mute_button.isChecked())
+
+    def _populate_speed_menu(self, menu: QMenu) -> None:
+        group = QActionGroup(menu)
+        group.setExclusive(True)
+        current = self.media.playback_rate
+        for rate in (0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0):
+            label = f"{rate:g}x ({tr('Normal')})" if rate == 1.0 else f"{rate:g}x"
+            act = menu.addAction(label)
+            act.setCheckable(True)
+            act.setChecked(abs(current - rate) < 0.01)
+            group.addAction(act)
+            act.triggered.connect(lambda _=False, r=rate: self.media.set_playback_rate(r))
+
+    def build_video_context_menu(self) -> QMenu:
+        menu = QMenu(self)
+        by_key = self.actions_by_key
+        menu.addAction(by_key["play"])
+        menu.addAction(by_key["stop"])
+        menu.addSeparator()
+        menu.addAction(by_key["frame_back"])
+        menu.addAction(by_key["frame_forward"])
+        menu.addSeparator()
+        menu.addAction(by_key["seek_back"])
+        menu.addAction(by_key["seek_forward"])
+        menu.addSeparator()
+        speed_menu = menu.addMenu(tr("Velocidad de reproducción"))
+        self._populate_speed_menu(speed_menu)
+        menu.addSeparator()
+        menu.addAction(by_key["rotate_right"])
+        menu.addAction(by_key["rotate_left"])
+        menu.addAction(by_key["flip_h"])
+        menu.addAction(by_key["flip_v"])
+        menu.addAction(by_key["reset_orientation"])
+        menu.addSeparator()
+        menu.addAction(by_key["repeat"])
+        menu.addAction(by_key["mute"])
+        menu.addSeparator()
+        menu.addAction(by_key["save_frame"])
+        menu.addAction(by_key["fullscreen"])
+        return menu
+
+    def _show_video_context_menu(self, pos: QPoint) -> None:
+        menu = self.build_video_context_menu()
+        menu.exec(pos)
 
     def _build_menus(self) -> None:
         by_key = self.actions_by_key
         bar = self.menuBar()
         for title, keys in ((tr("&Archivo"), ("save_frame", None, "open_system", "reveal", None, "close")),
-                            (tr("&Reproducción"), ("play", "stop", None, "frame_back", "frame_forward", None, "seek_back", "seek_forward")),
-                            (tr("&Ver"), ("previous", "next", None, "fullscreen", None, "ai_prompt"))):
+                            (tr("&Reproducción"), ("play", "stop", None, "frame_back", "frame_forward", None,
+                                                   "seek_back", "seek_forward", None, "speed", None,
+                                                   "rotate_right", "rotate_left", "flip_h", "flip_v", "reset_orientation", None,
+                                                   "repeat", "mute")),
+                            (tr("&Ver"), ("previous", "next", None, "rotate_left", "rotate_right", None, "fullscreen", None, "ai_prompt"))):
             menu = bar.addMenu(title)
             for key in keys:
-                menu.addSeparator() if key is None else menu.addAction(by_key[key])
+                if key is None:
+                    menu.addSeparator()
+                elif key == "speed":
+                    speed_menu = menu.addMenu(tr("Velocidad de reproducción"))
+                    self._populate_speed_menu(speed_menu)
+                else:
+                    menu.addAction(by_key[key])
 
     def _build_toolbar(self) -> None:
         self.toolbar = QToolBar(tr("Visor de vídeo"))
@@ -360,6 +425,13 @@ class VideoViewer(QMainWindow):
         self.actions_by_key["save_frame"].setEnabled(frame.isValid())
         self._show_format()
 
+    def _on_orientation_changed(self) -> None:
+        if "flip_h" in self.actions_by_key:
+            self.actions_by_key["flip_h"].setChecked(self.media.is_flipped_horizontal)
+        if "flip_v" in self.actions_by_key:
+            self.actions_by_key["flip_v"].setChecked(self.media.is_flipped_vertical)
+        self._show_format()
+
     def _show_format(self) -> None:
         frame = self.media.current_frame()
         if not frame.isValid():
@@ -368,7 +440,8 @@ class VideoViewer(QMainWindow):
         speed = tr(" · {rate:.4g} fps", rate=rate)
         width, height = frame.width(), frame.height()
         # El giro, del fotograma: el de los metadatos (`QMediaMetaData.Key.Orientation`) es un tipo que PySide6 no sabe convertir y lanza una excepción.
-        if frame.rotation() in (QtVideo.Rotation.Clockwise90, QtVideo.Rotation.Clockwise270):  # el vídeo se ve girado
+        rot = frame.rotation() in (QtVideo.Rotation.Clockwise90, QtVideo.Rotation.Clockwise270)
+        if rot != (self.media.rotation in (90, 270)):
             width, height = height, width
         self.status_labels["format"].setText(f"{width} x {height}{speed}")
 
@@ -394,6 +467,15 @@ class VideoViewer(QMainWindow):
         if image.isNull():
             QMessageBox.warning(self, APP_NAME, tr("No se pudo leer el fotograma"))
             return
+        t = QTransform()
+        if self.media.is_flipped_horizontal:
+            t.scale(-1, 1)
+        if self.media.is_flipped_vertical:
+            t.scale(1, -1)
+        if self.media.rotation:
+            t.rotate(self.media.rotation)
+        if not t.isIdentity():
+            image = image.transformed(t, Qt.TransformationMode.SmoothTransformation)
         target, _filter = QFileDialog.getSaveFileName(self, tr("Guardar fotograma como PNG"),
                                                       image_ops.frame_name(self.current_path, player.position()), tr("Imagen PNG (*.png)"))
         if not target:
@@ -428,10 +510,17 @@ class VideoViewer(QMainWindow):
         self.actions_by_key["fullscreen"].setChecked(entering)
 
     def eventFilter(self, watched, event) -> bool:
-        if watched is self.media.video and event.type() in (QEvent.Type.MouseButtonRelease, QEvent.Type.MouseButtonDblClick):
-            if event.button() == Qt.MouseButton.LeftButton:
-                self._video_clicked(event.type() == QEvent.Type.MouseButtonDblClick)
+        video = getattr(self.media, "video", None)
+        is_video = watched is video or (video is not None and watched is getattr(video, "viewport", lambda: None)())
+        if is_video:
+            if event.type() == QEvent.Type.ContextMenu:
+                pos = event.globalPos() if hasattr(event, "globalPos") else self.cursor().pos()
+                self._show_video_context_menu(pos)
                 return True
+            if event.type() in (QEvent.Type.MouseButtonRelease, QEvent.Type.MouseButtonDblClick):
+                if event.button() == Qt.MouseButton.LeftButton:
+                    self._video_clicked(event.type() == QEvent.Type.MouseButtonDblClick)
+                    return True
         return super().eventFilter(watched, event)
 
     def _video_clicked(self, double: bool) -> None:

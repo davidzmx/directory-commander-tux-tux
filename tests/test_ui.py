@@ -7263,3 +7263,99 @@ def test_about_dialog_contains_repo_url(window, monkeypatch):
     title, text = recorded[0]
     assert "Directory Commander Tux Tux" in title
     assert "https://github.com/davidzmx/directory-commander-tux-tux" in text
+    assert "Desarrollado con IA para uso personal. El software y código se provee tal cual (as is) sin garantía de ningún tipo." in text
+
+
+def test_media_player_playback_rate_and_transform(app):
+    media = MediaPlayer({}, windowed=True)
+    assert media.playback_rate == 1.0
+    assert media.speed_button.text() == "1x"
+
+    rate_changed = []
+    media.playbackRateChanged.connect(lambda r: rate_changed.append(r))
+    media.set_playback_rate(1.5)
+    assert media.playback_rate == 1.5
+    assert media.speed_button.text() == "1.5x"
+    assert rate_changed == [1.5]
+
+    orient_changed = []
+    media.orientationChanged.connect(lambda: orient_changed.append(True))
+    assert media.rotation == 0
+    assert not media.is_flipped_horizontal
+    assert not media.is_flipped_vertical
+
+    media.rotate(90)
+    assert media.rotation == 90
+    assert len(orient_changed) == 1
+
+    media.toggle_flip_horizontal()
+    assert media.is_flipped_horizontal
+    assert len(orient_changed) == 2
+
+    media.toggle_flip_vertical()
+    assert media.is_flipped_vertical
+    assert len(orient_changed) == 3
+
+    media.reset_orientation()
+    assert media.rotation == 0
+    assert not media.is_flipped_horizontal
+    assert not media.is_flipped_vertical
+    assert len(orient_changed) == 4
+
+
+def test_video_viewer_playback_options_and_context_menu(window, video_folder, monkeypatch):
+    from directory_commander_tux_tux.core.i18n import tr
+    open_video(window, video_folder, monkeypatch)
+    viewer = window._viewers[0]
+
+    # Check actions exist
+    assert "rotate_right" in viewer.actions_by_key
+    assert "rotate_left" in viewer.actions_by_key
+    assert "flip_h" in viewer.actions_by_key
+    assert "flip_v" in viewer.actions_by_key
+    assert "reset_orientation" in viewer.actions_by_key
+    assert "repeat" in viewer.actions_by_key
+    assert "mute" in viewer.actions_by_key
+
+    # Test rotation actions
+    viewer.actions_by_key["rotate_right"].trigger()
+    assert viewer.media.rotation == 90
+    viewer.actions_by_key["rotate_left"].trigger()
+    assert viewer.media.rotation == 0
+
+    # Test flip actions
+    viewer.actions_by_key["flip_h"].trigger()
+    assert viewer.media.is_flipped_horizontal
+    assert viewer.actions_by_key["flip_h"].isChecked()
+
+    viewer.actions_by_key["flip_v"].trigger()
+    assert viewer.media.is_flipped_vertical
+    assert viewer.actions_by_key["flip_v"].isChecked()
+
+    viewer.actions_by_key["reset_orientation"].trigger()
+    assert viewer.media.rotation == 0
+    assert not viewer.media.is_flipped_horizontal
+    assert not viewer.actions_by_key["flip_h"].isChecked()
+    assert not viewer.media.is_flipped_vertical
+    assert not viewer.actions_by_key["flip_v"].isChecked()
+
+    # Test speed change
+    viewer.media.set_playback_rate(2.0)
+    assert viewer.media.playback_rate == 2.0
+
+    # Test context menu building
+    menu = viewer.build_video_context_menu()
+    actions = [a.text() for a in menu.actions() if not a.isSeparator()]
+    assert tr("Reproducir o pausar") in actions
+    assert tr("Velocidad de reproducción") in actions
+    assert tr("Girar a la derecha") in actions
+    assert tr("Voltear horizontalmente") in actions
+
+    # Test context menu on video right-click
+    called = []
+    monkeypatch.setattr(viewer, "_show_video_context_menu", lambda pos: called.append(pos))
+    event = QContextMenuEvent(QContextMenuEvent.Reason.Mouse, QPoint(10, 10), QPoint(100, 100))
+    assert viewer.eventFilter(viewer.media.video, event)
+    assert len(called) == 1
+    assert called[0] == QPoint(100, 100)
+    viewer.close()
