@@ -4562,7 +4562,7 @@ class MainWindow(ExtraCommands, QMainWindow):
 
     def _cmd_help(self, _cmd: commands.Command) -> None:
         QMessageBox.about(self, tr("Acerca de {APP_NAME}", APP_NAME=APP_NAME),
-                          tr("<b>{APP_NAME} {version__}</b><br>Gestor de archivos de doble panel para Linux y Windows.<br>Proyecto independiente de código abierto.<br><br>Repositorio:<br><a href=\"{repo_url}\">{repo_url}</a>",
+                          tr("<b>{APP_NAME} {version__}</b><br>Gestor de archivos de doble panel para Linux y Windows.<br>Proyecto independiente de código abierto. Desarrollado con IA para uso personal. El software y código se provee tal cual (as is) sin garantía de ningún tipo.<br><br>Repositorio:<br><a href=\"{repo_url}\">{repo_url}</a>",
                              APP_NAME=APP_NAME, version__=__version__, repo_url=REPO_URL))
 
     def _cmd_close(self, cmd: commands.Command) -> None:

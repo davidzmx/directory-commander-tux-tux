@@ -1065,7 +1065,7 @@ def test_lora_column_display_and_no_horizontal_scroll():
     dock.close()
 
 
-def test_video_viewer_ai_prompt_next_to_reveal(tmp_path):
+def test_video_viewer_ai_prompt_next_to_reveal(app, tmp_path):
     from directory_commander_tux_tux.ui.video_viewer import VideoViewer
     from directory_commander_tux_tux.core import bar_buttons
 

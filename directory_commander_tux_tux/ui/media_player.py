@@ -6,12 +6,12 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QPointF, QRect, QSize, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QColor, QPainter, QPixmap, QPolygonF
+from PySide6.QtCore import QPointF, QRect, QRectF, QSize, QSizeF, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QActionGroup, QColor, QPainter, QPixmap, QPolygonF, QTransform
 from PySide6.QtMultimedia import QAudioOutput, QMediaMetaData, QMediaPlayer, QVideoFrame
-from PySide6.QtMultimediaWidgets import QVideoWidget
-from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMenu, QSizePolicy, QSlider, QStackedWidget, QStyle, QToolButton,
-                               QVBoxLayout, QWidget)
+from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
+from PySide6.QtWidgets import (QGraphicsScene, QGraphicsView, QHBoxLayout, QLabel, QMenu, QSizePolicy, QSlider,
+                               QStackedWidget, QStyle, QToolButton, QVBoxLayout, QWidget)
 
 from ..core import bar_buttons
 from ..core.media_info import VIDEO_EXTENSIONS, read_media_info
@@ -115,9 +115,110 @@ class VolumeSlider(ClickSlider):
         painter.drawPolygon(wedge)
 
 
+class TransformableVideoWidget(QGraphicsView):
+    """Superficie de vídeo que permite rotación continua en múltiplos de 90° y volteo horizontal y vertical."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.scene_ = QGraphicsScene(self)
+        self.setScene(self.scene_)
+        self.video_item = QGraphicsVideoItem()
+        self.scene_.addItem(self.video_item)
+        self.setStyleSheet("background: black; border: none;")
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setFrameShape(QGraphicsView.Shape.NoFrame)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.rotation: int = 0
+        self.flip_h: bool = False
+        self.flip_v: bool = False
+        self._frame_size = QSizeF(0, 0)
+        self.videoSink().videoFrameChanged.connect(self._on_frame)
+        self.video_item.nativeSizeChanged.connect(self._on_native_size)
+
+    def videoSink(self):
+        return self.video_item.videoSink()
+
+    def _on_native_size(self, size: QSizeF) -> None:
+        if size.isValid() and not size.isEmpty():
+            self._frame_size = size
+            self._update_transform()
+
+    def _on_frame(self, frame: QVideoFrame) -> None:
+        if frame.isValid():
+            size = QSizeF(frame.width(), frame.height())
+            if self._frame_size != size:
+                self._frame_size = size
+                self._update_transform()
+
+    def set_rotation(self, angle: int) -> None:
+        self.rotation = angle % 360
+        self._update_transform()
+
+    def rotate_by(self, delta: int) -> None:
+        self.set_rotation(self.rotation + delta)
+
+    def set_flip_horizontal(self, flip: bool) -> None:
+        self.flip_h = flip
+        self._update_transform()
+
+    def toggle_flip_horizontal(self) -> None:
+        self.set_flip_horizontal(not self.flip_h)
+
+    def set_flip_vertical(self, flip: bool) -> None:
+        self.flip_v = flip
+        self._update_transform()
+
+    def toggle_flip_vertical(self) -> None:
+        self.set_flip_vertical(not self.flip_v)
+
+    def reset_transform(self) -> None:
+        self.rotation = 0
+        self.flip_h = False
+        self.flip_v = False
+        self._update_transform()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_transform()
+
+    def _update_transform(self) -> None:
+        size = self._frame_size
+        if not size.isValid() or size.isEmpty():
+            size = self.video_item.nativeSize()
+        if not size.isValid() or size.isEmpty():
+            return
+        w, h = size.width(), size.height()
+        self.video_item.setPos(0, 0)
+        self.video_item.setSize(size)
+        self.video_item.setTransformOriginPoint(w / 2.0, h / 2.0)
+
+        t = QTransform()
+        sx = -1.0 if self.flip_h else 1.0
+        sy = -1.0 if self.flip_v else 1.0
+        t.scale(sx, sy)
+        t.rotate(self.rotation)
+        self.video_item.setTransform(t)
+
+        rect = self.video_item.mapToScene(self.video_item.boundingRect()).boundingRect()
+        self.setSceneRect(rect)
+        self.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
+
+    def installEventFilter(self, filter_obj) -> None:
+        super().installEventFilter(filter_obj)
+        self.viewport().installEventFilter(filter_obj)
+
+    def removeEventFilter(self, filter_obj) -> None:
+        super().removeEventFilter(filter_obj)
+        self.viewport().removeEventFilter(filter_obj)
+
+
 class MediaPlayer(QWidget):
     failed = Signal(str)
     customizeRequested = Signal()  # clic derecho en los controles → Personalizar…
+    playbackRateChanged = Signal(float)
+    orientationChanged = Signal()
 
     def __init__(self, config, parent=None, windowed: bool = False) -> None:
         """`windowed` es el reproductor de la ventana de vídeo: con fotograma a fotograma y siempre reproduciendo
@@ -133,14 +234,15 @@ class MediaPlayer(QWidget):
         self._first_frame_us: int | None = None  # no siempre es 0: algunos vídeos empiezan un poco después
         self._seen_interval = 0
         self._file_rate: float | None = None
+        self._playback_rate: float = 1.0
         self._step_timer = QTimer(self, singleShot=True, interval=STEP_TIMEOUT_MS)
         self._step_timer.timeout.connect(self._finish_steps)
 
         self.audio = QAudioOutput(self)
         self.player = QMediaPlayer(self)
         self.player.setAudioOutput(self.audio)
-        self.video = QVideoWidget()
-        self.player.setVideoOutput(self.video)
+        self.video = TransformableVideoWidget()
+        self.player.setVideoOutput(self.video.video_item)
 
         self.cover = QLabel(alignment=Qt.AlignmentFlag.AlignCenter)
         self.cover.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
@@ -172,6 +274,15 @@ class MediaPlayer(QWidget):
         self.stop_button = self._button(tr("Detener y volver al principio"), self.stop)
         self.repeat_button = self._button(tr("Repetir"), self._set_repeat)
         self.repeat_button.setCheckable(True)
+        self.speed_button = QToolButton()
+        self.speed_button.setAutoRaise(True)
+        self.speed_button.setText(f"{self._playback_rate:g}x")
+        self.speed_button.setToolTip(tr("Velocidad de reproducción"))
+        self.speed_button.setIconSize(QSize(16, 16))
+        self.speed_button.setFixedSize(38, 22)
+        self.speed_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.speed_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.speed_button.setMenu(self.create_speed_menu(self.speed_button))
         self.back_button = self.forward_button = None
         if windowed:
             self.back_button = self._button(tr("Fotograma anterior (←)"), lambda: self.step_frame(-1))
@@ -418,6 +529,75 @@ class MediaPlayer(QWidget):
             self.forward_button.setIcon(themed("framestepforward"))
         self.mute_button.setIcon(themed("mediamuted" if self.audio.isMuted() else "mediavolume"))
 
+    @property
+    def playback_rate(self) -> float:
+        return self._playback_rate
+
+    def set_playback_rate(self, rate: float) -> None:
+        self._playback_rate = rate
+        self.player.setPlaybackRate(rate)
+        if hasattr(self, "speed_button") and self.speed_button is not None:
+            self.speed_button.setText(f"{rate:g}x")
+            self.speed_button.setMenu(self.create_speed_menu(self.speed_button))
+        self.playbackRateChanged.emit(rate)
+
+    def create_speed_menu(self, parent: QWidget | None = None) -> QMenu:
+        menu = QMenu(parent or self)
+        group = QActionGroup(menu)
+        group.setExclusive(True)
+        for rate in (0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0):
+            label = f"{rate:g}x ({tr('Normal')})" if rate == 1.0 else f"{rate:g}x"
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(abs(self._playback_rate - rate) < 0.01)
+            group.addAction(action)
+            action.triggered.connect(lambda _=False, r=rate: self.set_playback_rate(r))
+        return menu
+
+    @property
+    def rotation(self) -> int:
+        return self.video.rotation
+
+    @property
+    def is_flipped_horizontal(self) -> bool:
+        return self.video.flip_h
+
+    @property
+    def is_flipped_vertical(self) -> bool:
+        return self.video.flip_v
+
+    def rotate(self, delta: int) -> None:
+        self.video.rotate_by(delta)
+        self.orientationChanged.emit()
+
+    def set_flip_horizontal(self, flip: bool) -> None:
+        self.video.set_flip_horizontal(flip)
+        self.orientationChanged.emit()
+
+    def set_flip_vertical(self, flip: bool) -> None:
+        self.video.set_flip_vertical(flip)
+        self.orientationChanged.emit()
+
+    def toggle_flip_horizontal(self) -> None:
+        self.video.toggle_flip_horizontal()
+        self.orientationChanged.emit()
+
+    def toggle_flip_vertical(self) -> None:
+        self.video.toggle_flip_vertical()
+        self.orientationChanged.emit()
+
+    def reset_orientation(self) -> None:
+        self.video.reset_transform()
+        self.orientationChanged.emit()
+
+    def toggle_repeat(self) -> None:
+        self.repeat_button.setChecked(not self.repeat_button.isChecked())
+        self._set_repeat(self.repeat_button.isChecked())
+
+    def toggle_mute(self) -> None:
+        self.mute_button.setChecked(not self.mute_button.isChecked())
+        self._set_muted(self.mute_button.isChecked())
+
     # ---------------------------------------------------------------- estado
     def _reset_display(self) -> None:
         self._finish_steps()
@@ -428,6 +608,8 @@ class MediaPlayer(QWidget):
         self.cover.clear()
         self.caption.clear()
         self.seek.setRange(0, 0)
+        self.video.reset_transform()
+        self.orientationChanged.emit()
 
     def _fit_controls(self) -> None:
         """Muestra, por orden de utilidad, los controles que caben junto a la barra de progreso.
@@ -437,8 +619,8 @@ class MediaPlayer(QWidget):
         removed = bar_buttons.hidden(self.config, bar_buttons.VIDEO_CONTROLS if self.windowed else bar_buttons.PLAYER_CONTROLS)
         used = SEEK_MIN_WIDTH
         for key, widget in (("play", self.play_button), ("stop", self.stop_button), ("frame_back", self.back_button),
-                            ("frame_forward", self.forward_button), ("repeat", self.repeat_button), ("mute", self.mute_button),
-                            ("auto", self.auto_button), ("volume", self.volume)):
+                            ("frame_forward", self.forward_button), ("speed", self.speed_button), ("repeat", self.repeat_button),
+                            ("mute", self.mute_button), ("auto", self.auto_button), ("volume", self.volume)):
             if widget is None:
                 continue
             if key in removed:
@@ -449,8 +631,9 @@ class MediaPlayer(QWidget):
 
     def _arrange_controls(self) -> None:
         """Coloca los controles en el orden elegido. La barra de progreso se lleva el espacio que sobre."""
-        widgets = {"play": self.play_button, "stop": self.stop_button, "repeat": self.repeat_button, "frame_back": self.back_button,
-                   "frame_forward": self.forward_button, "auto": self.auto_button, "mute": self.mute_button, "volume": self.volume}
+        widgets = {"play": self.play_button, "stop": self.stop_button, "repeat": self.repeat_button, "speed": self.speed_button,
+                   "frame_back": self.back_button, "frame_forward": self.forward_button, "auto": self.auto_button,
+                   "mute": self.mute_button, "volume": self.volume}
         layout = self.controls.layout()
         while layout.count():
             layout.takeAt(0)
@@ -475,6 +658,9 @@ class MediaPlayer(QWidget):
         if self._resume_at and status in (QMediaPlayer.MediaStatus.LoadedMedia, QMediaPlayer.MediaStatus.BufferedMedia):
             self.player.setPosition(self._resume_at)
             self._resume_at = 0
+        if status in (QMediaPlayer.MediaStatus.LoadedMedia, QMediaPlayer.MediaStatus.BufferedMedia):
+            if self._playback_rate != 1.0:
+                self.player.setPlaybackRate(self._playback_rate)
 
     def _show_page(self, has_video: bool) -> None:
         if not has_video:

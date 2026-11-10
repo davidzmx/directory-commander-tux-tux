@@ -39,13 +39,18 @@ _FIXED_BARS: dict[str, tuple[str, list[tuple[str, str]]]] = {
                                          ("fullscreen", tr("Pantalla completa")), ("slideshow", tr("Presentación")), _LINE, ("crop", tr("Recortar")),
                                          ("save_crop", tr("Guardar selección")), _LINE, ("rename", tr("Renombrar")), ("delete", tr("Eliminar")), _LINE,
                                          ("ai_prompt", tr("Info de IA")), ("reveal", tr("Mostrar en el panel"))]),
-    VIDEO_VIEWER: (tr("Ventana de vídeo: barra superior"), [("previous", tr("Vídeo anterior")), ("next", tr("Vídeo siguiente")), _LINE, ("save_frame", tr("Guardar fotograma")),
+    VIDEO_VIEWER: (tr("Ventana de vídeo: barra superior"), [("previous", tr("Vídeo anterior")), ("next", tr("Vídeo siguiente")), _LINE,
+                                                            ("rotate_left", tr("Girar a la izquierda")), ("rotate_right", tr("Girar a la derecha")),
+                                                            ("flip_h", tr("Voltear horizontalmente")), ("flip_v", tr("Voltear verticalmente")), _LINE,
+                                                            ("save_frame", tr("Guardar fotograma")),
                                                             _LINE, ("fullscreen", tr("Pantalla completa")), _LINE, ("ai_prompt", tr("Info de IA")), ("reveal", tr("Mostrar en el panel"))]),
     VIDEO_CONTROLS: (tr("Ventana de vídeo: controles"), [("play", tr("Reproducir o pausar")), ("stop", tr("Detener")), ("repeat", tr("Repetir")),
-                                                     ("frame_back", tr("Fotograma anterior")), ("frame_forward", tr("Fotograma siguiente")), (SEEK, tr("Barra de progreso")),
-                                                     ("mute", tr("Silenciar")), ("volume", tr("Volumen"))]),
-    PLAYER_CONTROLS: (tr("Visor lateral: controles de vídeo y audio"), [("play", tr("Reproducir o pausar")), ("stop", tr("Detener")), ("repeat", tr("Repetir")), (SEEK, tr("Barra de progreso")),
-                                                                    ("auto", "Auto"), ("mute", tr("Silenciar")), ("volume", tr("Volumen"))]),
+                                                         ("speed", tr("Velocidad de reproducción")),
+                                                         ("frame_back", tr("Fotograma anterior")), ("frame_forward", tr("Fotograma siguiente")), (SEEK, tr("Barra de progreso")),
+                                                         ("mute", tr("Silenciar")), ("volume", tr("Volumen"))]),
+    PLAYER_CONTROLS: (tr("Visor lateral: controles de vídeo y audio"), [("play", tr("Reproducir o pausar")), ("stop", tr("Detener")), ("repeat", tr("Repetir")),
+                                                                        ("speed", tr("Velocidad de reproducción")), (SEEK, tr("Barra de progreso")),
+                                                                        ("auto", "Auto"), ("mute", tr("Silenciar")), ("volume", tr("Volumen"))]),
 }
 
 

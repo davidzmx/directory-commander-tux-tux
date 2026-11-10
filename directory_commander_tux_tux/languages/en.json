@@ -1869,10 +1869,14 @@
     "Abrir imágenes: Visualizador interno (clic para usar la aplicación del sistema)": "Open images: Internal viewer (click to use system application)",
     "Abrir imágenes: Aplicación del sistema (clic para usar el visualizador interno)": "Open images: System application (click to use internal viewer)",
     "Opción": "Option",
-    "<b>{APP_NAME} {version__}</b><br>Gestor de archivos de doble panel para Linux y Windows.<br>Proyecto independiente de código abierto.<br><br>Repositorio:<br><a href=\"{repo_url}\">{repo_url}</a>": "<b>{APP_NAME} {version__}</b><br>Dual-pane file manager for Linux and Windows.<br>Independent open source project.<br><br>Repository:<br><a href=\"{repo_url}\">{repo_url}</a>",
+    "<b>{APP_NAME} {version__}</b><br>Gestor de archivos de doble panel para Linux y Windows.<br>Proyecto independiente de código abierto. Desarrollado con IA para uso personal. El software y código se provee tal cual (as is) sin garantía de ningún tipo.<br><br>Repositorio:<br><a href=\"{repo_url}\">{repo_url}</a>": "<b>{APP_NAME} {version__}</b><br>Dual-pane file manager for Linux and Windows.<br>Independent open source project. Developed with AI for personal use. The software and code are provided as is without warranty of any kind.<br><br>Repository:<br><a href=\"{repo_url}\">{repo_url}</a>",
     "Icono en la esquina superior derecha": "Icon in top right corner",
     "Mostrar el icono de la aplicación en la esquina superior derecha": "Show application icon in top right corner",
     "Ocultar este icono": "Hide this icon",
-    "Acerca de {APP_NAME}…": "About {APP_NAME}…"
+    "Acerca de {APP_NAME}…": "About {APP_NAME}…",
+    "Voltear horizontalmente": "Flip horizontally",
+    "Voltear verticalmente": "Flip vertically",
+    "Velocidad de reproducción": "Playback speed",
+    "Restablecer orientación": "Reset orientation"
   }
 }
