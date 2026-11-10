@@ -608,6 +608,7 @@ class ExtraCommands:
         self._set_friendlydates(config.get("friendly_dates", "off"))
         self._set_fullrowselect("on" if config.get("full_row_select", False) else "off")
         self._set_hoverinfo("on" if config.get("hover_info", True) else "off")
+        self._apply_app_logo_visibility()
         if not self._style_named(config.get("style", "")):
             styles = config.get("styles", [])
             config["style"] = styles[0]["name"] if styles else ""

@@ -2,4 +2,5 @@
 
 APP_NAME = "Directory Commander Tux Tux"
 APP_ID = "directory-commander-tux-tux"
+REPO_URL = "https://github.com/davidzmx/directory-commander-tux-tux"
 __version__ = "0.1.0"
