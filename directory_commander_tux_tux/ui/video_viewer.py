@@ -203,7 +203,7 @@ class VideoViewer(QMainWindow):
                                                    "seek_back", "seek_forward", None, "speed", None,
                                                    "rotate_right", "rotate_left", "flip_h", "flip_v", "reset_orientation", None,
                                                    "repeat", "mute")),
-                            (tr("&Ver"), ("previous", "next", None, "rotate_left", "rotate_right", None, "fullscreen", None, "ai_prompt"))):
+                            (tr("&Ver"), ("previous", "next", None, "fullscreen", None, "ai_prompt"))):
             menu = bar.addMenu(title)
             for key in keys:
                 if key is None:

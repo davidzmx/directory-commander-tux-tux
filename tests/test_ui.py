@@ -3018,13 +3018,13 @@ def test_controls_hide_by_priority_when_narrow(media_window):
         media._fit_controls()
         return [not w.isHidden() for w in controls]
 
-    controls = (media.play_button, media.stop_button, media.repeat_button, media.mute_button, media.auto_button, media.volume)
-    assert shown(600) == [True] * 6
+    controls = (media.play_button, media.stop_button, media.speed_button, media.repeat_button, media.mute_button, media.auto_button, media.volume)
+    assert shown(600) == [True] * 7
     spacing = media.controls.layout().spacing()
-    exact = SEEK_MIN_WIDTH + sum(min(w.sizeHint().width(), w.maximumWidth()) for w in controls) + 6 * spacing
-    assert shown(exact) == [True] * 6  # justo el ancho que necesitan: no se oculta ninguno
-    assert shown(exact - 1) == [True, True, True, True, True, False]
-    assert shown(60) == [True, False, False, False, False, False]
+    exact = SEEK_MIN_WIDTH + sum(min(w.sizeHint().width(), w.maximumWidth()) for w in controls) + 7 * spacing
+    assert shown(exact) == [True] * 7  # justo el ancho que necesitan: no se oculta ninguno
+    assert shown(exact - 1) == [True, True, True, True, True, True, False]
+    assert shown(60) == [True, False, False, False, False, False, False]
     states = [shown(width) for width in range(60, 400, 20)]
     assert all(sum(a) <= sum(b) for a, b in zip(states, states[1:]))  # con más sitio nunca se oculta nada
 
@@ -4844,7 +4844,7 @@ def test_controls_are_in_one_row_in_order(player):
     _win, media = player
     row = media.controls.layout()
     widgets = [row.itemAt(i).widget() for i in range(row.count())]
-    assert widgets == [media.play_button, media.stop_button, media.repeat_button, media.seek, media.auto_button, media.mute_button, media.volume]
+    assert widgets == [media.play_button, media.stop_button, media.repeat_button, media.speed_button, media.seek, media.auto_button, media.mute_button, media.volume]
     assert media.auto_button.text() == "Auto"
     assert media.layout().indexOf(media.seek) < 0
 
@@ -7359,3 +7359,32 @@ def test_video_viewer_playback_options_and_context_menu(window, video_folder, mo
     assert len(called) == 1
     assert called[0] == QPoint(100, 100)
     viewer.close()
+
+
+def test_video_orientation_is_in_the_menus_and_off_the_toolbar_by_default(window, video_folder, monkeypatch):
+    from directory_commander_tux_tux.core.i18n import tr
+    from directory_commander_tux_tux.core.config import VIDEO_ORIENTATION_BUTTONS
+    open_video(window, video_folder, monkeypatch)
+    viewer = window._viewers[0]
+    orientation = [viewer.actions_by_key[key] for key in VIDEO_ORIENTATION_BUTTONS]
+    on_bar = viewer.toolbar.actions()
+    assert not any(action in on_bar for action in orientation)
+    assert viewer.actions_by_key["save_frame"] in on_bar and viewer.actions_by_key["fullscreen"] in on_bar
+    menus = {menu.title().replace("&", ""): menu.actions() for menu in (action.menu() for action in viewer.menuBar().actions())}
+    assert all(action in menus[tr("Reproducción")] for action in orientation)
+    assert not any(action in menus[tr("Ver")] for action in orientation)
+    assert all(action in viewer.build_video_context_menu().actions() for action in orientation)
+    # Se pueden poner en la barra desde Personalizar, como los demás botones.
+    window.config["bar_buttons"] = {}
+    viewer.apply_bar_buttons()
+    assert all(action in viewer.toolbar.actions() for action in orientation)
+    viewer.close()
+
+
+def test_old_configurations_take_the_orientation_buttons_off_the_video_toolbar(tmp_path):
+    from directory_commander_tux_tux.core.config import VIDEO_ORIENTATION_BUTTONS
+    (tmp_path / "config.json").write_text(json.dumps({"config_version": 22, "bar_buttons": {"video_viewer": ["save_frame"], "pane": ["home"]}}),
+                                          encoding="utf-8")
+    hidden = Config(str(tmp_path))["bar_buttons"]
+    assert hidden == {"video_viewer": ["save_frame", *VIDEO_ORIENTATION_BUTTONS], "pane": ["home"]}  # lo que el usuario quitó, intacto
+    assert Config(str(tmp_path / "nueva"))["bar_buttons"] == {"video_viewer": list(VIDEO_ORIENTATION_BUTTONS)}
