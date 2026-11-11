@@ -11,7 +11,7 @@ from . import favorites
 from .i18n import AUTO, LANGUAGE_FOLDER, N_, tr
 from .pane_colors import DEFAULT_SCHEME, adopt_old_colors
 
-CONFIG_VERSION = 22
+CONFIG_VERSION = 23
 PORTABLE_MARKER = "portable.txt"
 VISIT_POINTS = 3
 
@@ -72,6 +72,7 @@ FRAMES_TOGGLE_COMMAND = "Set PANEFRAMES=Toggle"
 GENERATION_MARKS_COMMAND = "Set GENERATIONMARKS=Toggle"
 OPEN_VIDEOS_COMMAND = "Set OPENVIDEOS=Toggle"
 OPEN_IMAGES_COMMAND = "Set OPENIMAGES=Toggle"
+VIDEO_ORIENTATION_BUTTONS = ("rotate_left", "rotate_right", "flip_h", "flip_v")
 DISK_USAGE_COMMAND = "DiskUsage"
 OLD_SIZES_COMMAND = "GetSizes"
 OLD_SIZES_LABEL = "Tamaños de carpeta"
@@ -235,7 +236,7 @@ DEFAULTS: dict = {
     "viewer_autoplay": True,
     "viewer_repeat": False,
     "video_window_repeat": True,
-    "bar_buttons": {},
+    "bar_buttons": {"video_viewer": list(VIDEO_ORIENTATION_BUTTONS)},  # girar y voltear: en los menús, no en la barra
     "bar_order": {},
     "viewer_muted": False,
     "viewer_volume": 80,
@@ -457,6 +458,16 @@ def _add_marks_button(stored: dict) -> None:
     toolbar.insert(len(toolbar) if viewer is None else viewer, button)
 
 
+def _hide_video_orientation_buttons(stored: dict) -> None:
+    """Girar y voltear el vídeo llegaron a la barra de la ventana de vídeo: van en los menús, y la barra los tiene desmarcados."""
+    hidden = stored.get("bar_buttons")
+    if not isinstance(hidden, dict):
+        return  # sin nada guardado vale lo de serie, que ya los oculta
+    keys = hidden.get("video_viewer")
+    keys = keys if isinstance(keys, list) else []
+    hidden["video_viewer"] = keys + [key for key in VIDEO_ORIENTATION_BUTTONS if key not in keys]
+
+
 def _add_open_media_buttons(stored: dict) -> None:
     """Detrás del botón de marcas de IA: botones para alternar cómo se abren vídeos e imágenes."""
     toolbar = stored.get("toolbar")
@@ -620,6 +631,8 @@ class Config:
             _swap_sizes_for_disk_usage(stored)
         if version < 22:
             _add_open_media_buttons(stored)
+        if version < 23:
+            _hide_video_orientation_buttons(stored)
         if version < 17:
             stored.pop("find_window_geometry", None)  # era de otra forma de colocar el panel, con otras medidas
         if version < 15:
