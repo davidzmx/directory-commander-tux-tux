@@ -34,6 +34,7 @@ ICON_ICO = os.path.join(ROOT, "packaging", "windows", "app.ico")
 INSTALLER_SCRIPT = os.path.join(ROOT, "packaging", "windows", "installer.iss")
 DESKTOP_FILE = os.path.join(ROOT, "packaging", "linux", f"{APP_ID}.desktop")
 LEGAL_FILES = ("LICENSE", "THIRD_PARTY_NOTICES.md")  # lo que se reparte lleva bibliotecas de terceros: debe decirlo
+LICENSE_TEXTS = os.path.join(ROOT, "packaging", "licenses")  # GPL y LGPL de Qt; en el repositorio para no depender de la red al empaquetar
 PORTABLE_MARKER = "portable.txt"
 PORTABLE_TEXT = ("Este archivo activa el modo portable: la configuración se guarda en la carpeta config, junto al programa.\n"
                  "Si lo borras, el programa usará la configuración de tu usuario.\n")
@@ -62,6 +63,7 @@ def build_exe() -> str:
     shutil.rmtree(temp_dist, ignore_errors=True)
     for name in LEGAL_FILES:
         shutil.copy(os.path.join(ROOT, name), folder)
+    shutil.copytree(LICENSE_TEXTS, os.path.join(folder, "licenses"), dirs_exist_ok=True)
     return folder
 
 
