@@ -1,5 +1,9 @@
 name: CI
-on: [push, pull_request]
+on:
+  push:
+    branches: ["**"]  # solo ramas: con una etiqueta v*, las pruebas las lanza el workflow de los paquetes antes de publicar
+  pull_request:
+  workflow_call:
 
 jobs:
   test:
