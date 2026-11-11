@@ -85,7 +85,8 @@ def ico_bytes(images: dict[int, bytes]) -> bytes:
     return header + entries + data
 
 
-def make_icon(out: str = ICON_ICO) -> str:
+def _icon_pngs(sizes) -> dict[int, bytes]:
+    """El icono de la aplicación en PNG, a cada tamaño."""
     from PySide6.QtCore import QBuffer, QIODevice
     from PySide6.QtGui import QGuiApplication, QImage, QPainter
     from PySide6.QtSvg import QSvgRenderer
@@ -94,7 +95,7 @@ def make_icon(out: str = ICON_ICO) -> str:
     app = QGuiApplication.instance() or QGuiApplication([])
     renderer = QSvgRenderer(ICON_SVG)
     images = {}
-    for size in ICON_SIZES:
+    for size in sizes:
         image = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
         image.fill(0)
         painter = QPainter(image)
@@ -105,6 +106,11 @@ def make_icon(out: str = ICON_ICO) -> str:
         image.save(buffer, "PNG")
         images[size] = bytes(buffer.data())
     del app
+    return images
+
+
+def make_icon(out: str = ICON_ICO) -> str:
+    images = _icon_pngs(ICON_SIZES)
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "wb") as target:
         target.write(ico_bytes(images))
@@ -274,6 +280,8 @@ def make_appdir(folder: str, app_dir: str) -> str:
     os.chmod(os.path.join(app_dir, "AppRun"), 0o755)
     shutil.copy(DESKTOP_FILE, app_dir)
     shutil.copy(ICON_SVG, app_dir)
+    with open(os.path.join(app_dir, ".DirIcon"), "wb") as icon:  # appimagetool lo quiere en PNG, no en SVG
+        icon.write(_icon_pngs([256])[256])
     return app_dir
 
 

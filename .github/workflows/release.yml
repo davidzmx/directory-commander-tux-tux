@@ -30,12 +30,15 @@ jobs:
           curl -fsSL https://www.gnu.org/licenses/gpl-3.0.txt -o dist/directory-commander-tux-tux/licenses/GPL-3.0.txt
       - run: python packaging/build.py portable
       - run: python packaging/build.py installer
-      - uses: actions/upload-artifact@v4
+      # Un artifact por paquete, para poder bajar solo el que haga falta.
+      - uses: actions/upload-artifact@v7
         with:
-          name: windows
-          path: |
-            dist/*.exe
-            dist/*.zip
+          path: dist/*.exe
+          archive: false  # se descarga tal cual, sin meterlo en un zip
+      - uses: actions/upload-artifact@v7
+        with:
+          path: dist/*.zip
+          archive: false  # se descarga tal cual, sin meterlo en un zip
   linux:
     runs-on: ubuntu-24.04
     steps:
@@ -64,21 +67,27 @@ jobs:
         run: |
           dpkg-deb --info dist/*.deb
           dpkg-deb --contents dist/*.deb | grep -q "usr/bin/directory-commander-tux-tux"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
-          name: linux
-          path: |
-            dist/*.deb
-            dist/*.tar.gz
-            dist/*.AppImage
+          path: dist/*.deb
+          archive: false  # se descarga tal cual, sin meterlo en un zip
+      - uses: actions/upload-artifact@v7
+        with:
+          path: dist/*.tar.gz
+          archive: false  # se descarga tal cual, sin meterlo en un zip
+      - uses: actions/upload-artifact@v7
+        with:
+          path: dist/*.AppImage
+          archive: false  # se descarga tal cual, sin meterlo en un zip
   publish:
     if: startsWith(github.ref, 'refs/tags/')
     needs: [windows, linux]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: paquetes
+          merge-multiple: true
       - env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes paquetes/*/*
+        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes paquetes/*
