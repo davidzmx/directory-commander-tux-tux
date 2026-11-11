@@ -1,9 +1,12 @@
 name: Paquetes
-# Genera los instaladores y las versiones portables en cada sistema. Con una etiqueta v*, además los publica en una versión de GitHub.
+# Genera los instaladores y las versiones portables en cada sistema en cada push a main y en cada PR. Con una etiqueta v*, además los publica en una versión de GitHub.
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     tags: ["v*"]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: write
