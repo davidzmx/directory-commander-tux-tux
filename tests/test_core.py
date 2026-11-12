@@ -46,6 +46,24 @@ def test_sort_reverse_keeps_dirs_first(tmp_path):
     assert names == ["d", "b.txt", "a.txt"]
 
 
+def test_extensionless_text_file_type_and_sort(tmp_path, monkeypatch):
+    write(tmp_path / "docker.txt", "contenido")
+    write(tmp_path / "Notas", "mis notas")
+    (tmp_path / "binario").write_bytes(b"\x00\x01\x02\x03")
+    entries = {e.name: e for e in listing.list_dir(str(tmp_path))}
+    # En Linux, Notas se clasifica como Archivo TXT y binario como Archivo
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert entries["docker.txt"].type_label == "Archivo TXT"
+    assert entries["Notas"].type_label == "Archivo TXT"
+    assert entries["binario"].type_label == "Archivo"
+    sorted_names = [e.name for e in listing.sort_entries(list(entries.values()), "type")]
+    assert sorted_names == ["binario", "docker.txt", "Notas"]
+    # En Windows, Notas mantiene su etiqueta de Archivo
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert entries["Notas"].type_label == "Archivo"
+    assert entries["docker.txt"].type_label == "Archivo TXT"
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="regla de ocultos de POSIX")
 def test_hidden_posix(tmp_path):
     write(tmp_path / ".secreto")

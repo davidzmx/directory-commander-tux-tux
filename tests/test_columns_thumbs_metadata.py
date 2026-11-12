@@ -425,6 +425,24 @@ def test_without_ffmpeg_videos_keep_their_icon(app, tmp_path, monkeypatch):
     view.dispose()
 
 
+def test_extensionless_files_do_not_share_cached_icon(window, tmp_path):
+    from directory_commander_tux_tux.core.listing import entry_from_path
+    from directory_commander_tux_tux.ui.model import icon_for
+
+    script = tmp_path / "script_sin_ext"
+    script.write_text("#!/bin/sh\necho ok\n", encoding="utf-8")
+    os.chmod(script, 0o755)
+
+    texto = tmp_path / "nota_sin_ext"
+    texto.write_text("solo texto", encoding="utf-8")
+    os.chmod(texto, 0o644)
+
+    icon_script = icon_for(entry_from_path(str(script)))
+    icon_texto = icon_for(entry_from_path(str(texto)))
+    if icon_script.name() and icon_texto.name():
+        assert icon_texto.name() != icon_script.name()
+
+
 # ------------------------------------------------------------------ vista y orden de cada carpeta
 def test_each_folder_keeps_its_view_and_order(window, tree):
     left, right = tree
