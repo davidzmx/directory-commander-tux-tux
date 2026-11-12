@@ -1727,6 +1727,19 @@ def test_ctrl_c_also_leaves_the_line_empty(window, folders):
     assert not terminal._line_started
 
 
+def test_backspace_until_prompt_empty_resets_line_started(window):
+    terminal, session = ready_fake(window)
+    assert terminal.ready_for_command()
+    terminal.screen_.feed_text("abc")
+    terminal._line_started = True
+    terminal._last_activity = 0
+    assert not terminal.ready_for_command()
+    terminal.screen_.feed_text("\b \b" * 3)
+    terminal._last_activity = 0
+    assert terminal.ready_for_command()
+    assert not terminal._line_started
+
+
 @pytest.mark.parametrize("change", ["busy", "no_prompt", "full_screen", "just_typed"])
 def test_it_waits_when_the_shell_cannot_receive_a_command(window, folders, change):
     terminal, session = ready_fake(window)
@@ -2009,9 +2022,9 @@ def test_old_config_gets_the_button_next_to_open_terminal(tmp_path):
         {"label": "Otro", "commands": ["Go UP"]}, {"label": "Terminal", "commands": [TERMINAL_COMMAND]}, {"label": "Último", "commands": ["Go BACK"]}],
         "bar_order": {"toolbar": ["Último", "Terminal", "Otro"], "pane": ["goup", "menu-arrow", "path"]}}), encoding="utf-8")
     config = Config(str(tmp_path))
-    assert [item["commands"][0] for item in config["toolbar"]] == ["Go UP", TERMINAL_COMMAND, GENERAL_TERMINAL_COMMAND, "Set PANEFRAMES=Toggle", "Go BACK", "Compare FILES", "Set GENERATIONMARKS=Toggle", "Set OPENVIDEOS=Toggle", "Set OPENIMAGES=Toggle"]
+    assert [item["commands"][0] for item in config["toolbar"]] == ["Go UP", TERMINAL_COMMAND, GENERAL_TERMINAL_COMMAND, "Set PANEFRAMES=Toggle", "Go BACK", "Compare FILES", "Set GENERATIONMARKS=Toggle", "Set OPENVIDEOS=Toggle", "Set OPENIMAGES=Toggle", "Set NOTES=Toggle"]
     arranged = bar_buttons.arrange_toolbar(config, config["toolbar"])
-    assert [item["label"] for item in arranged] == ["Último", "Comparar archivos", "Marcas de IA", "Abrir vídeos", "Abrir imágenes", "Terminal", "Terminal general", "Marcos de los paneles", "Otro"]
+    assert [item["label"] for item in arranged] == ["Último", "Comparar archivos", "Marcas de IA", "Abrir vídeos", "Abrir imágenes", "Notas", "Terminal", "Terminal general", "Marcos de los paneles", "Otro"]
     order = bar_buttons.arranged(config, bar_buttons.PANE)
     assert order.index("terminalpane") == order.index("treepane") + 1 == order.index("thumbnails") + 2 == order.index("gitbranch") + 3 and order.index("gitbranch") == order.index("copypath") + 1 and order.index("copypath") == order.index("menu-arrow") + 1
 
@@ -2019,7 +2032,7 @@ def test_old_config_gets_the_button_next_to_open_terminal(tmp_path):
 def test_toolbar_without_open_terminal_gets_it_at_the_end_and_only_once(tmp_path):
     (tmp_path / "config.json").write_text(json.dumps({"config_version": 7, "toolbar": [{"label": "Otro", "commands": ["Go UP"]}]}), encoding="utf-8")
     config = Config(str(tmp_path))
-    assert [item["commands"] for item in config["toolbar"][-6:]] == [[GENERAL_TERMINAL_COMMAND], ["Set PANEFRAMES=Toggle"], ["Compare FILES"], ["Set GENERATIONMARKS=Toggle"], ["Set OPENVIDEOS=Toggle"], ["Set OPENIMAGES=Toggle"]]
+    assert [item["commands"] for item in config["toolbar"][-7:]] == [[GENERAL_TERMINAL_COMMAND], ["Set PANEFRAMES=Toggle"], ["Compare FILES"], ["Set GENERATIONMARKS=Toggle"], ["Set OPENVIDEOS=Toggle"], ["Set OPENIMAGES=Toggle"], ["Set NOTES=Toggle"]]
     config.save()
     assert sum(item["commands"] == [GENERAL_TERMINAL_COMMAND] for item in Config(str(tmp_path))["toolbar"]) == 1
 
@@ -2029,7 +2042,7 @@ def test_previous_button_becomes_the_general_terminal_and_keeps_its_place(tmp_pa
     (tmp_path / "config.json").write_text(json.dumps({"config_version": 8, "toolbar": [{"label": "Terminal", "commands": [TERMINAL_COMMAND]}, {"label": "Otro", "commands": ["Go UP"]}, old],
         "bar_order": {"toolbar": ["Panel de terminal", "Otro", "Terminal"]}, "bar_buttons": {"toolbar": ["Panel de terminal"]}}), encoding="utf-8")
     config = Config(str(tmp_path))
-    assert [item["commands"][0] for item in config["toolbar"]] == [TERMINAL_COMMAND, "Go UP", GENERAL_TERMINAL_COMMAND, "Set PANEFRAMES=Toggle", "Compare FILES", "Set GENERATIONMARKS=Toggle", "Set OPENVIDEOS=Toggle", "Set OPENIMAGES=Toggle"]
+    assert [item["commands"][0] for item in config["toolbar"]] == [TERMINAL_COMMAND, "Go UP", GENERAL_TERMINAL_COMMAND, "Set PANEFRAMES=Toggle", "Compare FILES", "Set GENERATIONMARKS=Toggle", "Set OPENVIDEOS=Toggle", "Set OPENIMAGES=Toggle", "Set NOTES=Toggle"]
     assert config["toolbar"][2]["label"] == "Terminal general" and config["toolbar"][2]["icon"] == "terminalgeneral"
     assert config["bar_order"]["toolbar"] == ["Terminal general", "Otro", "Terminal"]
     assert config["bar_buttons"]["toolbar"] == ["Terminal general"]
@@ -2038,7 +2051,7 @@ def test_previous_button_becomes_the_general_terminal_and_keeps_its_place(tmp_pa
 def test_a_button_made_by_the_user_for_the_active_pane_stays(tmp_path):
     (tmp_path / "config.json").write_text(json.dumps({"config_version": 8, "toolbar": [{"label": "Mi terminal", "commands": [TERMINAL_TOGGLE_COMMAND]}]}), encoding="utf-8")
     config = Config(str(tmp_path))
-    assert [item["commands"][0] for item in config["toolbar"]] == [TERMINAL_TOGGLE_COMMAND, GENERAL_TERMINAL_COMMAND, "Set PANEFRAMES=Toggle", "Compare FILES", "Set GENERATIONMARKS=Toggle", "Set OPENVIDEOS=Toggle", "Set OPENIMAGES=Toggle"]
+    assert [item["commands"][0] for item in config["toolbar"]] == [TERMINAL_TOGGLE_COMMAND, GENERAL_TERMINAL_COMMAND, "Set PANEFRAMES=Toggle", "Compare FILES", "Set GENERATIONMARKS=Toggle", "Set OPENVIDEOS=Toggle", "Set OPENIMAGES=Toggle", "Set NOTES=Toggle"]
 
 
 def test_pane_button_can_be_hidden_from_preferences(window):

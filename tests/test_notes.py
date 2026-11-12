@@ -207,3 +207,37 @@ def test_notes_popup_resizable(tmp_path, qapp_for_gc):
     assert popup2.height() == 480
     popup2.close()
 
+
+def test_notes_popup_click_outside_closes_and_respects_click(tmp_path, qapp_for_gc):
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtWidgets import QPushButton, QWidget
+    from directory_commander_tux_tux.ui.notes_popup import NotesPopup
+
+    parent = QWidget()
+    parent.resize(600, 400)
+    btn = QPushButton("External Action", parent)
+    btn.move(10, 10)
+    clicked = []
+    btn.clicked.connect(lambda: clicked.append(True))
+    parent.show()
+
+    popup = NotesPopup(str(tmp_path), parent)
+    popup.move(100, 100)
+    popup.show()
+    assert popup.isVisible()
+
+    # Clic fuera del popup en el botón externo
+    pos = btn.mapToGlobal(QPoint(10, 10))
+    press = QMouseEvent(QMouseEvent.Type.MouseButtonPress, QPoint(10, 10), pos, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    release = QMouseEvent(QMouseEvent.Type.MouseButtonRelease, QPoint(10, 10), pos, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    qapp_for_gc.sendEvent(btn, press)
+    qapp_for_gc.sendEvent(btn, release)
+
+    # El popup debe haberse cerrado y el clic del botón haberse respetado
+    assert not popup.isVisible()
+    assert clicked == [True]
+
+    parent.close()
+
+

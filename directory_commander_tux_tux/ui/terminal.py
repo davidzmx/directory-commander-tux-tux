@@ -15,7 +15,18 @@ from ..core import remote
 from ..core.git_tools import quote
 from ..core.i18n import tr
 from ..core.pty_session import PtySession
-from ..core.shells import DEFAULT_FAMILY, OTHER, POWERSHELL, Shell, can_clear_line_with_escape, cd_command, default_shell, looks_like_prompt, prompt_folder
+from ..core.shells import (
+    _PROMPT_ENDINGS,
+    DEFAULT_FAMILY,
+    OTHER,
+    POWERSHELL,
+    Shell,
+    can_clear_line_with_escape,
+    cd_command,
+    default_shell,
+    looks_like_prompt,
+    prompt_folder,
+)
 from ..core.vt_screen import Screen
 from . import theme
 
@@ -129,6 +140,7 @@ class TerminalView(QAbstractScrollArea):
         self._current_folder = ""
         self._wanted_folder: str | None = None
         self._line_started = False
+        self._last_prompt: str | None = None
         self._last_activity = 0.0
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled)
@@ -222,6 +234,7 @@ class TerminalView(QAbstractScrollArea):
         self._current_folder = folder
         self._wanted_folder = None
         self._line_started = False
+        self._last_prompt = None
         self._last_activity = time.monotonic()
         self._refresh()
         self.started.emit()
@@ -254,10 +267,22 @@ class TerminalView(QAbstractScrollArea):
     def _ready_for_command(self) -> bool:
         """Se escribe solo en un indicador vacío: nunca en lo que el usuario esté tecleando ni en un programa que espera una respuesta."""
         screen = self.screen_
-        if self._line_started or screen.alt or time.monotonic() - self._last_activity < _QUIET_SECONDS:
+        if screen.alt or time.monotonic() - self._last_activity < _QUIET_SECONDS:
             return False
+        if self._line_started:
+            prompt = screen.prompt_text().rstrip()
+            after_cursor = "".join(cell[0] for cell in screen.line(screen.cursor_index)[screen.x:]).strip()
+            if (self._last_prompt is not None and prompt == self._last_prompt and not after_cursor) or (
+                prompt.endswith(_PROMPT_ENDINGS.get(self._family, ())) and not after_cursor
+            ):
+                self._line_started = False
+            else:
+                return False
         # Sin hijos, el intérprete aún puede estar en un `pause` o un `set /p` de un .bat.
-        return looks_like_prompt(screen.prompt_text(), self._family) and self.session.shell_is_idle()
+        ready = looks_like_prompt(screen.prompt_text(), self._family) and self.session.shell_is_idle()
+        if ready:
+            self._last_prompt = screen.prompt_text().rstrip()
+        return ready
 
     @property
     def family(self) -> str:

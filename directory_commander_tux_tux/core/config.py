@@ -168,8 +168,8 @@ DEFAULT_TOOLBAR = [
     _btn(N_("Terminal general"), "terminalgeneral", GENERAL_TERMINAL_COMMAND, N_("Mostrar u ocultar la terminal general (Ctrl+Mayús+G)")),
     _btn(N_("Marcos de los paneles"), "paneframes", FRAMES_TOGGLE_COMMAND, N_("Mostrar u ocultar el marco de color de cada panel")),
     _sep(),
-    _btn(N_("Notas"), "newtextfile", NOTES_COMMAND, N_("Bloc de notas rápido (Ctrl+Shift+N)")),
     _btn(N_("Cambiar tema"), "themetoggle", THEME_TOGGLE_COMMAND, N_("Cambiar entre el tema claro y el oscuro")),
+    _btn(N_("Notas"), "newtextfile", NOTES_COMMAND, N_("Bloc de notas rápido (Ctrl+Shift+N)")),
 ]
 
 DEFAULT_STYLES = [
@@ -558,13 +558,13 @@ def _add_panel_terminal_styles(stored: dict) -> None:
 
 
 def _add_notes_button(stored: dict) -> None:
-    """Delante del botón de cambiar tema, o al final si la barra no lo tiene."""
+    """Detrás del botón de cambiar tema, o al final si la barra no lo tiene."""
     toolbar = stored.get("toolbar")
     if not isinstance(toolbar, list) or any(_runs(item, NOTES_COMMAND) or _runs(item, "Notes") for item in toolbar):
         return
     button = next(json.loads(json.dumps(item)) for item in DEFAULT_TOOLBAR if _runs(item, NOTES_COMMAND))
     theme_btn = next((position for position, item in enumerate(toolbar) if _runs(item, THEME_TOGGLE_COMMAND)), None)
-    toolbar.insert(len(toolbar) if theme_btn is None else theme_btn, button)
+    toolbar.insert(len(toolbar) if theme_btn is None else theme_btn + 1, button)
 
 
 class Config:
