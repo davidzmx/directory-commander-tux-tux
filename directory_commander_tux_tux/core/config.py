@@ -11,7 +11,7 @@ from . import favorites
 from .i18n import AUTO, LANGUAGE_FOLDER, N_, tr
 from .pane_colors import DEFAULT_SCHEME, adopt_old_colors
 
-CONFIG_VERSION = 23
+CONFIG_VERSION = 24
 PORTABLE_MARKER = "portable.txt"
 VISIT_POINTS = 3
 
@@ -61,6 +61,7 @@ def _item(label: str, icon: str, command: str) -> dict:
 
 
 THEME_TOGGLE_COMMAND = "Set DARKMODE=Toggle"
+NOTES_COMMAND = "Set NOTES=Toggle"
 METADATA_TOGGLE_COMMAND = "Set METAPANE=Toggle"
 VIEWER_TOGGLE_COMMAND = "Set VIEWPANE=Toggle"
 TERMINAL_COMMAND = "CLI DOSPROMPT"
@@ -167,6 +168,7 @@ DEFAULT_TOOLBAR = [
     _btn(N_("Terminal general"), "terminalgeneral", GENERAL_TERMINAL_COMMAND, N_("Mostrar u ocultar la terminal general (Ctrl+Mayús+G)")),
     _btn(N_("Marcos de los paneles"), "paneframes", FRAMES_TOGGLE_COMMAND, N_("Mostrar u ocultar el marco de color de cada panel")),
     _sep(),
+    _btn(N_("Notas"), "newtextfile", NOTES_COMMAND, N_("Bloc de notas rápido (Ctrl+Shift+N)")),
     _btn(N_("Cambiar tema"), "themetoggle", THEME_TOGGLE_COMMAND, N_("Cambiar entre el tema claro y el oscuro")),
 ]
 
@@ -555,6 +557,16 @@ def _add_panel_terminal_styles(stored: dict) -> None:
             styles.insert(names.index(partner) + 1 if partner in names else len(styles), definition)
 
 
+def _add_notes_button(stored: dict) -> None:
+    """Delante del botón de cambiar tema, o al final si la barra no lo tiene."""
+    toolbar = stored.get("toolbar")
+    if not isinstance(toolbar, list) or any(_runs(item, NOTES_COMMAND) or _runs(item, "Notes") for item in toolbar):
+        return
+    button = next(json.loads(json.dumps(item)) for item in DEFAULT_TOOLBAR if _runs(item, NOTES_COMMAND))
+    theme_btn = next((position for position, item in enumerate(toolbar) if _runs(item, THEME_TOGGLE_COMMAND)), None)
+    toolbar.insert(len(toolbar) if theme_btn is None else theme_btn, button)
+
+
 class Config:
     """Diccionario persistente. Un archivo dañado se aparta y no impide arrancar."""
 
@@ -633,6 +645,8 @@ class Config:
             _add_open_media_buttons(stored)
         if version < 23:
             _hide_video_orientation_buttons(stored)
+        if version < 24:
+            _add_notes_button(stored)
         if version < 17:
             stored.pop("find_window_geometry", None)  # era de otra forma de colocar el panel, con otras medidas
         if version < 15:

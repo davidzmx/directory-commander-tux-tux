@@ -174,6 +174,8 @@ MENU_ITEMS = [
     (N_("&Herramientas"), N_("Copiar lo más reciente a destino"), "sync", None, "Copy UPDATEALL", True),
     (N_("&Herramientas"), N_("Guardar listado de la carpeta…"), "logs", None, "Print FOLDER", False),
     (N_("&Herramientas"), None, None, None, None, False),
+    (N_("&Herramientas"), N_("Bloc de notas rápido"), "newtextfile", "Ctrl+Shift+N", "Set NOTES=Toggle", False),
+    (N_("&Herramientas"), None, None, None, None, False),
     (N_("&Herramientas"), N_("Trabajos"), "jobs", None, "Set UTILITY=Jobs", False),
     (N_("&Herramientas"), N_("Registro"), "logs", "Ctrl+U", "Set UTILITY=Log", False),
     (N_("Ay&uda"), N_("Acerca de Directory Commander Tux Tux"), "about", None, "Help ABOUT", False),
@@ -196,7 +198,7 @@ BAR_OVERFLOW_WIDTH = 26
 NOT_IN_RESULTS = {"diskusage", "createfolder", "createfile", "filetype", "archive", "extract", "split", "join", "cli"}  # hacen algo en la carpeta, y los resultados no son una
 # En un panel remoto: lo que sabe hacer en un servidor. Lo demás lee o escribe archivos del equipo.
 ON_SERVER = {"go", "copy", "delete", "rename", "createfolder", "createfile", "select", "set", "clipboard", "favorites", "help", "close", "prefs",
-             "toolbar", "recent", "marker", "compare"}
+             "toolbar", "recent", "marker", "compare", "notes"}
 # Formas de Copy que trabajan con archivos del equipo: con un servidor de por medio, no.
 REMOTE_COPY_LIMITS = ("ADDTOARCHIVE", "ADDTOZIP", "ZIP", "ARCHIVE", "EXTRACT", "MAKELINK", "UPDATEALL", "UPDATEEXISTING")
 NOT_ON_COMPUTER = {"diskusage", "copy", "delete", "rename", "createfolder", "createfile", "filetype", "archive", "extract", "setattr",
@@ -712,6 +714,8 @@ class MainWindow(ExtraCommands, QMainWindow):
         self._undo: list[dict] = []
         self._redo: list[dict] = []
         self._viewers: list[ImageViewer] = []
+        self._notes_popup = None
+        self._notes_action = None
         self.nav_lock = False
         self._following = False
         self._apply_theme_globals()
@@ -1000,6 +1004,8 @@ class MainWindow(ExtraCommands, QMainWindow):
         for viewer in self._viewers:
             if _alive(viewer):
                 viewer.apply_icons()
+        if self._notes_popup is not None:
+            self._notes_popup.apply_theme()
         for view in self.all_views():
             view.model.layoutChanged.emit()
 
@@ -2007,6 +2013,7 @@ class MainWindow(ExtraCommands, QMainWindow):
         self.toolbar.clear()
         self._compare_bar_actions.clear()
         self._open_media_actions.clear()
+        self._notes_action = None
         items = self.config.get("toolbar", [])
         removed = bar_buttons.hidden(self.config, bar_buttons.TOOLBAR)
         self._add_toolbar_items(self.toolbar, [item for item in bar_buttons.arrange_toolbar(self.config, items) if bar_buttons.toolbar_key(item) not in removed]
@@ -2045,7 +2052,9 @@ class MainWindow(ExtraCommands, QMainWindow):
         if COMPARE_COMMAND in lines:
             self._compare_bar_actions.append(action)
             action.setEnabled(self.compare_pair() is not None)
-        from ..core.config import OPEN_IMAGES_COMMAND, OPEN_VIDEOS_COMMAND
+        from ..core.config import NOTES_COMMAND, OPEN_IMAGES_COMMAND, OPEN_VIDEOS_COMMAND
+        if any(line in (NOTES_COMMAND, "Notes") for line in lines):
+            self._notes_action = action
         if OPEN_VIDEOS_COMMAND in lines:
             action.setCheckable(True)
             self._open_media_actions.append((action, "open_videos"))
@@ -3725,6 +3734,18 @@ class MainWindow(ExtraCommands, QMainWindow):
         value = value.lower()
         self._show_terminal(GENERAL_TERMINAL, self.terminal_panels[GENERAL_TERMINAL].isHidden() if value == "toggle" else value in ("on", "yes"))
 
+    def _set_notes(self, value: str) -> None:
+        value = value.lower()
+        if value in ("toggle", ""):
+            self.toggle_notes()
+        elif value in ("on", "yes", "true", "1", "show"):
+            if not (self._notes_popup and self._notes_popup.isVisible()):
+                btn = self._find_notes_button()
+                self.notes_popup.popup_at(btn)
+        elif value in ("off", "no", "false", "0", "hide"):
+            if self._notes_popup and self._notes_popup.isVisible():
+                self._notes_popup.hide()
+
     # ------------------------------------------------------------------ el foquito de las conexiones
     def _led_tick(self) -> None:
         self._led_lit = not self._led_lit
@@ -4559,6 +4580,37 @@ class MainWindow(ExtraCommands, QMainWindow):
             label = volume.displayName() or root
             action = menu.addAction(themed("drive"), f"{label} ({root})")
             action.triggered.connect(lambda _=False, p=root: self.source.navigate(p))
+
+    @property
+    def notes_popup(self):
+        if self._notes_popup is None:
+            from .notes_popup import NotesPopup
+            self._notes_popup = NotesPopup(self.config.directory, self)
+        return self._notes_popup
+
+    def _find_notes_button(self) -> QWidget | None:
+        if hasattr(self, "_notes_action") and self._notes_action is not None:
+            widget = self.toolbar.widgetForAction(self._notes_action)
+            if widget is not None:
+                return widget
+        for action in self.toolbar.actions():
+            widget = self.toolbar.widgetForAction(action)
+            if widget is not None:
+                tip = action.toolTip().lower()
+                text = action.text().lower()
+                if "nota" in tip or "nota" in text or "note" in tip:
+                    return widget
+        return None
+
+    def toggle_notes(self) -> None:
+        if self._notes_popup is not None and self._notes_popup.isVisible():
+            self._notes_popup.hide()
+            return
+        btn = self._find_notes_button()
+        self.notes_popup.popup_at(btn)
+
+    def _cmd_notes(self, _cmd: commands.Command) -> None:
+        self.toggle_notes()
 
     def _cmd_help(self, _cmd: commands.Command) -> None:
         QMessageBox.about(self, tr("Acerca de {APP_NAME}", APP_NAME=APP_NAME),
