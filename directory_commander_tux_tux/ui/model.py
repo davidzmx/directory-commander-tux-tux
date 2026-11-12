@@ -143,14 +143,15 @@ def icon_for(entry: Entry) -> QIcon:
     if entry.is_dir:
         return _icons.icon(QFileIconProvider.IconType.Folder)
     ext = entry.extension
-    cached = _ext_cache.get(ext)
-    if cached is not None:
-        return cached
+    if ext:
+        cached = _ext_cache.get(ext)
+        if cached is not None:
+            return cached
     if os.path.exists(entry.path):
         icon = _icons.icon(QFileInfo(entry.path))
     else:  # miembro de un comprimido
         icon = _icons.icon(QFileIconProvider.IconType.File)
-    if ext not in ("exe", "lnk", "ico", "appimage", "desktop"):  # estos tienen icono propio
+    if ext and ext not in ("exe", "lnk", "ico", "appimage", "desktop"):  # estos tienen icono propio
         _ext_cache[ext] = icon
     return icon
 

@@ -114,6 +114,34 @@ def natural_key(name: str) -> tuple:
     return tuple(int(p) if i % 2 else p for i, p in enumerate(parts))
 
 
+_TEXT_ALLOWED = frozenset(b"\t\n\r\f\x1b\b")
+_text_cache: dict[tuple[str, float], bool] = {}
+
+
+def _is_text_file(path: str, mtime: float = 0.0) -> bool:
+    if not path or not os.path.isfile(path):
+        return False
+    key = (path, mtime)
+    cached = _text_cache.get(key)
+    if cached is not None:
+        return cached
+    if len(_text_cache) > 8192:
+        _text_cache.clear()
+    try:
+        with open(path, "rb") as f:
+            sample = f.read(512)
+        if not sample or sample.startswith((b"\xff\xfe", b"\xfe\xff")):
+            result = True
+        elif b"\0" in sample:
+            result = False
+        else:
+            result = not any(byte < 32 and byte not in _TEXT_ALLOWED for byte in sample)
+    except OSError:
+        result = False
+    _text_cache[key] = result
+    return result
+
+
 @dataclass(slots=True)
 class Entry:
     name: str
@@ -162,7 +190,11 @@ class Entry:
             return DRIVE_GROUPS[self.drive_kind][1] if self.drive_kind in DRIVE_GROUPS else tr("Unidad")
         if self.is_dir:
             return tr("Carpeta (enlace)") if self.is_link else tr("Carpeta")
-        return tr("Archivo {upper}", upper=self.extension.upper()) if self.extension else tr("Archivo")
+        if self.extension:
+            return tr("Archivo {upper}", upper=self.extension.upper())
+        if sys.platform != "win32" and _is_text_file(self.path, self.mtime):
+            return tr("Archivo TXT")
+        return tr("Archivo")
 
 
 def _windows_attrs(st: os.stat_result) -> str:
@@ -331,7 +363,12 @@ CONTENT_TYPES = {
 def matches_content_type(entry: Entry, content_types) -> bool:
     """Basta con ser de uno de los tipos. Las carpetas siempre pasan: ocultarlas impediría navegar."""
     groups = [CONTENT_TYPES[key] for key in ((content_types,) if isinstance(content_types, str) else content_types) if key in CONTENT_TYPES]
-    return not groups or entry.is_dir or any(entry.extension in extensions for _name, extensions in groups)
+    if not groups or entry.is_dir:
+        return True
+    ext = entry.extension
+    if not ext and sys.platform != "win32" and _is_text_file(entry.path, entry.mtime):
+        ext = "txt"
+    return any(ext in extensions for _name, extensions in groups)
 
 
 def format_size(size: int) -> str:
