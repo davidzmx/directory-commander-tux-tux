@@ -278,14 +278,14 @@ def test_upgrade_swaps_the_two_buttons_in_the_toolbar_and_in_the_chosen_order(tm
     other = {"label": "Otro", "commands": ["Go UP"]}
     order = ["Otro", "Panel de visualización", "Panel de metadatos", "|"]
     config = upgraded(tmp_path, toolbar=[other, VIEWER, METADATA], bar_order={"toolbar": order})
-    assert [item["label"] for item in config["toolbar"]] == ["Otro", "Panel de metadatos", "Panel de visualización", "Terminal general", "Marcos de los paneles", "Comparar archivos", "Marcas de IA", "Abrir vídeos", "Abrir imágenes"]
+    assert [item["label"] for item in config["toolbar"]] == ["Otro", "Panel de metadatos", "Panel de visualización", "Terminal general", "Marcos de los paneles", "Comparar archivos", "Marcas de IA", "Abrir vídeos", "Abrir imágenes", "Notas"]
     assert config["bar_order"]["toolbar"] == ["Otro", "Panel de metadatos", "Panel de visualización", "|"]
 
 
 def test_upgrade_does_not_touch_buttons_the_user_separated(tmp_path):
     other = {"label": "Otro", "commands": ["Go UP"]}
     config = upgraded(tmp_path, toolbar=[VIEWER, other, METADATA])
-    assert [item["label"] for item in config["toolbar"]] == ["Panel de visualización", "Otro", "Panel de metadatos", "Terminal general", "Marcos de los paneles", "Comparar archivos", "Marcas de IA", "Abrir vídeos", "Abrir imágenes"]
+    assert [item["label"] for item in config["toolbar"]] == ["Panel de visualización", "Otro", "Panel de metadatos", "Terminal general", "Marcos de los paneles", "Comparar archivos", "Marcas de IA", "Abrir vídeos", "Abrir imágenes", "Notas"]
 
 
 def test_a_custom_button_with_the_old_name_still_works(window):

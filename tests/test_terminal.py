@@ -1707,6 +1707,7 @@ def test_each_terminal_follows_only_its_pane(window, folders, tmp_path):
 def test_half_typed_text_is_never_overwritten_and_enter_lets_it_follow(window, folders):
     terminal, session = ready_fake(window)
     QTest.keyClick(terminal, Qt.Key.Key_R)
+    terminal.screen_.feed_text("r")  # el eco del intérprete
     session.sent = b""
     terminal._last_activity = 0
     window.groups[0].current.navigate(str(folders[1]))
@@ -1714,6 +1715,7 @@ def test_half_typed_text_is_never_overwritten_and_enter_lets_it_follow(window, f
     assert session.sent == b"" and terminal._wanted_folder == str(folders[1])
     QTest.keyClick(terminal, Qt.Key.Key_Return)
     assert session.sent == b"\r"
+    terminal.screen_.feed_text("\r\nC:\\>")
     session.sent = b""
     terminal._last_activity = 0
     assert wait_until(lambda: session.sent)
@@ -1730,14 +1732,25 @@ def test_ctrl_c_also_leaves_the_line_empty(window, folders):
 def test_backspace_until_prompt_empty_resets_line_started(window):
     terminal, session = ready_fake(window)
     assert terminal.ready_for_command()
+    QTest.keyClicks(terminal, "abc")
     terminal.screen_.feed_text("abc")
-    terminal._line_started = True
     terminal._last_activity = 0
     assert not terminal.ready_for_command()
+    for _ in range(3):
+        QTest.keyClick(terminal, Qt.Key.Key_Backspace)
     terminal.screen_.feed_text("\b \b" * 3)
     terminal._last_activity = 0
     assert terminal.ready_for_command()
     assert not terminal._line_started
+
+
+def test_text_that_ends_like_a_prompt_is_still_half_typed(window):
+    terminal, session = ready_fake(window)
+    terminal._family = POSIX
+    QTest.keyClicks(terminal, "echo $")
+    terminal.screen_.feed_text("echo $")
+    terminal._last_activity = 0
+    assert not terminal.ready_for_command()
 
 
 @pytest.mark.parametrize("change", ["busy", "no_prompt", "full_screen", "just_typed"])

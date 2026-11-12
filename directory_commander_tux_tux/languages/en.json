@@ -3,6 +3,7 @@
   "code": "en",
   "strings": {
     " (detenida)": " (stopped)",
+    "# Comandos y notas rápidas\n# Escribe aquí rutas, comandos o datos temporales.\n# Haz doble clic en la lista para copiar al instante.": "# Quick commands and notes\n# Write paths, commands or temporary data here.\n# Double-click in the list to copy it instantly.",
     " (haz clic para cambiar)": " (click to change)",
     " ({skipped} omitidos)": " ({skipped} skipped)",
     " Se descartaron {skipped} no válidos.": " {skipped} invalid items were discarded.",
@@ -137,6 +138,7 @@
     "Archivo del servidor": "File on the server",
     "Archivo vacío": "Empty file",
     "Archivo {upper}": "{upper} file",
+    "Archivo TXT": "TXT file",
     "Archivos": "Files",
     "Archivos JSON (*.json)": "JSON files (*.json)",
     "Archivos MP3": "MP3 files",
@@ -1524,6 +1526,7 @@
     "Tira de Fotogramas": "Filmstrip",
     "Tira de fotogramas": "Filmstrip",
     "Todas las opciones": "All options",
+    "Todos los archivos (*)": "All files (*)",
     "Todos los archivos se han renombrado. ¿Quieres seguir renombrando los mismos archivos?": "All the files have been renamed. Do you want to keep renaming the same files?",
     "Todos los archivos y carpetas": "All files and folders",
     "Toolbar necesita NAME, LIST o RESETDEFAULTS": "Toolbar needs NAME, LIST or RESETDEFAULTS",
