@@ -1706,7 +1706,7 @@ def test_old_configs_get_the_compare_button(tmp_path):
 
     (tmp_path / "config.json").write_text(json.dumps({"config_version": 13, "toolbar": [{"label": "Duplicados", "commands": ["Set UTILITY=Dupe"]}, {"label": "Otro", "commands": ["Go UP"]}]}), encoding="utf-8")
     labels = [item["label"] for item in Config(str(tmp_path))["toolbar"]]
-    assert labels == ["Duplicados", "Comparar archivos", "Otro", "Marcos de los paneles", "Marcas de IA", "Abrir vídeos", "Abrir imágenes"]
+    assert labels == ["Duplicados", "Comparar archivos", "Otro", "Marcos de los paneles", "Marcas de IA", "Abrir vídeos", "Abrir imágenes", "Notas"]
 
 
 def test_identical_files(tmp_path):

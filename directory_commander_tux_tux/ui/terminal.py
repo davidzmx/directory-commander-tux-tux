@@ -15,18 +15,7 @@ from ..core import remote
 from ..core.git_tools import quote
 from ..core.i18n import tr
 from ..core.pty_session import PtySession
-from ..core.shells import (
-    _PROMPT_ENDINGS,
-    DEFAULT_FAMILY,
-    OTHER,
-    POWERSHELL,
-    Shell,
-    can_clear_line_with_escape,
-    cd_command,
-    default_shell,
-    looks_like_prompt,
-    prompt_folder,
-)
+from ..core.shells import DEFAULT_FAMILY, OTHER, POWERSHELL, Shell, can_clear_line_with_escape, cd_command, default_shell, looks_like_prompt, prompt_folder
 from ..core.vt_screen import Screen
 from . import theme
 
@@ -140,7 +129,7 @@ class TerminalView(QAbstractScrollArea):
         self._current_folder = ""
         self._wanted_folder: str | None = None
         self._line_started = False
-        self._last_prompt: str | None = None
+        self._typed_after: str | None = None  # el indicador que había al empezar a teclear, para saber si se ha borrado todo
         self._last_activity = 0.0
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled)
@@ -234,7 +223,7 @@ class TerminalView(QAbstractScrollArea):
         self._current_folder = folder
         self._wanted_folder = None
         self._line_started = False
-        self._last_prompt = None
+        self._typed_after = None
         self._last_activity = time.monotonic()
         self._refresh()
         self.started.emit()
@@ -270,19 +259,13 @@ class TerminalView(QAbstractScrollArea):
         if screen.alt or time.monotonic() - self._last_activity < _QUIET_SECONDS:
             return False
         if self._line_started:
-            prompt = screen.prompt_text().rstrip()
+            # Si se ha borrado todo lo tecleado, la línea vuelve a ser exactamente el indicador de antes. Parecerse a un indicador no basta: «echo $» también acaba en «$».
             after_cursor = "".join(cell[0] for cell in screen.line(screen.cursor_index)[screen.x:]).strip()
-            if (self._last_prompt is not None and prompt == self._last_prompt and not after_cursor) or (
-                prompt.endswith(_PROMPT_ENDINGS.get(self._family, ())) and not after_cursor
-            ):
-                self._line_started = False
-            else:
+            if self._typed_after is None or screen.prompt_text().rstrip() != self._typed_after or after_cursor:
                 return False
+            self._line_started = False
         # Sin hijos, el intérprete aún puede estar en un `pause` o un `set /p` de un .bat.
-        ready = looks_like_prompt(screen.prompt_text(), self._family) and self.session.shell_is_idle()
-        if ready:
-            self._last_prompt = screen.prompt_text().rstrip()
-        return ready
+        return looks_like_prompt(screen.prompt_text(), self._family) and self.session.shell_is_idle()
 
     @property
     def family(self) -> str:
@@ -344,7 +327,11 @@ class TerminalView(QAbstractScrollArea):
     def _send_text(self, text: str) -> None:
         self._last_activity = time.monotonic()
         # Con Intro o Ctrl+C la línea vuelve a estar vacía, y Esc la vacía en cmd y PowerShell. Cualquier otra tecla podría haber dejado texto a medias.
-        self._line_started = not (text.endswith(("\r", "\x03")) or (text == "\x1b" and can_clear_line_with_escape(self._family)))
+        started = not (text.endswith(("\r", "\x03")) or (text == "\x1b" and can_clear_line_with_escape(self._family)))
+        if started and not self._line_started:
+            prompt = self.screen_.prompt_text().rstrip()
+            self._typed_after = prompt if looks_like_prompt(prompt, self._family) else None
+        self._line_started = started
         self._selection = None
         self.verticalScrollBar().setValue(self.verticalScrollBar().maximum())
         self._write(text.encode("utf-8", "replace"))
