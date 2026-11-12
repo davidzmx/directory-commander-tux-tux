@@ -186,7 +186,7 @@ def test_upgrade_puts_the_metadata_button_before_the_viewer_button(tmp_path):
     toolbar = [{"label": "Visor", "commands": ["Set VIEWPANE=Toggle"]}, {"label": "Otro", "commands": ["Go UP"]}]
     (tmp_path / "config.json").write_text(json.dumps({"config_version": 5, "toolbar": toolbar}), encoding="utf-8")
     labels = [item["commands"][0] for item in Config(str(tmp_path))["toolbar"]]
-    assert labels == [METADATA_TOGGLE_COMMAND, "Set VIEWPANE=Toggle", "Go UP", "Set GENERALTERMINAL=Toggle", "Set PANEFRAMES=Toggle", "Compare FILES", "Set GENERATIONMARKS=Toggle", "Set OPENVIDEOS=Toggle", "Set OPENIMAGES=Toggle"]
+    assert labels == [METADATA_TOGGLE_COMMAND, "Set VIEWPANE=Toggle", "Go UP", "Set GENERALTERMINAL=Toggle", "Set PANEFRAMES=Toggle", "Compare FILES", "Set GENERATIONMARKS=Toggle", "Set OPENVIDEOS=Toggle", "Set OPENIMAGES=Toggle", "Set NOTES=Toggle"]
 
 
 def test_settings_validate_recents_and_smart_favorites_on_import(tmp_path):
@@ -1218,7 +1218,7 @@ def test_upgrade_puts_the_marks_button_before_the_image_viewer(tmp_path):
 
     toolbar = [{"label": "Arriba", "commands": ["Go UP"]}, {"label": "Mostrar imágenes", "commands": ["Show"]}]
     (tmp_path / "config.json").write_text(json.dumps({"config_version": 18, "toolbar": toolbar}), encoding="utf-8")
-    assert [item["commands"][0] for item in Config(str(tmp_path))["toolbar"]] == ["Go UP", GENERATION_MARKS_COMMAND, "Set OPENVIDEOS=Toggle", "Set OPENIMAGES=Toggle", "Show"]
+    assert [item["commands"][0] for item in Config(str(tmp_path))["toolbar"]] == ["Go UP", GENERATION_MARKS_COMMAND, "Set OPENVIDEOS=Toggle", "Set OPENIMAGES=Toggle", "Show", "Set NOTES=Toggle"]
 
 
 def test_upgrade_turns_the_folder_sizes_button_into_disk_usage(tmp_path):
@@ -1229,6 +1229,6 @@ def test_upgrade_turns_the_folder_sizes_button_into_disk_usage(tmp_path):
     (tmp_path / "config.json").write_text(json.dumps({"config_version": 20, "toolbar": toolbar, "bar_order": {"toolbar": ["Tamaños de carpeta", "Arriba"]}}),
                                           encoding="utf-8")
     config = Config(str(tmp_path))
-    assert [item["commands"][0] for item in config["toolbar"]] == ["Go UP", DISK_USAGE_COMMAND, "GetSizes", "Set OPENVIDEOS=Toggle", "Set OPENIMAGES=Toggle"]  # en su sitio; el del usuario, intacto
+    assert [item["commands"][0] for item in config["toolbar"]] == ["Go UP", DISK_USAGE_COMMAND, "GetSizes", "Set OPENVIDEOS=Toggle", "Set OPENIMAGES=Toggle", "Set NOTES=Toggle"]  # en su sitio; el del usuario, intacto
     assert [child["commands"][0] for child in config["toolbar"][1]["children"]] == [DISK_USAGE_COMMAND, "GetSizes"]  # calcular, en su menú
     assert config["bar_order"]["toolbar"] == ["Uso del disco", "Arriba"]

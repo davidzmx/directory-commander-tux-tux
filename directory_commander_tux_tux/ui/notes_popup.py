@@ -6,7 +6,7 @@ import json
 import os
 import re
 
-from PySide6.QtCore import QModelIndex, QPoint, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QModelIndex, QPoint, QRect, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import (QColor, QFont, QFontDatabase, QKeySequence, QMouseEvent,
                            QPainter, QShortcut, QTextCharFormat, QTextCursor,
                            QTextDocument)
@@ -69,7 +69,7 @@ class NotesPopup(QDialog):
     """Ventana emergente tipo popup redimensionable anclada a la barra de herramientas."""
 
     def __init__(self, config_dir: str, parent=None) -> None:
-        super().__init__(parent, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        super().__init__(parent, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
         self.config_dir = config_dir
         self.notes: list[notes.NoteItem] = []
         self._current_id: str | None = None
@@ -78,6 +78,8 @@ class NotesPopup(QDialog):
         self._resize_start_pos = QPoint()
         self._resize_start_size = QSize()
         self._pending_selection = ""
+        self._host_widget: QWidget | None = None
+        self._dialog_open: bool = False
 
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.setMouseTracking(True)
@@ -290,6 +292,45 @@ class NotesPopup(QDialog):
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
+
+    def hideEvent(self, event) -> None:
+        super().hideEvent(event)
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
+        self._save_current_note()
+        self._save_size()
+
+    def eventFilter(self, watched, event) -> bool:
+        if event.type() in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonDblClick):
+            pos = event.globalPosition().toPoint()
+            if not self.geometry().contains(pos):
+                self.hide()
+                if self._host_widget is not None and self._host_widget.isVisible():
+                    host_rect = QRect(self._host_widget.mapToGlobal(QPoint(0, 0)), self._host_widget.size())
+                    if host_rect.contains(pos):
+                        return True  # Si se pulsa el botón del panel, consumir para no reabrirlo
+                return False  # Cierra el popup y deja pasar el clic al botón/elemento destino
+        return False
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.ActivationChange:
+            if not self.isActiveWindow() and not getattr(self, "_dialog_open", False):
+                self.hide()
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_Escape:
+            self.hide()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     # ------------------------------------------------------------------ Tema y Estilos
     def apply_theme(self) -> None:
@@ -559,36 +600,44 @@ class NotesPopup(QDialog):
 
     # ------------------------------------------------------------------ Importar y Exportar
     def export_notes(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(
-            self,
-            tr("Exportar notas"),
-            os.path.join(os.path.expanduser("~"), "notas.json"),
-            "JSON (*.json);;" + tr("Todos los archivos (*)")
-        )
-        if not path:
-            return
-        self._save_current_note()
-        notes.export_notes_to_file(path, self.notes)
-        self.flash_copied(tr("¡Notas exportadas!"))
+        self._dialog_open = True
+        try:
+            path, _ = QFileDialog.getSaveFileName(
+                self,
+                tr("Exportar notas"),
+                os.path.join(os.path.expanduser("~"), "notas.json"),
+                "JSON (*.json);;" + tr("Todos los archivos (*)")
+            )
+            if not path:
+                return
+            self._save_current_note()
+            notes.export_notes_to_file(path, self.notes)
+            self.flash_copied(tr("¡Notas exportadas!"))
+        finally:
+            self._dialog_open = False
 
     def import_notes(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            tr("Importar notas"),
-            os.path.expanduser("~"),
-            "JSON / Text (*.json *.txt *.md);;" + tr("Todos los archivos (*)")
-        )
-        if not path:
-            return
-        self._save_current_note()
-        added = notes.import_notes_from_file(path, self.notes)
-        if added > 0:
-            notes.save_notes(self.config_dir, self.notes)
-            self._refresh_list()
-            self._select_note(self.notes[-1].id)
-            self.flash_copied(tr("¡{count} notas importadas!", count=added))
-        else:
-            self.flash_copied(tr("No se importaron notas"))
+        self._dialog_open = True
+        try:
+            path, _ = QFileDialog.getOpenFileName(
+                self,
+                tr("Importar notas"),
+                os.path.expanduser("~"),
+                "JSON / Text (*.json *.txt *.md);;" + tr("Todos los archivos (*)")
+            )
+            if not path:
+                return
+            self._save_current_note()
+            added = notes.import_notes_from_file(path, self.notes)
+            if added > 0:
+                notes.save_notes(self.config_dir, self.notes)
+                self._refresh_list()
+                self._select_note(self.notes[-1].id)
+                self.flash_copied(tr("¡{count} notas importadas!", count=added))
+            else:
+                self.flash_copied(tr("No se importaron notas"))
+        finally:
+            self._dialog_open = False
 
     # ------------------------------------------------------------------ Despliegue
     def popup_at(self, widget: QWidget | None = None) -> None:
@@ -597,6 +646,7 @@ class NotesPopup(QDialog):
             self.hide()
             return
 
+        self._host_widget = widget
         self.apply_theme()
 
         if widget is not None and widget.isVisible():
