@@ -34,6 +34,7 @@ KNOWN_ARGS: dict[str, set[str]] = {
     "undo": {"REDO"},
     "prefs": {"PAGE", "BARS", "STYLELIST", "LAYOUTSAVE", "LAYOUTLIST", "LAYOUTEDIT", "THEMES", "IMPORT", "EXPORT", "SFTP"},
     "help": {"ABOUT"},
+    "notes": set(),
     "favorites": {"ADD", "ADDDIALOG", "IMPORT", "EXPORT", "MENU", "EDIT", "SMART"},
     "cli": {"DOSPROMPT"},
     "archive": set(),
