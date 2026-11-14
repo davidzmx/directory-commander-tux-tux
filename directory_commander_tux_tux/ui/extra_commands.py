@@ -70,17 +70,30 @@ class ExtraCommands:
         key = value.lower()
         if key == "sortlist":
             menu = QMenu(self)
+            current, descending = self.current_sort(self.source)
             for name, label in (("name", tr("Nombre")), ("size", tr("Tamaño")), ("type", tr("Tipo")), ("modified", tr("Modificación")),
                                 ("attrs", tr("Atributos"))):
-                menu.addAction(label, lambda n=name: self._sort_source(n))
+                item = menu.addAction(label, lambda n=name: self._sort_source(n))
+                item.setCheckable(True)
+                item.setChecked(name == current)
             menu.addSeparator()
-            menu.addAction(tr("Invertir el orden"), lambda: self._set_sortreverse("toggle"))
+            reverse = menu.addAction(tr("Invertir el orden"), lambda: self._set_sortreverse("toggle"))
+            reverse.setCheckable(True)
+            reverse.setChecked(descending)
             menu.exec(self.cursor().pos())
             return
         column = SORT_COLUMNS.get(key)
         if column is None:
             raise ValueError(tr("Columna desconocida: {value}", value=value))
         self._sort_source(column)
+
+    @staticmethod
+    def current_sort(view) -> tuple[str, bool]:
+        """La columna por la que está ordenado el panel y si va al revés. Lo que manda es el indicador de la cabecera."""
+        header = view.details.horizontalHeader()
+        section = header.sortIndicatorSection()
+        column = COLUMNS[section][0] if 0 <= section < len(COLUMNS) else ""
+        return column, header.sortIndicatorOrder() == Qt.SortOrder.DescendingOrder
 
     def _sort_source(self, column: str) -> None:
         index = next(i for i, (key, _label) in enumerate(COLUMNS) if key == column)

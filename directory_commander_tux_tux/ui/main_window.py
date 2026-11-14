@@ -4931,11 +4931,16 @@ class MainWindow(ExtraCommands, QMainWindow):
         if view.view_mode == "thumbnails":
             self._add_thumbnail_size_menu(menu, getattr(view.thumbs, "thumb_size", None))
         order = menu.addMenu(tr("Ordenar por"))
+        current, descending = self.current_sort(view)
         for label, key in ((tr("Nombre"), "name"), (tr("Tamaño"), "size"), (tr("Tipo"), "type"), (tr("Modificación"), "modified"),
                            (tr("Atributos"), "attrs")):
-            self._add_command(order, label, f"Set SORTBY={key}")
+            item = self._add_command(order, label, f"Set SORTBY={key}")
+            item.setCheckable(True)
+            item.setChecked(key == current)
         order.addSeparator()
-        self._add_command(order, tr("Invertir el orden"), "Set SORTREVERSE=Toggle")
+        reverse = self._add_command(order, tr("Invertir el orden"), "Set SORTREVERSE=Toggle")
+        reverse.setCheckable(True)
+        reverse.setChecked(descending)
         flat = add(tr("Vista plana"), "Set FLATVIEW=Toggle", local, "flat")
         flat.setCheckable(True)
         flat.setChecked(view.flat)
