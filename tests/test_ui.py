@@ -14,7 +14,7 @@ from PySide6.QtGui import (QAction, QCloseEvent, QColor, QContextMenuEvent, QDra
                            QMouseEvent, QPalette, QWheelEvent)
 from PySide6.QtMultimedia import QMediaMetaData, QMediaPlayer, QVideoFrame, QVideoFrameFormat
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QDialog, QFormLayout, QLineEdit, QMenu, QMessageBox, QStyle, QStyleOptionToolBar, QToolButton, QWidget,
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QDialog, QFormLayout, QLineEdit, QMenu, QMessageBox, QStyle, QStyleOptionToolBar, QStyleOptionViewItem, QStyledItemDelegate, QToolButton, QWidget,
                                QTreeWidgetItem)
 
 from directory_commander_tux_tux.core import bar_buttons, context_menu, desktop_apps, fsops, media_info, platform_utils, settings_io, tab_settings, windows_shell
@@ -1225,6 +1225,36 @@ def test_rename_editor_keeps_visible_selection_color(window):
     assert editor is not None
     assert editor.palette().color(QPalette.ColorRole.Highlight).alpha() == 255
     assert view.details.palette().color(QPalette.ColorRole.Highlight).alpha() == 0
+
+
+def test_rename_delegate_suppresses_old_name_behind_editor(window):
+    view = window.source
+    select(view, "a.txt")
+    idx = view.model.index(view.model.row_of(os.path.join(view.path, "a.txt")), 0)
+    view.current_view.setCurrentIndex(idx)
+    delegate = view.details._name_delegate
+    assert not delegate._is_editing(idx)
+
+    opt_before = QStyleOptionViewItem()
+    delegate.initStyleOption(opt_before, idx)
+    assert opt_before.text == "a.txt"
+
+    view.begin_rename()
+    editor = view.details.findChild(QLineEdit)
+    assert editor is not None
+    assert delegate._is_editing(idx)
+
+    opt_during = QStyleOptionViewItem()
+    delegate.initStyleOption(opt_during, idx)
+    assert opt_during.text == ""
+
+    # Cancel rename
+    view.details.closeEditor(editor, QStyledItemDelegate.EndEditHint.RevertModelCache)
+    assert not delegate._is_editing(idx)
+
+    opt_after = QStyleOptionViewItem()
+    delegate.initStyleOption(opt_after, idx)
+    assert opt_after.text == "a.txt"
 
 
 def test_selection_stays_name_only_after_theme_change(window):

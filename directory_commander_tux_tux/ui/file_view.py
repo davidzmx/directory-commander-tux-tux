@@ -7,8 +7,8 @@ import time
 from pathlib import PurePath
 
 import shiboken6
-from PySide6.QtCore import (QEvent, QFileSystemWatcher, QItemSelection, QItemSelectionModel, QModelIndex, QObject, QPoint, QPointF, QRect, QRectF,
-                            QSize, Qt, QTimer, Signal)
+from PySide6.QtCore import (QEvent, QFileSystemWatcher, QItemSelection, QItemSelectionModel, QModelIndex, QObject,
+                            QPersistentModelIndex, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal)
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter, QPalette, QPen
 from PySide6.QtWidgets import (QAbstractItemView, QAbstractSlider, QApplication, QFrame, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
                                QListView, QMenu, QRubberBand, QSizePolicy, QStackedLayout, QStackedWidget, QStyle,
@@ -324,12 +324,14 @@ def text_end(view, delegate, option, index) -> int:
     style = view.style()
     rect = style.subElementRect(QStyle.SubElement.SE_ItemViewItemText, filled, view)
     margin = style.pixelMetric(QStyle.PixelMetric.PM_FocusFrameHMargin, filled, view) + 1
-    return rect.left() + margin + min(filled.fontMetrics.horizontalAdvance(filled.text), max(0, rect.width() - 2 * margin))
+    entry = index.data(EntryRole)
+    text = entry.display_name if entry else filled.text
+    return rect.left() + margin + min(filled.fontMetrics.horizontalAdvance(text), max(0, rect.width() - 2 * margin))
 
 
 def paint_style_option_match(painter, view, delegate, option, index) -> None:
     """Para los delegados que pintan con Qt: el nombre va donde el estilo dice."""
-    if not view.find_text:
+    if not view.find_text or getattr(delegate, "_is_editing", lambda _idx: False)(index):
         return
     filled = QStyleOptionViewItem(option)
     delegate.initStyleOption(filled, index)
@@ -391,6 +393,10 @@ class NameDelegate(QStyledItemDelegate):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._selected_now = False
+        self._editing_index = QPersistentModelIndex()
+
+    def _is_editing(self, index: QModelIndex) -> bool:
+        return self._editing_index.isValid() and self._editing_index == index
 
     def _offset(self, entry) -> int:
         return (entry.depth * INDENT if entry else 0) + CHEVRON
@@ -443,6 +449,8 @@ class NameDelegate(QStyledItemDelegate):
         super().initStyleOption(option, index)
         if self._selected_now:
             option.palette.setColor(QPalette.ColorRole.Text, QColor(theme.current().sel_text))
+        if self._is_editing(index):
+            option.text = ""
 
     @staticmethod
     def _paint_group(painter, cell: QRect, title: str, font) -> None:
@@ -468,10 +476,19 @@ class NameDelegate(QStyledItemDelegate):
         return super().editorEvent(event, model, shifted, index)
 
     def createEditor(self, parent, option, index):
+        self._editing_index = QPersistentModelIndex(index)
         editor = super().createEditor(parent, option, index)
         if editor is not None:
+            editor.destroyed.connect(self._editor_destroyed)
             editor.setPalette(QApplication.palette())  # la tabla tiene el color de selección transparente
         return editor
+
+    def _editor_destroyed(self) -> None:
+        self._editing_index = QPersistentModelIndex()
+
+    def destroyEditor(self, editor, index) -> None:
+        self._editing_index = QPersistentModelIndex()
+        super().destroyEditor(editor, index)
 
     def setEditorData(self, editor, index) -> None:
         keep_typed_text(self, editor, index)
@@ -537,6 +554,29 @@ class ItemDelegate(QStyledItemDelegate):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._sizes: dict[tuple, QSize] = {}
+        self._editing_index = QPersistentModelIndex()
+
+    def _is_editing(self, index: QModelIndex) -> bool:
+        return self._editing_index.isValid() and self._editing_index == index
+
+    def createEditor(self, parent, option, index):
+        self._editing_index = QPersistentModelIndex(index)
+        editor = super().createEditor(parent, option, index)
+        if editor is not None:
+            editor.destroyed.connect(self._editor_destroyed)
+        return editor
+
+    def _editor_destroyed(self) -> None:
+        self._editing_index = QPersistentModelIndex()
+
+    def destroyEditor(self, editor, index) -> None:
+        self._editing_index = QPersistentModelIndex()
+        super().destroyEditor(editor, index)
+
+    def initStyleOption(self, option, index) -> None:
+        super().initStyleOption(option, index)
+        if self._is_editing(index):
+            option.text = ""
 
     def setEditorData(self, editor, index) -> None:
         keep_typed_text(self, editor, index)
@@ -590,7 +630,9 @@ class ItemDelegate(QStyledItemDelegate):
         if option.decorationPosition == QStyleOptionViewItem.Position.Top:
             return icon.united(text)
         margin = style.pixelMetric(QStyle.PixelMetric.PM_FocusFrameHMargin, option, view) + 1
-        width = min(option.fontMetrics.horizontalAdvance(option.text) + 2 * margin + 3, text.width())
+        entry = index.data(EntryRole)
+        name = entry.display_name if entry else option.text
+        width = min(option.fontMetrics.horizontalAdvance(name) + 2 * margin + 3, text.width())
         return QRect(option.rect.left(), option.rect.top(), text.left() - option.rect.left() + width, option.rect.height())
 
     def icon_rect(self, option: QStyleOptionViewItem, index: QModelIndex) -> QRect:
