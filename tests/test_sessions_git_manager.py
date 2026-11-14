@@ -925,6 +925,24 @@ def test_restoring_from_the_command_line_does_not_open_a_window(tmp_path, monkey
     assert called == [""]
 
 
+def test_the_installer_choices_are_saved_without_opening_a_window(tmp_path, monkeypatch):
+    from directory_commander_tux_tux import app
+
+    monkeypatch.setenv("DIRECTORY_COMMANDER_TUX_TUX_CONFIG", str(tmp_path / "config"))
+    monkeypatch.setattr(app.sys, "platform", "win32")
+    monkeypatch.setattr(app, "is_portable", lambda: False)
+    replaced = []
+    monkeypatch.setattr(default_manager, "become_windows_default", replaced.append)
+    tools = tmp_path / "ffmpeg"
+    tools.mkdir()
+    assert app.main(["--ffmpeg-dir", str(tools), "--exiftool-dir", str(tmp_path / "no existe"), "--replace-file-manager", "--win-e"]) == 0
+    config = Config(str(tmp_path / "config"))
+    assert config["ffmpeg_dir"] == str(tools) and config["exiftool_dir"] == ""  # una carpeta que no existe no se guarda
+    assert replaced == [True]
+    assert app.main(["--exiftool-dir", str(tools)]) == 0  # sin --replace-file-manager no se toca el Explorador
+    assert Config(str(tmp_path / "config"))["exiftool_dir"] == str(tools) and replaced == [True]
+
+
 # ------------------------------------------------------------------ sesiones: guardar, nueva y vista previa
 def test_saving_an_open_session_offers_to_overwrite_or_save_as_new(window, monkeypatch):
     window.save_named_session("una")

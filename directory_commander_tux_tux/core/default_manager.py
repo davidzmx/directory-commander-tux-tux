@@ -191,6 +191,15 @@ def set_win_e(registry: Registry, arguments: list[str], enabled: bool) -> None:
             registry.delete_if_empty("\\".join(parts[:length]))
 
 
+def become_windows_default(win_e: bool) -> None:
+    """Las carpetas, y si se quiere Win+E, se abren aquí. Lo usan las preferencias y el instalador."""
+    registry = Registry()
+    arguments = launch_arguments()
+    replace_explorer(registry, arguments)
+    set_win_e(registry, arguments, win_e)
+    notify_windows()
+
+
 def notify_windows() -> None:
     """Para que el Explorador se entere sin reiniciar la sesión."""
     import ctypes

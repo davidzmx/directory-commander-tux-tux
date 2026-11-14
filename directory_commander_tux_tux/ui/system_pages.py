@@ -241,11 +241,7 @@ class FileManagerPage(QWidget):
         if self.off.isChecked():
             default_manager.restore_system_default()
         else:
-            registry = default_manager.Registry()
-            arguments = default_manager.launch_arguments()
-            default_manager.replace_explorer(registry, arguments)
-            default_manager.set_win_e(registry, arguments, self.win_e.isChecked())
-            default_manager.notify_windows()
+            default_manager.become_windows_default(self.win_e.isChecked())
         self._changed = False
         self.show_handler()
 
