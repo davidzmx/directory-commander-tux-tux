@@ -18,6 +18,7 @@ from ..core import devices as storage, favorites as favorites_tree, remote
 from ..core.listing import COMPUTER_LABEL, COMPUTER_PATH, _is_hidden, format_size, has_computer_view, is_results, list_dir
 from ..core.platform_utils import home_dir
 from . import theme
+from . import drive_watch
 from .background import run_bg
 from .connection_led import LED_SIZE, paint_led
 from .drag_drop import DropDecider, accept_drop, folder_mime, show_operation, start_drag
@@ -197,6 +198,8 @@ class FolderTree(QTreeWidget):
         self._calls: set = set()
         self._waiting: dict[int, list] = {}
         self._sync_token = 0
+        if has_computer_view():
+            drive_watch.watcher().watch(self, self._drives_changed)
         self.remote_item: QTreeWidgetItem | None = None  # con el panel en un servidor, sus carpetas en lugar de las del equipo
         self.devices_item: QTreeWidgetItem | None = None
         self._devices_shown = False
@@ -349,6 +352,15 @@ class FolderTree(QTreeWidget):
             elif what == "folder":
                 item = self._node(parent, node["label"], node["path"], self._folder_icon())
                 item.setDisabled(node["path"] != COMPUTER_PATH and not os.path.isdir(node["path"]))
+
+    def _drives_changed(self, found: dict) -> None:
+        """Una unidad conectada o quitada, como un USB: «Este equipo» se vuelve a leer, si ya estaba leído."""
+        root = getattr(self, "root_item", None)
+        if self._disposed or root is None or not root.data(0, LOADED_ROLE):
+            return
+        shown = {os.path.normcase(root.child(row).data(0, PATH_ROLE)) for row in range(root.childCount())}
+        if shown != {os.path.normcase(path) for path in found}:
+            self._load(root)
 
     def set_show_hidden(self, show_hidden: bool) -> None:
         if show_hidden == self.show_hidden:

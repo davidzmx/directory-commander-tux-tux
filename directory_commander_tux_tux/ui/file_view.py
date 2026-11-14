@@ -21,6 +21,7 @@ from ..core.bar_buttons import PATH
 from ..core.listing import COMPUTER_LABEL, COMPUTER_PATH, format_size, has_computer_view, is_results, list_dir, location_label, results_name, sort_entries
 from ..core.platform_utils import home_dir, root_of
 from . import theme
+from . import drive_watch
 from .background import run_bg
 from .drag_drop import DropDecider, accept_drop, show_operation, start_drag
 from .hover_card import HoverCard
@@ -146,6 +147,28 @@ def stem_length(name: str) -> int:
     """Lo que se selecciona al renombrar: el nombre sin su extensión. Uno que empieza por punto, como «.gitignore», es todo nombre."""
     dot = name.rfind(".")
     return dot if dot > 0 else len(name)
+
+
+EDITOR_PADDING = 16  # a la derecha del nombre que se escribe: sitio para el cursor y la siguiente letra
+MIN_EDITOR_WIDTH = 60
+
+
+def fit_name_editor(editor, left: int, top: int, height: int) -> None:
+    """El nombre se escribe tras el icono, que sigue a la vista, en un recuadro de su ancho que crece al escribir,
+    no en toda la columna."""
+    editor.setProperty("place", (left, top, height))
+
+    def fit() -> None:
+        if not shiboken6.isValid(editor) or editor.parentWidget() is None:
+            return
+        x, y, tall = editor.property("place")
+        room = max(editor.parentWidget().width() - x - 2, MIN_EDITOR_WIDTH)
+        editor.setGeometry(x, y, min(max(editor.fontMetrics().horizontalAdvance(editor.text()) + EDITOR_PADDING, MIN_EDITOR_WIDTH), room), tall)
+
+    if not editor.property("fits"):
+        editor.setProperty("fits", True)
+        editor.textChanged.connect(fit)
+    fit()
 
 
 def keep_typed_text(delegate, editor, index) -> None:
@@ -455,7 +478,13 @@ class NameDelegate(QStyledItemDelegate):
 
     def updateEditorGeometry(self, editor, option, index) -> None:
         super().updateEditorGeometry(editor, option, index)
-        editor.setGeometry(editor.geometry().adjusted(self._offset(index.data(EntryRole)) + 18, 0, 0, 0))
+        view = self.parent()
+        shifted = QStyleOptionViewItem(option)
+        self.initStyleOption(shifted, index)
+        shifted.rect = option.rect.adjusted(self._offset(index.data(EntryRole)), 0, 0, 0)  # como se dibuja: tras la sangría y la flecha
+        text = view.style().subElementRect(QStyle.SubElement.SE_ItemViewItemText, shifted, view)
+        place = editor.geometry()
+        fit_name_editor(editor, text.left() - 3, place.top(), place.height())  # el texto del recuadro, donde estaba el nombre
 
 
 class TileDelegate(QStyledItemDelegate):
@@ -511,6 +540,15 @@ class ItemDelegate(QStyledItemDelegate):
 
     def setEditorData(self, editor, index) -> None:
         keep_typed_text(self, editor, index)
+
+    def updateEditorGeometry(self, editor, option, index) -> None:
+        """En la lista y con iconos pequeños, el nombre va a la derecha del icono: se escribe ahí. Con el nombre debajo, como Qt lo pone."""
+        super().updateEditorGeometry(editor, option, index)
+        view = self.parent()
+        if view.viewMode() != QListView.ViewMode.ListMode:
+            return
+        icon = self.icon_rect(QStyleOptionViewItem(option), index)
+        fit_name_editor(editor, icon.right() + 3, option.rect.top(), option.rect.height())
 
     def _indent(self, index: QModelIndex) -> int:
         if not self.parent().list_mode:
@@ -1433,6 +1471,7 @@ class FileView(QWidget):
         self._saved_at_end = (False, False)
         self.resort_on_change = False  # reordenar la lista en cuanto aparece o cambia un archivo
         self._focus_after_load: str | None = None
+        self._rename_after_load: bool | None = None  # al marcar lo de `_focus_after_load`, empezar a renombrarlo: solo el nombre o todo
         self.last_selection: list[str] = []
         self.grid_lines = False
         self.previous_path = ""
@@ -1601,7 +1640,7 @@ class FileView(QWidget):
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setSingleShot(True)
         self._refresh_timer.setInterval(350)
-        self._refresh_timer.timeout.connect(self.refresh)
+        self._refresh_timer.timeout.connect(self._refresh_after_change)
         self._watcher.directoryChanged.connect(lambda _p: self._refresh_timer.start())
 
     def build_pane_bar_menu(self) -> QMenu:
@@ -1778,6 +1817,20 @@ class FileView(QWidget):
             self._watcher.removePaths(current)
         if archive.split_archive_path(path) is None and os.path.isdir(path):
             self._watcher.addPath(path)
+        if path == COMPUTER_PATH:  # las unidades no son una carpeta que se pueda vigilar
+            drive_watch.watcher().watch(self, self._drives_changed)
+        else:
+            drive_watch.watcher().unwatch(self)
+
+    def _drives_changed(self, found: dict) -> None:
+        """Una unidad nueva o quitada: se vuelve a leer «Este equipo». Si solo cambia el espacio, basta con mostrarlo."""
+        if self.path != COMPUTER_PATH or self.model.is_loading:
+            return
+        shown = {entry.path: entry.free_space for entry in self.model.entries if entry.is_drive}
+        if set(shown) != set(found) or any((shown[path] is None) != (found[path] is None) for path in found):
+            self.refresh(resort=True)
+        else:
+            self.model.update_drive_space(found)
 
     def refresh(self, resort: bool | None = None, renamed: dict[str, str] | None = None) -> None:
         """`resort`: ordenar otra vez, como al pulsar F5. Sin indicarlo, según la opción: al cambiar algo en la carpeta, de serie no.
@@ -1990,7 +2043,8 @@ class FileView(QWidget):
         index = self.model.index(index.row(), 0)
         self.current_view.edit(index)
         entry = self.model.entry(index.row())
-        editor = QApplication.focusWidget()
+        # El que se acaba de abrir. No por el foco: con la ventana aún sin activar, como al cerrar un menú, no lo tiene.
+        editor = next((widget for widget in self.current_view.viewport().findChildren(QLineEdit) if widget.isVisible()), QApplication.focusWidget())
         if only_stem and entry is not None and not entry.is_dir and isinstance(editor, QLineEdit):
             length = stem_length(editor.text())
             editor.setSelection(0, length)
@@ -2279,13 +2333,34 @@ class FileView(QWidget):
         if self._focus_after_load:
             focus = os.path.normpath(self._focus_after_load)
             self._focus_after_load = None
+            rename, self._rename_after_load = self._rename_after_load, None
             row = self.model.row_of(focus)
             if row >= 0:
                 index = self.model.index(row, 0)
                 self.details.selectionModel().setCurrentIndex(
                     index, QItemSelectionModel.SelectionFlag.ClearAndSelect | QItemSelectionModel.SelectionFlag.Rows)
                 self.current_view.scrollTo(index)
+                if rename is not None:
+                    self.current_view.setFocus()
+                    self.begin_rename(rename)
         self._update_status()
+
+    def show_and_rename(self, path: str, only_stem: bool = True) -> None:
+        """Lo recién creado: se vuelve a leer la carpeta, se marca y se empieza a escribir su nombre en la lista, como al pulsar F2.
+        Sin reordenar, salvo que se haya pedido: aparece al final, como lo que llega de fuera."""
+        self._focus_after_load = path
+        self._rename_after_load = only_stem
+        self.refresh()
+
+    def is_editing(self) -> bool:
+        return any(view.state() == QAbstractItemView.State.EditingState for view in (self.details, self.thumbs))
+
+    def _refresh_after_change(self) -> None:
+        """Algo cambió en la carpeta. Volver a leerla cierra el nombre que se está escribiendo: se espera a que se termine."""
+        if self.is_editing():
+            self._refresh_timer.start()
+            return
+        self.refresh()
 
     def _selection_changed(self, *_args) -> None:
         self._update_status()

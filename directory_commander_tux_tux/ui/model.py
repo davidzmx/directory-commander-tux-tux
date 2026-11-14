@@ -9,7 +9,7 @@ from PySide6.QtCore import QAbstractTableModel, QBuffer, QFileInfo, QIODevice, Q
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QImage, QImageReader, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QFileIconProvider
 
-from ..core import ai_metadata, archive, fsops, git_tools, media_info, remote
+from ..core import ai_metadata, archive, fsops, git_tools, media_info, remote, windows_shell
 from ..core.drives import DRIVE_GROUPS
 from ..core.listing import (COMPUTER_PATH, Entry, format_size, format_time, has_visible_entries, is_results, list_dir, matches_content_type, matches_filter,
                             sort_entries)
@@ -33,6 +33,13 @@ MAX_CACHED_PREVIEWS = 2000
 
 _icons = QFileIconProvider()
 _ext_cache: dict[str, QIcon] = {}
+OWN_ICON_EXTENSIONS = ("exe", "lnk", "ico", "appimage", "desktop")  # cada archivo con su icono: no vale el de su extensión
+# En Windows, el icono propio de un .exe o un acceso directo puede tardar segundos la primera vez: se pide aparte y se recuerda
+# para todas las pestañas. Mientras llega, el genérico.
+_own_icon_pool = QThreadPool()
+_own_icon_pool.setMaxThreadCount(2)
+_own_icons: OrderedDict = OrderedDict()
+MAX_OWN_ICONS = 5000
 _thumb_pool = QThreadPool()
 _thumb_pool.setMaxThreadCount(max(2, (os.cpu_count() or 4) // 2))
 _video_pool = QThreadPool()  # aparte: cada vídeo tarda un segundo, y las imágenes no deben esperar a que terminen
@@ -151,9 +158,24 @@ def icon_for(entry: Entry) -> QIcon:
         icon = _icons.icon(QFileInfo(entry.path))
     else:  # miembro de un comprimido
         icon = _icons.icon(QFileIconProvider.IconType.File)
-    if ext and ext not in ("exe", "lnk", "ico", "appimage", "desktop"):  # estos tienen icono propio
+    if ext and ext not in OWN_ICON_EXTENSIONS:  # estos tienen icono propio
         _ext_cache[ext] = icon
     return icon
+
+
+def has_own_icon(entry: Entry) -> bool:
+    """Un archivo del equipo cuyo icono es solo suyo: un programa, un acceso directo, un icono o uno sin extensión."""
+    return (not entry.is_dir and not entry.is_drive and not entry.in_archive and not remote.is_remote(entry.path)
+            and (entry.extension in OWN_ICON_EXTENSIONS or not entry.extension))
+
+
+def _read_own_icon(path: str) -> list[QImage]:
+    """En segundo plano: QImage se puede crear fuera del hilo de la ventana; QIcon y QPixmap, no."""
+    images = []
+    for handle in windows_shell.file_icon_handles(path):
+        images.append(QImage.fromHICON(handle))
+        windows_shell.destroy_icon(handle)
+    return [image for image in images if not image.isNull()]
 
 
 class FileModel(QAbstractTableModel):
@@ -191,6 +213,7 @@ class FileModel(QAbstractTableModel):
         self._git_states: tuple = ({}, {}, ())  # archivos, carpetas con cambios dentro, carpetas ignoradas
         self.generation_kinds = "both"  # both, prompt o workflow
         self.reloading = False
+        self._own_icons_pending: set[tuple] = set()
         self.ffmpeg_dir = ""
         self._generated: dict[tuple, bool] = {}  # por (ruta, fecha de modificación): sigue valiendo al volver a leer la carpeta
         self._generated_pending: set[tuple] = set()
@@ -310,6 +333,21 @@ class FileModel(QAbstractTableModel):
         self.reloading = False
         self.loadFinished.emit("")
         self._probe_folders([entry for group in [entries, *children.values()] for entry in group])
+
+    @property
+    def is_loading(self) -> bool:
+        return self._loading is not None
+
+    def update_drive_space(self, found: dict) -> None:
+        """El espacio de cada unidad, sin volver a leer «Este equipo»: así no parpadea ni pierde lo seleccionado."""
+        changed = False
+        for entry in self._entries:
+            space = found.get(entry.path) if entry.is_drive else None
+            if space is not None and (entry.dir_size, entry.free_space) != space:
+                entry.dir_size, entry.free_space = space
+                changed = True
+        if changed and self._rows:
+            self.dataChanged.emit(self.index(0, 0), self.index(len(self._rows) - 1, len(COLUMNS) - 1))
 
     def _probe_folders(self, entries: list[Entry]) -> None:
         """Mira en segundo plano qué carpetas están vacías, para quitarles la flecha. Mientras tanto la conservan: en una unidad de red puede tardar."""
@@ -562,6 +600,8 @@ class FileModel(QAbstractTableModel):
                 thumb = self._thumbnail(entry)
                 if thumb is not None:
                     return thumb
+            if windows_shell.AVAILABLE and has_own_icon(entry):
+                return self._own_icon(entry)
             return icon_for(entry)
         if role == Qt.ItemDataRole.ForegroundRole:
             if entry.hidden or (column == "name" and (self.git_state(entry) or ("",))[0] == "!"):  # lo que git ignora, más tenue
@@ -836,6 +876,31 @@ class FileModel(QAbstractTableModel):
         """Si se mostrarán sus marcas de IA cuando se lean: lo que puede tenerlas, del equipo y con las marcas activadas."""
         return (self.generation_marks and not entry.is_dir and not entry.in_archive and not remote.is_remote(entry.path)
                 and entry.extension in ai_metadata.IMAGE_EXTENSIONS | ai_metadata.VIDEO_EXTENSIONS)
+
+    def _own_icon(self, entry: Entry) -> QIcon:
+        key = (entry.path, entry.mtime)
+        icon = _own_icons.get(key)
+        if icon is not None:
+            _own_icons.move_to_end(key)
+            return icon
+        if key not in self._own_icons_pending:
+            self._own_icons_pending.add(key)
+            path = entry.path
+
+            def ready(images: list) -> None:
+                self._own_icons_pending.discard(key)
+                found = QIcon()
+                for image in images:
+                    found.addPixmap(QPixmap.fromImage(image))
+                _own_icons[key] = found if not found.isNull() else _icons.icon(QFileIconProvider.IconType.File)
+                while len(_own_icons) > MAX_OWN_ICONS:
+                    _own_icons.popitem(last=False)
+                row = self.row_of(path)
+                if row >= 0:
+                    self.dataChanged.emit(self.index(row, 0), self.index(row, 0), [Qt.ItemDataRole.DecorationRole])
+
+            run_bg(lambda _sink: _read_own_icon(path), on_done=ready, on_error=lambda _exc: ready([]), pool=_own_icon_pool)
+        return _icons.icon(QFileIconProvider.IconType.File)
 
     def _generation_mark(self, entry: Entry):
         """(prompt, workflow, programa), o None. Solo de los archivos del equipo: hay que leer sus metadatos, y se hace en segundo plano."""

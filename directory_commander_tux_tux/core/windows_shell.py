@@ -616,3 +616,35 @@ def menu_for_folder(path: str, window: int = 0) -> ShellMenu | None:
     finally:
         _release(folder)
         _ole32.CoTaskMemFree(pidl)
+
+
+# ---------------------------------------------------------------- iconos propios de un archivo
+_SHGFI_ICON = 0x100
+_SHGFI_LARGEICON = 0x0
+_SHGFI_SMALLICON = 0x1
+
+
+class _FileInfo(Structure):
+    _fields_ = [("hIcon", c_void_p), ("iIcon", c_int), ("dwAttributes", c_ulong), ("szDisplayName", ctypes.c_wchar * 260), ("szTypeName", ctypes.c_wchar * 80)]
+
+
+if AVAILABLE:
+    _shell32.SHGetFileInfoW.argtypes = [c_wchar_p, c_ulong, POINTER(_FileInfo), c_uint, c_uint]
+    _shell32.SHGetFileInfoW.restype = ctypes.c_size_t
+    _user32.DestroyIcon.argtypes = [c_void_p]
+
+
+def file_icon_handles(path: str) -> list[int]:
+    """Los iconos pequeño y grande que Windows da a un archivo, como HICON: quien los recibe los suelta con `destroy_icon`.
+    El de un .exe o un acceso directo puede tardar segundos la primera vez: se piden en segundo plano."""
+    _start_com()
+    handles = []
+    for size in (_SHGFI_SMALLICON, _SHGFI_LARGEICON):
+        info = _FileInfo()
+        if _shell32.SHGetFileInfoW(path, 0, byref(info), sizeof(info), _SHGFI_ICON | size) and info.hIcon:
+            handles.append(info.hIcon)
+    return handles
+
+
+def destroy_icon(handle: int) -> None:
+    _user32.DestroyIcon(handle)

@@ -112,3 +112,21 @@ def list_drives(with_details: bool = True) -> list[Entry]:
         entries.append(Entry(f"{label or fallback} ({drive.rstrip(chr(92))})", drive, True, dir_size=total, is_drive=True,
                              free_space=free, filesystem=filesystem, drive_kind=kind))
     return entries
+
+
+def drive_space() -> dict[str, tuple[int, int] | None]:
+    """Cada unidad con (total, libre), para ver si se ha conectado o quitado una o si ha cambiado su espacio. None en un lector sin disco
+    y en una unidad de red, que no se consulta: desconectada, puede tardar mucho en responder."""
+    kernel32 = _kernel32()
+    kernel32.SetThreadErrorMode(_SEM_FAILCRITICALERRORS, None)
+    result: dict[str, tuple[int, int] | None] = {}
+    for drive in os.listdrives():
+        if kernel32.GetDriveTypeW(drive) == _DRIVE_REMOTE:
+            result[drive] = None
+            continue
+        try:
+            usage = shutil.disk_usage(drive)
+            result[drive] = (usage.total, usage.free)
+        except OSError:
+            result[drive] = None
+    return result

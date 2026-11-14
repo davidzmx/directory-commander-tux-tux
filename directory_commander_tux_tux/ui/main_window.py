@@ -3204,8 +3204,15 @@ class MainWindow(ExtraCommands, QMainWindow):
         if cmd.has("ZIP") or cmd.has("ARCHIVE"):
             self._create_empty_zip(cmd.get("NAME"))
             return
+        on_server = remote.is_remote(self.source.path)
+        if not cmd.get("NAME") and not on_server:
+            # Se crea «Nueva carpeta», o «Nueva carpeta (2)» si ya está, y su nombre se escribe en la lista.
+            path = fsops.create_folder(self.source.path, os.path.basename(fsops.unique_name(self.source.path, tr("Nueva carpeta"))))
+            self._push_undo({"kind": "created", "paths": [path]})
+            self.source.show_and_rename(path, only_stem=False)
+            return
         name = cmd.get("NAME") or self._ask_text(tr("Nueva carpeta"), tr("Nombre:"), tr("Nueva carpeta"))
-        if name and remote.is_remote(self.source.path):
+        if name and on_server:
             self._create_on_server(fsops.create_folder, commands.expand_date_codes(name))
         elif name:
             path = fsops.create_folder(self.source.path, commands.expand_date_codes(name))
@@ -3246,8 +3253,13 @@ class MainWindow(ExtraCommands, QMainWindow):
                 self._show_file_menu(self.source, self.cursor().pos())
             return
         extension = cmd.get("NEW", "")
-        name = fsops.unique_name(self.source.path, tr("Nuevo archivo{extension}", extension=extension))
-        self._cmd_createfile(commands.Command("createfile", [], set(), {"NAME": os.path.basename(name)}))
+        name = os.path.basename(fsops.unique_name(self.source.path, tr("Nuevo archivo{extension}", extension=extension)))
+        if remote.is_remote(self.source.path):
+            self._cmd_createfile(commands.Command("createfile", [], set(), {"NAME": name}))
+            return
+        path = fsops.create_file(self.source.path, name)  # y, como con una carpeta nueva, su nombre se escribe en la lista
+        self._push_undo({"kind": "created", "paths": [path]})
+        self.source.show_and_rename(path, only_stem=self.config.get("rename_selects_stem") is not False)
 
     def _cmd_rename(self, cmd: commands.Command) -> None:
         view = self.source

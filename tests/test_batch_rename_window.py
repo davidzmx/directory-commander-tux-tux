@@ -187,3 +187,70 @@ def test_a_folder_selects_its_whole_name_and_what_is_typed_is_kept(window, tree)
     model.dataChanged.emit(model.index(0, 0), model.index(model.rowCount() - 1, 0), [Qt.ItemDataRole.DisplayRole])  # como al llegar una marca
     QApplication.processEvents()
     assert editor.text() == "escrito"
+
+
+def test_a_new_folder_is_created_and_its_name_is_typed_in_the_list(window, tree):
+    from PySide6.QtTest import QTest
+
+    left, _ = tree
+    view = window.source
+    window.run_command("CreateFolder")
+    assert (left / "Nueva carpeta").is_dir()
+    assert wait_until(lambda: any(widget.isVisible() for widget in view.current_view.viewport().findChildren(QLineEdit)))
+    editor = editor_of(view)
+    assert editor.selectedText() == "Nueva carpeta"  # una carpeta, entera
+    editor.setText("Proyectos")
+    QTest.keyClick(editor, Qt.Key.Key_Return)
+    assert wait_until(lambda: (left / "Proyectos").is_dir() and not (left / "Nueva carpeta").exists())
+    window.run_command("CreateFolder")
+    window.run_command("CreateFolder")
+    assert (left / "Nueva carpeta").is_dir() and (left / "Nueva carpeta (2)").is_dir()
+
+
+def test_a_new_text_file_selects_only_its_name(window, tree):
+    left, _ = tree
+    view = window.source
+    window.run_command("FileType NEW=.txt")
+    assert (left / "Nuevo archivo.txt").is_file()
+    assert wait_until(lambda: any(widget.isVisible() for widget in view.current_view.viewport().findChildren(QLineEdit)))
+    assert editor_of(view).selectedText() == "Nuevo archivo"
+
+
+def test_a_named_folder_is_created_without_asking(window, tree):
+    left, _ = tree
+    window.run_command('CreateFolder NAME="Con nombre"')
+    assert (left / "Con nombre").is_dir()
+
+
+def test_a_change_in_the_folder_waits_while_the_new_name_is_typed(window, tree):
+    view = window.source
+    window.run_command("CreateFolder")
+    assert wait_until(lambda: view.is_editing())
+    names = [view.model.entry(row).name for row in range(view.model.rowCount())]
+    assert names[-1] == "Nueva carpeta"  # sin reordenar: al final, como lo que llega de fuera
+    reloads = []
+    original = view.refresh
+    view.refresh = lambda *args, **kwargs: reloads.append(1) or original(*args, **kwargs)
+    view._refresh_after_change()  # como el aviso de Windows de que la carpeta cambió
+    assert reloads == [] and view.is_editing() and view._refresh_timer.isActive()
+    editor_of(view).setText("Lista")
+    from PySide6.QtTest import QTest
+    QTest.keyClick(editor_of(view), Qt.Key.Key_Return)
+    assert wait_until(lambda: not view.is_editing())
+    assert wait_until(lambda: reloads == [1], 3)  # terminado de escribir, se lee de nuevo
+
+
+@pytest.mark.parametrize("mode", ["list", "details"])
+def test_the_name_is_typed_after_the_icon_in_a_box_of_its_width(window, tree, mode):
+    view = window.source
+    view.set_view_mode(mode)
+    window.run_command("FileType NEW=.txt")
+    assert wait_until(lambda: view.is_editing())
+    editor = editor_of(view)
+    items = view.current_view
+    cell = items.visualRect(items.currentIndex())
+    assert editor.geometry().left() >= cell.left() + 16  # el icono sigue a la vista
+    narrow = editor.geometry().width()
+    assert narrow < items.viewport().width() // 2  # no toda la columna
+    editor.setText(editor.text() + " y un nombre bastante más largo")
+    assert editor.geometry().width() > narrow  # crece al escribir
