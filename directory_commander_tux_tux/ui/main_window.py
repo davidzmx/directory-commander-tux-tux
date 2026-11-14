@@ -2197,14 +2197,11 @@ class MainWindow(ExtraCommands, QMainWindow):
 
         label = QLabel(tr("Localización"))
         label.setObjectName("barLabel")
-        self.location_folder = QLabel()
-        self.location_folder.setContentsMargins(0, 0, 4, 0)
         self.location = Breadcrumb()
         self.location.set_folder_menus(bool(self.config.get("path_folder_menus", False)))
         self.location.pathEntered.connect(lambda path: self.source.navigate(path))
-        self.location.elidedChanged.connect(lambda elided: self.location_folder.setVisible(not elided and not self.location.is_editing()))
         self.location.favorites_supplier = lambda: list(favorites.walk(favorites.with_bar(self.config.get("favorites", []))))
-        self._location_path_actions = [own_action(label), own_action(self.location_folder), own_action(self.location)]
+        self._location_path_actions = [own_action(label), own_action(self.location)]
         self.location_recent = QToolButton()
         self.location_recent.setToolTip(tr("Carpetas recientes"))
         self.location_recent.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
@@ -2251,7 +2248,6 @@ class MainWindow(ExtraCommands, QMainWindow):
         self._refresh_location_icons()
 
     def _refresh_location_icons(self) -> None:
-        self.location_folder.setPixmap(themed("folder").pixmap(16, 16))
         self.location_recent.setIcon(themed("menu-arrow"))
         self.location.apply_icons()
 

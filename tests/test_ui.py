@@ -1277,10 +1277,10 @@ def test_breadcrumb_hides_old_segments_at_once(app):
 def test_breadcrumb_overflow_button_shows_when_elided_and_navigates(app):
     crumb = Breadcrumb()
     crumb.resize(800, 24)
-    # Ruta corta en ancho amplio: no debe desbordarse
+    # Ruta corta en ancho amplio: no debe desbordarse y el botón [📁 ▼] se muestra siempre
     crumb.set_path(os.path.abspath(os.path.join(os.sep, "a")))
     assert not crumb.is_elided
-    assert crumb._overflow_button.isHidden()
+    assert not crumb._overflow_button.isHidden()
     assert all(not b.isHidden() for b in crumb._buttons)
 
     # Ruta profunda con ancho estrecho: debe activarse el desplegable de desbordamiento
@@ -1311,30 +1311,29 @@ def test_breadcrumb_overflow_button_shows_when_elided_and_navigates(app):
     target_action.trigger()
     assert (COMPUTER_PATH if has_computer_view() else "/") in received
 
-    # Al ampliar el ancho a suficiente tamaño, el desbordamiento se oculta de nuevo
+    # Al ampliar el ancho a suficiente tamaño, el botón [📁 ▼] sigue visible y todos los tramos se muestran
     crumb.resize(1200, 24)
     crumb._elide()
     assert not crumb.is_elided
-    assert crumb._overflow_button.isHidden()
+    assert not crumb._overflow_button.isHidden()
     assert all(not b.isHidden() for b in crumb._buttons)
 
 
-def test_view_folder_label_toggles_with_breadcrumb_elision(window):
+def test_view_folder_label_toggles_with_breadcrumb_field(window):
     view = window.source
     crumb = view.breadcrumb
-    deep_path = os.path.abspath(os.path.join(os.sep, "pinokio", "api", "comfy", "app", "models", "vae"))
 
-    crumb.resize(800, 24)
-    view.folder_label.show()
-    crumb.elidedChanged.emit(False)
-    assert view.folder_label.isVisible()
+    # En modo normal, el botón [📁 ▼] del breadcrumb está visible y el folder_label duplicado está oculto
+    assert not crumb._overflow_button.isHidden()
+    assert view.folder_label.isHidden()
 
-    crumb.resize(100, 24)
-    crumb.elidedChanged.emit(True)
-    assert not view.folder_label.isVisible()
+    # Al editar la ruta en texto (show_field), se muestra el folder_label junto a la caja de texto
+    crumb.show_field()
+    assert not view.folder_label.isHidden()
 
-    crumb.elidedChanged.emit(False)
-    assert view.folder_label.isVisible()
+    # Al volver a los botones, el folder_label se oculta
+    crumb.show_buttons()
+    assert view.folder_label.isHidden()
 
 
 # ---- doble clic ----

@@ -1074,7 +1074,7 @@ class Breadcrumb(QFrame):
         self._overflow_menu.aboutToShow.connect(self._fill_overflow_menu)
         self._overflow_button.setMenu(self._overflow_menu)
         self._apply_overflow_icon()
-        self._overflow_button.hide()
+        self._overflow_button.show()
         self._row.addWidget(self._overflow_button)
 
         self._edit = QLineEdit()
@@ -1325,41 +1325,20 @@ class Breadcrumb(QFrame):
         self._elide()
 
     def _elide(self) -> None:
-        """Si no cabe la ruta, oculta los tramos iniciales y muestra el botón de desbordamiento."""
+        """Ajusta los tramos visibles al espacio disponible. El desplegable [📁 ▼] se muestra siempre."""
         if self._eliding:
             return
         self._eliding = True
         try:
-            if not self._buttons:
-                self._overflow_button.hide()
-                if self._is_elided:
-                    self._is_elided = False
-                    self.elidedChanged.emit(False)
-                return
-
-            available = self.width() - 8
-            overflow_width = self._overflow_button.sizeHint().width() + self._row.spacing()
-
-            # Comprobar si caben todos sin botón de desbordamiento
-            total = 0
-            for btn in self._buttons:
-                arrow = self._arrows.get(btn)
-                total += btn.sizeHint().width() + (arrow.sizeHint().width() if arrow else 0)
-
-            if total <= available:
-                self._overflow_button.hide()
-                for btn in self._buttons:
-                    btn.show()
-                    arrow = self._arrows.get(btn)
-                    if arrow:
-                        arrow.show()
-                if self._is_elided:
-                    self._is_elided = False
-                    self.elidedChanged.emit(False)
-                return
-
             self._overflow_button.show()
-            available -= overflow_width
+            if not self._buttons:
+                if self._is_elided:
+                    self._is_elided = False
+                    self.elidedChanged.emit(False)
+                return
+
+            overflow_width = self._overflow_button.sizeHint().width() + self._row.spacing()
+            available = self.width() - 8 - overflow_width
             used = 0
             elided = False
             for idx in range(len(self._buttons) - 1, -1, -1):
@@ -1753,6 +1732,7 @@ class FileView(QWidget):
         bar.addWidget(self.favorites_button)
         self.folder_label = QLabel()
         self.folder_label.setContentsMargins(4, 0, 2, 0)
+        self.folder_label.hide()
         self.crumb_strip = QFrame()
         self.crumb_strip.setObjectName("crumbStrip")
         strip_row = QHBoxLayout(self.crumb_strip)
@@ -1905,7 +1885,7 @@ class FileView(QWidget):
         return themed(icon, theme.bar_icon_color(current, role), theme.bar_icon_disabled(current, role))
 
     def _on_breadcrumb_elided(self, elided: bool) -> None:
-        self.folder_label.setVisible(not elided and not self.breadcrumb.is_editing())
+        pass
 
     def _get_favorites(self) -> list[dict]:
         win = self.window()
@@ -1924,7 +1904,7 @@ class FileView(QWidget):
         strip.style().polish(strip)
         strip.update()
         self._apply_bar_icons()  # el fondo ya no es el mismo: en un color fuerte los iconos son blancos, y sobre el campo no se verían
-        self.folder_label.setVisible(shown or not self.breadcrumb.is_elided)
+        self.folder_label.setVisible(shown)
 
     def _apply_bar_icons(self) -> None:
         current, role = theme.current(), self.property("role")
