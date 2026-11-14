@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QApplication
 
 from . import APP_ID, APP_NAME, __version__
 from .core import default_manager, i18n
-from .core.config import Config
+from .core.config import Config, is_portable
 from .core.i18n import tr
 from .core.pty_session import restore_library_path
 
@@ -36,6 +36,17 @@ def _paths_for_the_explorer(paths: list[str], config: Config) -> list[str]:
     return outside
 
 
+def _apply_installer_choices(config: Config, args) -> int:
+    """Lo que se eligió al instalar. Una carpeta vacía o que no existe no cambia nada: se sigue buscando en el PATH."""
+    for key, folder in (("ffmpeg_dir", args.ffmpeg_dir), ("exiftool_dir", args.exiftool_dir)):
+        if folder and os.path.isdir(folder):
+            config[key] = folder
+    if args.replace_file_manager and sys.platform == "win32" and not is_portable():
+        default_manager.become_windows_default(args.win_e)
+    config.save()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     restore_library_path()
     config = Config()
@@ -44,11 +55,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("paths", nargs="*", help=tr("carpetas para abrir (hasta dos, una por panel)"))
     parser.add_argument("--version", action="version", version=f"{APP_NAME} {__version__}")
     parser.add_argument("--restore-file-manager", action="store_true", help=tr("deja de ser el administrador de archivos del sistema y sale"))
+    # Las usa el instalador de Windows para aplicar lo que se eligió en él. Se aplican y el programa sale sin abrir la ventana.
+    parser.add_argument("--replace-file-manager", action="store_true", help=tr("reemplaza al Explorador de archivos (solo en Windows) y sale"))
+    parser.add_argument("--win-e", action="store_true", help=tr("con --replace-file-manager, abre también este programa con Win+E"))
+    parser.add_argument("--ffmpeg-dir", metavar=tr("CARPETA"), help=tr("guarda la carpeta que contiene ffmpeg y sale"))
+    parser.add_argument("--exiftool-dir", metavar=tr("CARPETA"), help=tr("guarda la carpeta que contiene exiftool y sale"))
     args, qt_args = parser.parse_known_args(sys.argv[1:] if argv is None else argv)
     args.paths = [default_manager.clean_argument(path) for path in args.paths]
     if args.restore_file_manager:
         default_manager.restore_system_default(config.get("file_manager_previous", ""))
         return 0
+    if args.replace_file_manager or args.ffmpeg_dir is not None or args.exiftool_dir is not None:
+        return _apply_installer_choices(config, args)
 
     from .ui.icons import app_icon
     from .ui.main_window import MainWindow

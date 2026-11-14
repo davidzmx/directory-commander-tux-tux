@@ -271,6 +271,17 @@ def test_the_installer_needs_no_administrator_and_undoes_the_replacement():
     assert "PrivilegesRequired=lowest" in text and "--restore-file-manager" in text and "[UninstallRun]" in text
 
 
+def test_the_installer_offers_the_optional_programs_and_the_explorer_and_the_program_applies_them():
+    text = installer_text()
+    for flag in ("--ffmpeg-dir", "--exiftool-dir", "--replace-file-manager", "--win-e"):
+        assert flag in text
+    for language in ("spanish", "english"):
+        for message in ("ToolsCaption", "ToolsSubCaption", "FFmpegPrompt", "ExifToolPrompt", "ExplorerCaption", "ExplorerSubCaption", "ReplaceOption", "WinEOption"):
+            assert f"{language}.{message}=" in text
+    assert "Preferencias › General › Programas" in text and "Preferencias › Administrador de archivos" in text
+    assert "ExecAsOriginalUser" in text  # instalado para todos, lo elegido es del usuario que instala, no del administrador
+
+
 def test_the_files_of_the_installer_exist():
     text = installer_text()
     folder = os.path.dirname(build.INSTALLER_SCRIPT)
