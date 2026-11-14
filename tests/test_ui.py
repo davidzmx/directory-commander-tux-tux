@@ -1913,6 +1913,16 @@ def test_sort_commands(window):
     assert names(view) == ["subcarpeta", "a.txt", "b.txt"]
 
 
+
+def test_the_sort_menu_ticks_the_current_order(window):
+    def ticks():
+        order = next(a.menu() for a in window.build_folder_menu(window.source).actions() if a.text() == "Ordenar por")
+        return {a.text(): a.isChecked() for a in order.actions() if a.text()}
+    window.run_command("Set SORTBY=name SORTREVERSE=off")
+    assert ticks() == {"Nombre": True, "Tamaño": False, "Tipo": False, "Modificación": False, "Atributos": False, "Invertir el orden": False}
+    window.run_command("Set SORTBY=modified SORTREVERSE=on")
+    assert ticks() == {"Nombre": False, "Tamaño": False, "Tipo": False, "Modificación": True, "Atributos": False, "Invertir el orden": True}
+
 def test_navlock_moves_both_panes(window, tree):
     left, right = tree
     (right / "subcarpeta").mkdir()
