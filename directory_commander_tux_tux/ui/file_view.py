@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import sys
 import time
 from pathlib import PurePath
 
 import shiboken6
 from PySide6.QtCore import (QEvent, QFileSystemWatcher, QItemSelection, QItemSelectionModel, QModelIndex, QObject,
-                            QPersistentModelIndex, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal)
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter, QPalette, QPen
+                            QPersistentModelIndex, QPoint, QPointF, QRect, QRectF, QSize, QStandardPaths, Qt, QTimer, Signal)
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QAbstractSlider, QApplication, QFrame, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
                                QListView, QMenu, QRubberBand, QSizePolicy, QStackedLayout, QStackedWidget, QStyle,
                                QStyleOptionViewItem, QStyledItemDelegate, QTableView, QToolButton, QToolTip, QVBoxLayout,
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QAbstractSlider, QApplication,
 from ..core import archive, fsops, git_tools, remote
 from ..core.config import THUMB_SIZES
 from ..core.bar_buttons import PATH
+from ..core.drives import list_drives
 from ..core.listing import COMPUTER_LABEL, COMPUTER_PATH, format_size, has_computer_view, is_results, list_dir, location_label, results_name, sort_entries
 from ..core.platform_utils import home_dir, root_of
 from . import theme
@@ -1046,17 +1048,35 @@ class Breadcrumb(QFrame):
 
     pathEntered = Signal(str)
     fieldShown = Signal(bool)  # la ruta está como texto, para escribirla o junto a la lista de carpetas
+    elidedChanged = Signal(bool)  # si hay tramos ocultos que no caben en la barra
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("crumbFrame")
         self._path = ""
+        self._crumbs: list[tuple[str, str]] = []
+        self._is_elided = False
+        self._eliding = False
         self._stack = QStackedLayout(self)
         self._stack.setContentsMargins(1, 0, 1, 0)
         self._bar = QWidget()
         self._row = QHBoxLayout(self._bar)
         self._row.setContentsMargins(0, 0, 0, 0)
         self._row.setSpacing(0)
+
+        # Desplegable con los tramos de la ruta que no caben y los lugares del sistema
+        self._overflow_button = QToolButton()
+        self._overflow_button.setObjectName("crumbOverflow")
+        self._overflow_button.setAutoRaise(True)
+        self._overflow_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._overflow_button.setToolTip(tr("Ubicaciones superiores y del sistema"))
+        self._overflow_menu = QMenu(self._overflow_button)
+        self._overflow_menu.aboutToShow.connect(self._fill_overflow_menu)
+        self._overflow_button.setMenu(self._overflow_menu)
+        self._apply_overflow_icon()
+        self._overflow_button.hide()
+        self._row.addWidget(self._overflow_button)
+
         self._edit = QLineEdit()
         self._edit.returnPressed.connect(self._commit)
         self._edit.installEventFilter(self)
@@ -1068,6 +1088,125 @@ class Breadcrumb(QFrame):
         self._buttons: list[QToolButton] = []
         self._arrows: dict[QToolButton, QToolButton] = {}
         self.folder_menus = False
+        self.favorites_supplier = None
+
+    def _apply_overflow_icon(self) -> None:
+        pm = QPixmap(26, 16)
+        pm.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pm)
+        p.drawPixmap(0, 0, themed("folder").pixmap(16, 16))
+        p.drawPixmap(17, 4, themed("menu-arrow").pixmap(8, 8))
+        p.end()
+        self._overflow_button.setIcon(QIcon(pm))
+        self._overflow_button.setIconSize(QSize(26, 16))
+
+    def apply_icons(self) -> None:
+        self._apply_overflow_icon()
+
+    @property
+    def is_elided(self) -> bool:
+        return self._is_elided
+
+    def _fill_overflow_menu(self) -> None:
+        menu = self._overflow_menu
+        menu.clear()
+
+        first_visible = next((i for i, b in enumerate(self._buttons) if not b.isHidden()), len(self._buttons))
+        hidden_crumbs = self._crumbs[:first_visible]
+
+        desktop_path = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DesktopLocation)
+        desktop_added = False
+
+        # 1. Tramos de la ruta ocultos (con Escritorio arriba si en Windows se ocultó "Este equipo")
+        if has_computer_view() and desktop_path and os.path.isdir(desktop_path):
+            if any(target == COMPUTER_PATH for _, target in hidden_crumbs):
+                action = menu.addAction(folder_icon(desktop_path), tr("Escritorio"))
+                action.triggered.connect(lambda _=False, p=desktop_path: self.pathEntered.emit(p))
+                desktop_added = True
+
+        for label, target in hidden_crumbs:
+            if target == desktop_path:
+                desktop_added = True
+            action = menu.addAction(folder_icon(target), label)
+            action.triggered.connect(lambda _=False, p=target: self.pathEntered.emit(p))
+
+        menu.addSeparator()
+
+        # 2. Lugares del sistema
+        home_path = home_dir()
+        if home_path:
+            act_home = menu.addAction(themed("home"), tr("Inicio") if has_computer_view() else tr("Carpeta personal"))
+            act_home.triggered.connect(lambda _=False, p=home_path: self.pathEntered.emit(p))
+            if os.path.normcase(self._path) == os.path.normcase(home_path):
+                f = act_home.font()
+                f.setBold(True)
+                act_home.setFont(f)
+
+        computer_target = COMPUTER_PATH if has_computer_view() else "/"
+        computer_label = COMPUTER_LABEL if has_computer_view() else tr("Sistema de archivos")
+        act_comp = menu.addAction(folder_icon(computer_target), computer_label)
+        act_comp.triggered.connect(lambda _=False, p=computer_target: self.pathEntered.emit(p))
+        if self._path == computer_target or (has_computer_view() and self._path.startswith("\\\\")):
+            f = act_comp.font()
+            f.setBold(True)
+            act_comp.setFont(f)
+
+        if desktop_path and os.path.isdir(desktop_path) and not desktop_added:
+            act_desk = menu.addAction(folder_icon(desktop_path), tr("Escritorio"))
+            act_desk.triggered.connect(lambda _=False, p=desktop_path: self.pathEntered.emit(p))
+            if os.path.normcase(self._path) == os.path.normcase(desktop_path):
+                f = act_desk.font()
+                f.setBold(True)
+                act_desk.setFont(f)
+
+        if sys.platform == "win32":
+            act_trash = menu.addAction(themed("delete"), tr("Papelera de reciclaje"))
+            act_trash.triggered.connect(lambda _=False: os.startfile("shell:RecycleBinFolder") if hasattr(os, "startfile") else None)
+        else:
+            trash_path = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "Trash", "files")
+            if os.path.isdir(trash_path):
+                act_trash = menu.addAction(themed("delete"), tr("Papelera de reciclaje"))
+                act_trash.triggered.connect(lambda _=False, p=trash_path: self.pathEntered.emit(p))
+
+        menu.addSeparator()
+
+        # 3. Unidades del equipo
+        drives = list_drives(with_details=False)
+        for drive in drives:
+            act_drive = menu.addAction(folder_icon(drive.path), drive.name)
+            act_drive.triggered.connect(lambda _=False, p=drive.path: self.pathEntered.emit(p))
+            if self._path.casefold().startswith(drive.path.casefold()):
+                f = act_drive.font()
+                f.setBold(True)
+                act_drive.setFont(f)
+
+        # Carpetas de usuario estándar
+        for name, loc in (
+            (tr("Descargas"), QStandardPaths.StandardLocation.DownloadLocation),
+            (tr("Documentos"), QStandardPaths.StandardLocation.DocumentsLocation),
+            (tr("Imágenes"), QStandardPaths.StandardLocation.PicturesLocation),
+            (tr("Música"), QStandardPaths.StandardLocation.MusicLocation),
+            (tr("Vídeos"), QStandardPaths.StandardLocation.MoviesLocation),
+        ):
+            p = QStandardPaths.writableLocation(loc)
+            if p and os.path.isdir(p) and p != desktop_path and p != home_path:
+                act_loc = menu.addAction(folder_icon(p), name)
+                act_loc.triggered.connect(lambda _=False, target=p: self.pathEntered.emit(target))
+
+        # Favoritos si están disponibles
+        if callable(self.favorites_supplier):
+            try:
+                favs = self.favorites_supplier()
+                if favs:
+                    menu.addSeparator()
+                    for item in favs:
+                        if isinstance(item, dict) and item.get("path") and not item.get("separator"):
+                            p = item["path"]
+                            if os.path.exists(p) or p == COMPUTER_PATH:
+                                act_fav = menu.addAction(folder_icon(p), item.get("label") or os.path.basename(p))
+                                act_fav.triggered.connect(lambda _=False, target=p: self.pathEntered.emit(target))
+            except Exception:
+                pass
 
     def set_folder_menus(self, enabled: bool) -> None:
         """Si el › de cada tramo es un botón que despliega sus subcarpetas, o solo una separación."""
@@ -1110,16 +1249,24 @@ class Breadcrumb(QFrame):
 
     def set_path(self, path: str) -> None:
         self._path = path
+        self._crumbs = crumbs = path_crumbs(path)
         self._edit.setText(location_label(path))
         self.show_buttons()
-        while self._row.count():
-            item = self._row.takeAt(0)
-            if item.widget():
-                item.widget().hide()
-                item.widget().deleteLater()
+        for btn in self._buttons:
+            btn.hide()
+            btn.deleteLater()
+        for arrow in self._arrows.values():
+            arrow.hide()
+            arrow.deleteLater()
         self._buttons = []
         self._arrows = {}
-        for position, (label, target) in enumerate(crumbs := path_crumbs(path)):
+        while self._row.count() > 1:
+            item = self._row.takeAt(1)
+            w = item.widget()
+            if w and w is not self._overflow_button:
+                w.hide()
+                w.deleteLater()
+        for position, (label, target) in enumerate(crumbs):
             last = position == len(crumbs) - 1
             button = QToolButton()
             button.setObjectName("crumb")
@@ -1178,16 +1325,60 @@ class Breadcrumb(QFrame):
         self._elide()
 
     def _elide(self) -> None:
-        """Si no cabe la ruta, oculta los tramos iniciales: el final es lo que más importa."""
-        available = self.width() - 12
-        used = 0
-        for button in reversed(self._buttons):
-            arrow = self._arrows.get(button)
-            used += button.sizeHint().width() + (arrow.sizeHint().width() if arrow else 0)
-            shown = used <= available or button is self._buttons[-1]
-            button.setVisible(shown)
-            if arrow:
-                arrow.setVisible(shown)
+        """Si no cabe la ruta, oculta los tramos iniciales y muestra el botón de desbordamiento."""
+        if self._eliding:
+            return
+        self._eliding = True
+        try:
+            if not self._buttons:
+                self._overflow_button.hide()
+                if self._is_elided:
+                    self._is_elided = False
+                    self.elidedChanged.emit(False)
+                return
+
+            available = self.width() - 8
+            overflow_width = self._overflow_button.sizeHint().width() + self._row.spacing()
+
+            # Comprobar si caben todos sin botón de desbordamiento
+            total = 0
+            for btn in self._buttons:
+                arrow = self._arrows.get(btn)
+                total += btn.sizeHint().width() + (arrow.sizeHint().width() if arrow else 0)
+
+            if total <= available:
+                self._overflow_button.hide()
+                for btn in self._buttons:
+                    btn.show()
+                    arrow = self._arrows.get(btn)
+                    if arrow:
+                        arrow.show()
+                if self._is_elided:
+                    self._is_elided = False
+                    self.elidedChanged.emit(False)
+                return
+
+            self._overflow_button.show()
+            available -= overflow_width
+            used = 0
+            elided = False
+            for idx in range(len(self._buttons) - 1, -1, -1):
+                btn = self._buttons[idx]
+                arrow = self._arrows.get(btn)
+                w = btn.sizeHint().width() + (arrow.sizeHint().width() if arrow else 0)
+                used += w
+                shown = used <= available or idx == len(self._buttons) - 1
+                btn.setVisible(shown)
+                if arrow:
+                    arrow.setVisible(shown)
+                if not shown:
+                    elided = True
+
+            if self._is_elided != elided:
+                self._is_elided = elided
+                self.elidedChanged.emit(elided)
+        finally:
+            self._eliding = False
 
 
 class FindBar(QFrame):
@@ -1571,6 +1762,8 @@ class FileView(QWidget):
         self.breadcrumb = Breadcrumb()
         self.breadcrumb.pathEntered.connect(lambda _path: self.activated.emit(self))
         self.breadcrumb.pathEntered.connect(self.navigate)
+        self.breadcrumb.elidedChanged.connect(self._on_breadcrumb_elided)
+        self.breadcrumb.favorites_supplier = self._get_favorites
         strip_row.addWidget(self.breadcrumb, 1)
         bar.addWidget(self.crumb_strip, 1)
         self.history_button = QToolButton()
@@ -1711,6 +1904,17 @@ class FileView(QWidget):
         current, role = theme.current(), self.property("role")
         return themed(icon, theme.bar_icon_color(current, role), theme.bar_icon_disabled(current, role))
 
+    def _on_breadcrumb_elided(self, elided: bool) -> None:
+        self.folder_label.setVisible(not elided and not self.breadcrumb.is_editing())
+
+    def _get_favorites(self) -> list[dict]:
+        win = self.window()
+        if hasattr(win, "config"):
+            favs = win.config.get("favorites", [])
+            from ..core import favorites
+            return list(favorites.walk(favorites.with_bar(favs)))
+        return []
+
     def _path_field_shown(self, shown: bool) -> None:
         strip = self.crumb_strip
         if strip.property("fieldShown") == shown:
@@ -1720,6 +1924,7 @@ class FileView(QWidget):
         strip.style().polish(strip)
         strip.update()
         self._apply_bar_icons()  # el fondo ya no es el mismo: en un color fuerte los iconos son blancos, y sobre el campo no se verían
+        self.folder_label.setVisible(shown or not self.breadcrumb.is_elided)
 
     def _apply_bar_icons(self) -> None:
         current, role = theme.current(), self.property("role")
@@ -1734,6 +1939,7 @@ class FileView(QWidget):
         self.folder_label.setPixmap(pixmap("folder", 16))
         self.status.apply_icons()
         self.find_bar.apply_icons()
+        self.breadcrumb.apply_icons()
 
     def _set_default_columns(self) -> None:
         widths = {"size": 72, "type": 92, "modified": 112, "attrs": 44, "free": 92, "used": 150, "filesystem": 130, "location": 260}
@@ -2199,7 +2405,8 @@ class FileView(QWidget):
         layout = self.pane_bar.layout()
         margins = layout.contentsMargins()
         outlines = 4  # los contornos de la barra y de la ruta
-        room = self.width() - outlines - margins.left() - margins.right() - self.folder_label.sizeHint().width() - MIN_BREADCRUMB_WIDTH
+        folder_width = self.folder_label.sizeHint().width() if self.folder_label.isVisible() else 0
+        room = self.width() - outlines - margins.left() - margins.right() - folder_width - MIN_BREADCRUMB_WIDTH
         for button in order:
             button.setVisible(False)
         needed = [button.sizeHint().width() + layout.spacing() for button in wanted]

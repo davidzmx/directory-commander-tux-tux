@@ -23,7 +23,8 @@ from directory_commander_tux_tux.core.config import CONFIG_VERSION, DEFAULT_TOOL
 from directory_commander_tux_tux.core.fsops import Collision, OpResult
 from directory_commander_tux_tux.ui.transfer_dialog import SpeedGraph, TransferDialog, format_clock
 from directory_commander_tux_tux.ui import clipboard, hover_card as hover_card_module, image_ops, theme
-from directory_commander_tux_tux.core.listing import COMPUTER_PATH, Entry, entry_from_path, format_size, has_computer_view
+from directory_commander_tux_tux.core.i18n import tr
+from directory_commander_tux_tux.core.listing import COMPUTER_LABEL, COMPUTER_PATH, Entry, entry_from_path, format_size, has_computer_view
 from directory_commander_tux_tux.ui.favorites_pages import AddFavoriteDialog
 from directory_commander_tux_tux.ui.dialogs import PreferencesDialog, PropertiesDialog
 from directory_commander_tux_tux.ui.icons import has_icon, themed
@@ -1271,6 +1272,69 @@ def test_breadcrumb_hides_old_segments_at_once(app):
     old = list(crumb._buttons)
     crumb.set_path(os.path.abspath(os.path.join(os.sep, "tres")))
     assert all(button.isHidden() for button in old)
+
+
+def test_breadcrumb_overflow_button_shows_when_elided_and_navigates(app):
+    crumb = Breadcrumb()
+    crumb.resize(800, 24)
+    # Ruta corta en ancho amplio: no debe desbordarse
+    crumb.set_path(os.path.abspath(os.path.join(os.sep, "a")))
+    assert not crumb.is_elided
+    assert crumb._overflow_button.isHidden()
+    assert all(not b.isHidden() for b in crumb._buttons)
+
+    # Ruta profunda con ancho estrecho: debe activarse el desplegable de desbordamiento
+    deep_path = os.path.abspath(os.path.join(os.sep, "pinokio", "api", "comfy", "app", "models", "vae"))
+    crumb.resize(150, 24)
+    crumb.set_path(deep_path)
+    assert crumb.is_elided
+    assert not crumb._overflow_button.isHidden()
+    assert any(b.isHidden() for b in crumb._buttons)
+    assert not crumb._buttons[-1].isHidden()  # el último tramo siempre visible
+
+    # Rellenar y comprobar el menú del botón de desbordamiento
+    crumb._fill_overflow_menu()
+    actions = crumb._overflow_menu.actions()
+    action_texts = [a.text() for a in actions if a.text()]
+
+    # Debe contener los tramos ocultos y lugares del sistema
+    if has_computer_view():
+        assert COMPUTER_LABEL in action_texts
+        assert any(t == "pinokio" for t in action_texts)
+        assert tr("Escritorio") in action_texts
+
+    # Comprobar que pulsar un elemento del menú emite pathEntered con el destino correcto
+    received = []
+    crumb.pathEntered.connect(received.append)
+
+    target_action = next(a for a in actions if a.text() == (COMPUTER_LABEL if has_computer_view() else tr("Sistema de archivos")))
+    target_action.trigger()
+    assert (COMPUTER_PATH if has_computer_view() else "/") in received
+
+    # Al ampliar el ancho a suficiente tamaño, el desbordamiento se oculta de nuevo
+    crumb.resize(1200, 24)
+    crumb._elide()
+    assert not crumb.is_elided
+    assert crumb._overflow_button.isHidden()
+    assert all(not b.isHidden() for b in crumb._buttons)
+
+
+def test_view_folder_label_toggles_with_breadcrumb_elision(window):
+    view = window.source
+    crumb = view.breadcrumb
+    deep_path = os.path.abspath(os.path.join(os.sep, "pinokio", "api", "comfy", "app", "models", "vae"))
+
+    crumb.resize(800, 24)
+    view.folder_label.show()
+    crumb.elidedChanged.emit(False)
+    assert view.folder_label.isVisible()
+
+    crumb.resize(100, 24)
+    crumb.elidedChanged.emit(True)
+    assert not view.folder_label.isVisible()
+
+    crumb.elidedChanged.emit(False)
+    assert view.folder_label.isVisible()
 
 
 # ---- doble clic ----

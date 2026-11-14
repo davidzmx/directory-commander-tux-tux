@@ -327,6 +327,8 @@ def stylesheet(t: Theme, dest_tint: bool = True) -> str:
     QToolButton#splitArrow {{ border: 1px solid {t.border}; border-left: none; border-radius: 0; padding: 0 2px; }}
     QToolButton#crumb {{ padding: 1px 2px; }}
     QToolButton#crumbArrow {{ padding: 1px 3px; }}
+    QToolButton#crumbOverflow {{ padding: 0 1px; }}
+    QToolButton#crumbOverflow::menu-indicator {{ image: none; width: 0px; }}
 
     QTabWidget::pane {{ border: none; }}
     QTabBar {{ background: {t.window}; }}

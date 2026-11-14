@@ -2202,6 +2202,8 @@ class MainWindow(ExtraCommands, QMainWindow):
         self.location = Breadcrumb()
         self.location.set_folder_menus(bool(self.config.get("path_folder_menus", False)))
         self.location.pathEntered.connect(lambda path: self.source.navigate(path))
+        self.location.elidedChanged.connect(lambda elided: self.location_folder.setVisible(not elided and not self.location.is_editing()))
+        self.location.favorites_supplier = lambda: list(favorites.walk(favorites.with_bar(self.config.get("favorites", []))))
         self._location_path_actions = [own_action(label), own_action(self.location_folder), own_action(self.location)]
         self.location_recent = QToolButton()
         self.location_recent.setToolTip(tr("Carpetas recientes"))
@@ -2251,6 +2253,7 @@ class MainWindow(ExtraCommands, QMainWindow):
     def _refresh_location_icons(self) -> None:
         self.location_folder.setPixmap(themed("folder").pixmap(16, 16))
         self.location_recent.setIcon(themed("menu-arrow"))
+        self.location.apply_icons()
 
     def _content_type_chosen(self) -> None:
         self.source.model.set_content_types(self.content_box.checked_keys())
