@@ -1091,16 +1091,27 @@ class Breadcrumb(QFrame):
         self.favorites_supplier = None
 
     def _apply_overflow_icon(self) -> None:
+        color = getattr(self, "_arrow_color", None) or theme.current().text
         pm = QPixmap(26, 16)
         pm.fill(Qt.GlobalColor.transparent)
         p = QPainter(pm)
         p.drawPixmap(0, 0, themed("folder").pixmap(16, 16))
-        p.drawPixmap(17, 4, themed("menu-arrow").pixmap(8, 8))
+        p.drawPixmap(17, 4, themed("menu-arrow", color).pixmap(8, 8))
         p.end()
         self._overflow_button.setIcon(QIcon(pm))
         self._overflow_button.setIconSize(QSize(26, 16))
 
-    def apply_icons(self) -> None:
+    def apply_icons(self, arrow_color: str | None = None) -> None:
+        if arrow_color is None:
+            view = self.parent()
+            while view and not hasattr(view, "crumb_strip"):
+                view = view.parent()
+            if view:
+                current, role = theme.current(), view.property("role")
+                arrow_color = current.icon if view.crumb_strip.property("fieldShown") else theme.crumb_text_color(current, role)
+            else:
+                arrow_color = theme.current().text
+        self._arrow_color = arrow_color
         self._apply_overflow_icon()
 
     @property
@@ -1908,11 +1919,13 @@ class FileView(QWidget):
 
     def _apply_bar_icons(self) -> None:
         current, role = theme.current(), self.property("role")
+        arrow_color = current.icon if self.crumb_strip.property("fieldShown") else theme.crumb_text_color(current, role)
         for button, icon in self._tool_buttons:
             if button.parentWidget() is self.crumb_strip:  # va sobre el tramo de la ruta, no sobre el color de la barra
-                button.setIcon(themed(icon, current.icon if self.crumb_strip.property("fieldShown") else theme.crumb_text_color(current, role)))
+                button.setIcon(themed(icon, arrow_color))
             else:
                 button.setIcon(self._bar_icon(icon))
+        self.breadcrumb.apply_icons(arrow_color)
 
     def apply_icons(self) -> None:
         self._apply_bar_icons()

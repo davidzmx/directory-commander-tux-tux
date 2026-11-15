@@ -1336,6 +1336,15 @@ def test_view_folder_label_toggles_with_breadcrumb_field(window):
     assert view.folder_label.isHidden()
 
 
+def test_breadcrumb_arrow_color_matches_theme_crumb_text_color(window):
+    from directory_commander_tux_tux.ui import theme
+    view = window.source
+    view.setProperty("role", "source")
+    view._apply_bar_icons()
+    expected = theme.crumb_text_color(theme.current(), "source")
+    assert view.breadcrumb._arrow_color == expected
+
+
 # ---- doble clic ----
 
 def count_opened(view):
