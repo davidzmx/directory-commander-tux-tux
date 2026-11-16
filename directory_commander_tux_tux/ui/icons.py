@@ -22,7 +22,8 @@ _SHAPES = {
     "goroot": '<path d="M5 4h14"/><path d="M12 20V8M7 13l5-5 5 5"/>',
     "refresh": '<path d="M19 8a8 8 0 1 0 1 6"/><path d="M20 3v5h-5"/>',
     "home": '<path d="M4 11l8-7 8 7"/><path d="M6 10v10h4v-6h4v6h4V10"/>',
-    "favorites": '<path d="M12 3l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.3l-5.7 3.2 1.2-6.4L2.800 9.700l6.400-.8z" fill="{f}" stroke="{f}"/>',
+    "favorites": '<path d="M12 3l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.3l-5.7 3.2 1.2-6.4L2.800 9.700l6.400-.8z" fill="{f}" stroke="{f}"/>'
+                 '<polygon points="14.5 17 22.5 17 18.5 22.5" fill="{c}" stroke="{c}" stroke-width="0.5" stroke-linejoin="round"/>',
     "favoritesadd": '<path d="M10 2l2.300 4.900 5.300.7-3.900 3.600 1 5.300-4.700-2.600-4.700 2.600 1-5.300L2.400 7.600l5.300-.7z" fill="{f}" stroke="{f}"/>'
                     '<path d="M18 14v8M14 18h8" stroke="{a}" stroke-width="2.400"/>',
     "favoritesedit": '<path d="M10 2l2.300 4.900 5.300.7-3.900 3.600 1 5.300-4.700-2.600-4.700 2.600 1-5.300L2.400 7.600l5.300-.7z" fill="{f}" stroke="{f}"/>'
