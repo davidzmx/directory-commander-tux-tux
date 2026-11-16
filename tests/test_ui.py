@@ -4722,6 +4722,20 @@ def test_color_depth():
     assert color_depth(QImage(2, 2, QImage.Format.Format_Grayscale8)) == 8
 
 
+def test_image_viewer_side_buttons_adapt_to_theme(viewer):
+    original = theme.current()
+    try:
+        theme.set_current(theme.LIGHT)
+        viewer.apply_theme()
+        assert "245, 245, 247" in viewer.btn_side_next.styleSheet()
+
+        theme.set_current(theme.DARK)
+        viewer.apply_theme()
+        assert "20, 20, 20" in viewer.btn_side_next.styleSheet()
+    finally:
+        theme.set_current(original)
+
+
 # ---- el desplegado no mueve la lista ----
 
 @pytest.fixture

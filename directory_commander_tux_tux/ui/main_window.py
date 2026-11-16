@@ -1004,7 +1004,10 @@ class MainWindow(ExtraCommands, QMainWindow):
         self.preview.apply_icons()
         for viewer in self._viewers:
             if _alive(viewer):
-                viewer.apply_icons()
+                if hasattr(viewer, "apply_theme"):
+                    viewer.apply_theme()
+                else:
+                    viewer.apply_icons()
         if self._notes_popup is not None:
             self._notes_popup.apply_theme()
         for view in self.all_views():

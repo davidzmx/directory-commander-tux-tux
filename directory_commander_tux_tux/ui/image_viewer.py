@@ -100,31 +100,19 @@ class ImageViewer(QMainWindow):
 
         self.btn_side_prev = QToolButton(self.scroll.viewport())
         self.btn_side_next = QToolButton(self.scroll.viewport())
-        for btn, icon, tip, delta in (
-            (self.btn_side_prev, "goback", tr("Imagen anterior"), -1),
-            (self.btn_side_next, "goforward", tr("Imagen siguiente"), 1),
+        for btn, tip, delta in (
+            (self.btn_side_prev, tr("Imagen anterior"), -1),
+            (self.btn_side_next, tr("Imagen siguiente"), 1),
         ):
-            btn.setIcon(themed(icon))
             btn.setIconSize(QSize(28, 28))
             btn.setToolTip(tip)
             btn.setFixedSize(48, 64)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setMouseTracking(True)
-            btn.setStyleSheet("""
-                QToolButton {
-                    background-color: rgba(20, 20, 20, 0.7);
-                    border: 1px solid rgba(255, 255, 255, 0.25);
-                    border-radius: 8px;
-                    padding: 4px;
-                }
-                QToolButton:hover {
-                    background-color: rgba(0, 0, 0, 0.95);
-                    border: 1px solid rgba(255, 255, 255, 0.7);
-                }
-            """)
             btn.clicked.connect(lambda _=False, d=delta: self.step(d))
             btn.installEventFilter(self)
             btn.hide()
+        self._style_side_buttons()
 
         self.crop = CropOverlay(self.label)
         self.crop.hide()
@@ -304,9 +292,54 @@ class ImageViewer(QMainWindow):
         self.status_labels["ai"].setCursor(Qt.CursorShape.PointingHandCursor)
         self.status_labels["ai"].mousePressEvent = lambda _e: self.toggle_prompt_panel() if self.actions_by_key["ai_prompt"].isEnabled() else None
 
+    def _style_side_buttons(self) -> None:
+        t = theme.current()
+        is_light = t.name == "light"
+        if is_light:
+            stylesheet = """
+                QToolButton {
+                    background-color: rgba(245, 245, 247, 0.85);
+                    border: 1px solid rgba(0, 0, 0, 0.22);
+                    border-radius: 8px;
+                    padding: 4px;
+                }
+                QToolButton:hover {
+                    background-color: rgba(255, 255, 255, 0.98);
+                    border: 1px solid rgba(0, 0, 0, 0.45);
+                }
+            """
+            icon_color = "#202124"
+        else:
+            stylesheet = """
+                QToolButton {
+                    background-color: rgba(20, 20, 20, 0.7);
+                    border: 1px solid rgba(255, 255, 255, 0.25);
+                    border-radius: 8px;
+                    padding: 4px;
+                }
+                QToolButton:hover {
+                    background-color: rgba(0, 0, 0, 0.95);
+                    border: 1px solid rgba(255, 255, 255, 0.7);
+                }
+            """
+            icon_color = "#ffffff"
+
+        if hasattr(self, "btn_side_prev") and hasattr(self, "btn_side_next"):
+            self.btn_side_prev.setStyleSheet(stylesheet)
+            self.btn_side_next.setStyleSheet(stylesheet)
+            self.btn_side_prev.setIcon(themed("goback", icon_color))
+            self.btn_side_next.setIcon(themed("goforward", icon_color))
+
     def apply_icons(self) -> None:
         for key, icon in self._icons.items():
             self.actions_by_key[key].setIcon(themed(icon))
+        self._style_side_buttons()
+
+    def apply_theme(self) -> None:
+        background = theme.current().panel
+        self.label.setStyleSheet(f"background: {background}; color: {theme.current().text};")
+        self.scroll.setStyleSheet(f"QScrollArea {{ background: {background}; border: none; }}")
+        self.apply_icons()
 
     # ---------------------------------------------------------------- carga
     @property
