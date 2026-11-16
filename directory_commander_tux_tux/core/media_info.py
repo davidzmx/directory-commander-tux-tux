@@ -618,7 +618,10 @@ def find_tool(name: str, extra_dir: str = "") -> str | None:
     """Ruta absoluta de una herramienta. No mira la carpeta actual: un `ffmpeg.exe` dejado
     en la carpeta que se está viendo nunca debe ejecutarse."""
     filename = name + (".exe" if sys.platform == "win32" else "")
-    folders = ([extra_dir] if extra_dir else []) + os.environ.get("PATH", "").split(os.pathsep)
+    candidates = [extra_dir] if extra_dir else []
+    if sys.platform == "win32":
+        candidates.extend(["C:/tests/MyFFmpegGUI/bin", "C:/ffmpeg/bin"])
+    folders = candidates + os.environ.get("PATH", "").split(os.pathsep)
     for folder in folders:
         if folder and os.path.isabs(folder):
             candidate = os.path.join(folder, filename)
@@ -665,6 +668,18 @@ def _read_with_ffprobe(path: str, ffmpeg_dir: str) -> MediaInfo | None:
             info.kind = "video"
             info.width, info.height = int(stream.get("width") or 0), int(stream.get("height") or 0)
             info.codec = str(stream.get("codec_name") or "")
+            fps_str = str(stream.get("r_frame_rate") or stream.get("avg_frame_rate") or "")
+            if "/" in fps_str:
+                num, den = fps_str.split("/", 1)
+                try:
+                    info.frame_rate = round(float(num) / float(den), 2) if float(den) else 0.0
+                except (ValueError, ZeroDivisionError):
+                    pass
+            elif fps_str:
+                try:
+                    info.frame_rate = round(float(fps_str), 2)
+                except ValueError:
+                    pass
         elif kind == "audio" and not info.audio_codec:
             info.audio_codec = str(stream.get("codec_name") or "")
             info.sample_rate = int(_number(stream.get("sample_rate")))

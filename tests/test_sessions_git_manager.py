@@ -1990,3 +1990,46 @@ def test_a_comparer_that_cannot_start_falls_back_to_internal(window, tmp_path):
     window.compare_files(str(tmp_path / "a.txt"), str(tmp_path / "b.txt"), [str(tmp_path / "no_existe.exe")])
     assert wait_until(lambda: any(isinstance(child, CompareWindow) and child.isVisible() for child in window.children()))
     next(child for child in window.children() if isinstance(child, CompareWindow)).close()
+
+
+def test_video_comparison_detection(tmp_path):
+    v1 = tmp_path / "video1.mp4"
+    v2 = tmp_path / "video2.mkv"
+    v1.write_bytes(b"dummy1")
+    v2.write_bytes(b"dummy2")
+    kind, value = compare_files(str(v1), str(v2), [])
+    assert kind == "videos"
+    assert value == (str(v1), str(v2))
+
+
+def test_video_compare_canvas_and_window_ui(window, tmp_path):
+    from directory_commander_tux_tux.ui.video_compare_player import VideoCompareWindow, CompareVideoCanvas
+    v1 = str(tmp_path / "a.mp4")
+    v2 = str(tmp_path / "b.mp4")
+    canvas = CompareVideoCanvas()
+    assert canvas.mode == "split"
+    canvas.set_mode("side_by_side")
+    assert canvas.mode == "side_by_side"
+    canvas.set_split_ratio(0.35)
+    assert canvas.split_ratio == 0.35
+
+    vc_win = VideoCompareWindow(v1, v2, window.config, parent=window)
+    assert vc_win.btn_play.text() == "Reproducir"
+    assert vc_win.btn_mode_split.isChecked()
+    vc_win._set_mode("side_by_side")
+    assert vc_win.btn_mode_sbs.isChecked()
+    assert vc_win.canvas.mode == "side_by_side"
+    vc_win.close()
+
+
+def test_real_video_comparison_opens_video_compare_window(window, tmp_path):
+    from directory_commander_tux_tux.ui.video_compare_player import VideoCompareWindow
+    v1 = tmp_path / "a.mp4"
+    v2 = tmp_path / "b.mp4"
+    v1.write_bytes(b"dummy1")
+    v2.write_bytes(b"dummy2")
+    window.compare_files(str(v1), str(v2), [])
+    assert wait_until(lambda: any(isinstance(child, VideoCompareWindow) and child.isVisible() for child in window.children() + getattr(window, "_viewers", [])))
+    opened = next(child for child in window.children() + getattr(window, "_viewers", []) if isinstance(child, VideoCompareWindow))
+    assert opened.isVisible()
+    opened.close()

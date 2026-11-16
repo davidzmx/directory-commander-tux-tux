@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QCheckBox, QDialog, QFrame, QHBoxLayout, QLabel, Q
 from ..core import file_compare
 from ..core.i18n import tr
 from ..core.listing import format_size
+from ..core.media_info import VIDEO_EXTENSIONS
 from . import theme
 from .model import IMAGE_EXTENSIONS
 
@@ -26,6 +27,10 @@ _DIFF_COLORS = {"dark": {"+": ("#7ee787", "#12261a"), "-": ("#ff9492", "#2d1518"
 
 def is_image(path: str) -> bool:
     return os.path.splitext(path)[1][1:].lower() in IMAGE_EXTENSIONS
+
+
+def is_video(path: str) -> bool:
+    return os.path.splitext(path)[1][1:].lower() in VIDEO_EXTENSIONS
 
 
 def _load(path: str) -> tuple[QImage, str]:
@@ -128,6 +133,8 @@ def compare_images(first_path: str, second_path: str, is_cancelled=None) -> Imag
 
 def compare_files(first: str, second: str, external: list[str], external_for_images: bool = False, is_cancelled=None) -> tuple[str, object]:
     """Qué ha salido y lo que hay que mostrar. Si son idénticos no hace falta abrir nada más, tampoco un programa externo. Se llama desde otro hilo."""
+    if is_video(first) and is_video(second):
+        return "videos", (first, second)
     if file_compare.identical(first, second, is_cancelled):
         return "identical", None
     images = is_image(first) and is_image(second)

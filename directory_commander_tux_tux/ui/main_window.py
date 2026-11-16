@@ -2668,8 +2668,26 @@ class MainWindow(ExtraCommands, QMainWindow):
             self._report(tr("No se pudo abrir el comparador: {program}", program=value[0]))
             self.compare_files(first, second, [])
             return
+        if kind == "videos":
+            self.open_video_compare(first, second)
+            return
         window = CompareWindow(first, second, self)
         {"identical": lambda: window.show_identical(), "text": lambda: window.show_text(value), "images": lambda: window.show_images(value), "binary": lambda: window.show_binary(value)}[kind]()
+        window.show()
+        window.raise_()
+
+    def open_video_compare(self, first: str, second: str) -> None:
+        from .video_compare_player import VideoCompareWindow
+        ffmpeg_tool = media_info.find_tool("ffmpeg", self.config.get("ffmpeg_dir", ""))
+        if not ffmpeg_tool:
+            QMessageBox.warning(
+                self,
+                tr("Comparador de Video"),
+                tr("Se requiere FFmpeg para comparar videos de forma sincronizada.\nPuede configurar la ruta en Configuración -> Programas.")
+            )
+            return
+        window = VideoCompareWindow(first, second, self.config, self)
+        self._viewers.append(window)
         window.show()
         window.raise_()
 
