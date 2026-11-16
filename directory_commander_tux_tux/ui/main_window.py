@@ -718,6 +718,7 @@ class MainWindow(ExtraCommands, QMainWindow):
         self._notes_action = None
         self.nav_lock = False
         self._following = False
+        self._checked_menu_actions: list[tuple[QAction, str]] = []
         self._apply_theme_globals()
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(app_icon())
@@ -1110,6 +1111,7 @@ class MainWindow(ExtraCommands, QMainWindow):
         self.tree.deviceMenuRequested.connect(lambda device, where: self._device_menu(device, lambda: self.source).exec(where))
         self.tree_dock = self._dock(tr("Árbol de Carpetas"), "tree", self.tree, Qt.DockWidgetArea.LeftDockWidgetArea,
                                     [("collapse", tr("Plegar todo"), self.tree.collapseAll)])
+        self.tree_dock.visibilityChanged.connect(lambda _v: self._update_menu_checks())
         self.pane_trees: list[FolderTree] = []
         self.tree_panels: list[QWidget] = []
         self._pane_tree_paths: dict[int, str] = {}
@@ -1163,11 +1165,11 @@ class MainWindow(ExtraCommands, QMainWindow):
         self.preview.editRequested.connect(self.open_markdown_editor)
         self.preview.jsonRequested.connect(self.open_json_viewer)
         self.viewer_dock = self._dock(tr("Visor"), "viewer", self.preview, Qt.DockWidgetArea.RightDockWidgetArea)
-        self.viewer_dock.visibilityChanged.connect(lambda _v: self._update_preview())
+        self.viewer_dock.visibilityChanged.connect(lambda _v: (self._update_preview(), self._update_menu_checks()))
         self.metadata = MetadataPanel(self, config=self.config)
         self.metadata.exiftool_dir = self.config.get("exiftool_dir", "")
         self.meta_dock = self._dock(tr("Metadatos"), "metadata", self.metadata, Qt.DockWidgetArea.RightDockWidgetArea)
-        self.meta_dock.visibilityChanged.connect(lambda _v: self._update_preview())
+        self.meta_dock.visibilityChanged.connect(lambda _v: (self._update_preview(), self._update_menu_checks()))
         self.meta_dock.hide()
 
         self.preview.autoplay_allowed = lambda: not self._video_viewer_open()
@@ -1598,6 +1600,7 @@ class MainWindow(ExtraCommands, QMainWindow):
         self._sync_terminals()
         self._sync_tree()
         self._update_preview()
+        self._update_menu_checks()
 
     def _refresh_terminal_only_buttons(self, index: int) -> None:
         only = index in self._terminal_only
@@ -1753,11 +1756,15 @@ class MainWindow(ExtraCommands, QMainWindow):
         return states
 
     def _update_menu_checks(self) -> None:
+        if not hasattr(self, "_checked_menu_actions"):
+            return
         states = self._menu_states()
         for action, command in self._checked_menu_actions:
             try:
-                action.setChecked(bool(states[command]()))
-            except (AttributeError, RuntimeError):
+                fn = states.get(command)
+                if fn:
+                    action.setChecked(bool(fn()))
+            except (AttributeError, RuntimeError, KeyError):
                 pass  # al arrancar, aún sin paneles
 
     def _build_menus(self) -> None:
@@ -2360,6 +2367,7 @@ class MainWindow(ExtraCommands, QMainWindow):
             action.setChecked(True)
         self._sync_tree()
         self._update_preview()
+        self._update_menu_checks()
 
     @staticmethod
     def _style_layout(style: dict) -> str:
@@ -2420,6 +2428,7 @@ class MainWindow(ExtraCommands, QMainWindow):
                 self._show_pane_tree(index, True)
             elif not visible or index >= count or index in self._terminal_only:
                 panel.hide()  # el de un panel que no se ve: tendrá su ancho cuando se muestre
+        self._update_menu_checks()
 
     def _show_pane_tree(self, index: int, visible: bool) -> None:
         """El árbol propio de un panel, a su izquierda. Con un árbol general a la vez, este sigue al panel activo y el propio a su panel."""
@@ -2431,6 +2440,7 @@ class MainWindow(ExtraCommands, QMainWindow):
             side.setSizes([PANE_TREE_WIDTH, max(PANE_TREE_WIDTH, side.width() - PANE_TREE_WIDTH)])
             self._pane_tree_paths.pop(index, None)  # mientras estaba oculto no seguía a su panel
             self._sync_pane_trees()
+        self._update_menu_checks()
 
     def _arrange_side_docks(self) -> None:
         """Visor y metadatos, uno encima del otro en el orden elegido. Si el usuario movió uno a otro sitio, se respeta."""
@@ -2572,6 +2582,7 @@ class MainWindow(ExtraCommands, QMainWindow):
             self._sync_tree()
             self._sync_terminals()
             self._update_preview()
+            self._update_menu_checks()
 
     def on_tab_changed(self, group: PaneGroup) -> None:
         if group.current is None or not hasattr(self, "location"):
@@ -2583,6 +2594,7 @@ class MainWindow(ExtraCommands, QMainWindow):
         self._sync_tree()
         self._sync_terminals()
         self._update_preview()
+        self._update_menu_checks()
 
     def _view_path_changed(self, view: FileView) -> None:
         for group in self.groups:
@@ -2880,6 +2892,8 @@ class MainWindow(ExtraCommands, QMainWindow):
         except (OSError, ValueError) as exc:
             self._report(f"{text}: {exc}")
             QMessageBox.warning(self, APP_NAME, str(exc))
+        finally:
+            self._update_menu_checks()
 
     def _report(self, message: str) -> None:
         self.statusBar().showMessage(message, 8000)
@@ -3607,6 +3621,7 @@ class MainWindow(ExtraCommands, QMainWindow):
         self._sync_terminals()
         self._sync_tree()
         self._update_preview()
+        self._update_menu_checks()
         self.source.focus_list()
 
     def _move_pane_to_the_end(self, side: int) -> None:
@@ -5155,6 +5170,7 @@ class MainWindow(ExtraCommands, QMainWindow):
         self._orient_terminals()
         self.source.focus_list()
         self._sync_tree()
+        self._update_menu_checks()
 
     def _restore_terminal_only(self, saved: list) -> None:
         wanted = {entry["pane"]: (entry.get("follow") is not False, bool(entry.get("tree"))) for entry in saved

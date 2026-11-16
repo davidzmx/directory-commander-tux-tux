@@ -497,6 +497,45 @@ def test_docks_can_be_closed_from_title_bar(window):
     assert window.viewer_dock.isHidden()
 
 
+def test_viewer_action_syncs_with_dock_visibility(window):
+    viewer_actions = [action for action, cmd in window._checked_menu_actions if cmd == "Set VIEWPANE=Toggle"]
+    assert viewer_actions, "Debe haber al menos una acción asociada a Set VIEWPANE=Toggle"
+    action = viewer_actions[0]
+
+    # Abrir el visor
+    window.run_command("Set VIEWPANE=On")
+    assert not window.viewer_dock.isHidden()
+    assert action.isChecked()
+
+    # Cerrar el visor con el botón de la barra de título del dock (Ocultar)
+    buttons = window.viewer_dock.titleBarWidget().findChildren(QToolButton)
+    buttons[-1].click()
+    assert window.viewer_dock.isHidden()
+    assert not action.isChecked()
+
+    # Activar mediante la acción (simulando click en la barra de herramientas)
+    action.trigger()
+    assert not window.viewer_dock.isHidden()
+    assert action.isChecked()
+
+    # Desactivar mediante la acción
+    action.trigger()
+    assert window.viewer_dock.isHidden()
+    assert not action.isChecked()
+
+    # Probar que metadatos también sincroniza
+    meta_actions = [action for action, cmd in window._checked_menu_actions if cmd == "Set METAPANE=Toggle"]
+    if meta_actions:
+        m_action = meta_actions[0]
+        window.run_command("Set METAPANE=On")
+        assert not window.meta_dock.isHidden()
+        assert m_action.isChecked()
+        buttons_meta = window.meta_dock.titleBarWidget().findChildren(QToolButton)
+        buttons_meta[-1].click()
+        assert window.meta_dock.isHidden()
+        assert not m_action.isChecked()
+
+
 def test_closing_tab_while_loading_is_safe(window, tree):
     left, _ = tree
     group = window.groups[0]
