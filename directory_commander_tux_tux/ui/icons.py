@@ -29,6 +29,7 @@ _SHAPES = {
     "favoritesedit": '<path d="M10 2l2.300 4.900 5.300.7-3.900 3.600 1 5.300-4.700-2.600-4.700 2.600 1-5.300L2.400 7.600l5.300-.7z" fill="{f}" stroke="{f}"/>'
                      '<path d="M13 22l1-3.500 6-6 2.500 2.500-6 6z" fill="{a}" stroke="{a}" stroke-width="1"/>',
     "folder": _FOLDER,
+    "folder-dropdown": _FOLDER + '<polygon points="14.5 17 22.5 17 18.5 22.5" fill="{c}" stroke="{c}" stroke-width="0.5" stroke-linejoin="round"/>',
     "save": '<path d="M5 3h11l3 3v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M8 3v5h7V3"/><rect x="7" y="13" width="10" height="6" rx="1"/>',
     "diskusage": '<rect x="3" y="3" width="18" height="18" rx="1"/><path d="M12 3v18M3 13h9M12 9h9M16 9v12"/>'
                  '<rect x="3.800" y="3.800" width="7.400" height="8.400" fill="{a}" stroke="none"/>',
@@ -151,6 +152,7 @@ _ALIASES = {
     "edit-copy-path": "duplicates", "utilities-terminal": "terminal", "drive-harddisk": "drive",
     "bookmark-new": "favoritesadd", "process-stop": "close", "copyas": "copy", "moveas": "move", "rename2": "rename",
     "duplicate": "copy", "newzipfile": "addtozip", "goupnewtab": "goup", "goupnewlister": "goup", "pathfield": "folder",
+    "crumb-overflow": "folder-dropdown",
     "favoriteslist": "favorites", "smartfavorites": "favorites",
     "recentlist": "logs", "powermode": "detailsmode", "deletesecure": "deletepermanent", "viewerlink": "show",
     "undodlg": "undo", "drivebuttons": "drive", "gonetwork": "gomycomputer", "golibraries": "folder",

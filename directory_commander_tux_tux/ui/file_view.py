@@ -1098,14 +1098,8 @@ class Breadcrumb(QFrame):
 
     def _apply_overflow_icon(self) -> None:
         color = getattr(self, "_arrow_color", None) or theme.current().text
-        pm = QPixmap(26, 16)
-        pm.fill(Qt.GlobalColor.transparent)
-        p = QPainter(pm)
-        p.drawPixmap(0, 0, themed("folder").pixmap(16, 16))
-        p.drawPixmap(17, 4, themed("menu-arrow", color).pixmap(8, 8))
-        p.end()
-        self._overflow_button.setIcon(QIcon(pm))
-        self._overflow_button.setIconSize(QSize(26, 16))
+        self._overflow_button.setIcon(themed("folder-dropdown", color))
+        self._overflow_button.setIconSize(QSize(16, 16))
 
     def apply_icons(self, arrow_color: str | None = None) -> None:
         if arrow_color is None:
