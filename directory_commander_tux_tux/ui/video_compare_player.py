@@ -29,9 +29,10 @@ from PySide6.QtCore import (
 )
 
 from .. import APP_NAME
-from ..core import media_info
+from ..core import media_info, platform_utils
 from ..core.i18n import tr
 from .icons import app_icon
+from . import theme
 
 
 def format_timestamp(seconds: float) -> str:
@@ -149,8 +150,8 @@ class CompareVideoCanvas(QWidget):
         self.split_ratio: float = 0.5  # Divisor en el 50%
         self.dragging_divider: bool = False
         self.show_labels: bool = True
-        self.label_a: str = tr("Original (A)")
-        self.label_b: str = tr("Procesado (B)")
+        self.label_a: str = "A"
+        self.label_b: str = "B"
 
         # Temporizador para diferenciar clic simple (Play/Pausa) de doble clic (Pantalla Completa)
         self._click_timer = QTimer(self)
@@ -815,6 +816,8 @@ class VideoCompareWindow(QDialog):
 
         name_a = os.path.basename(self.video_a)
         name_b = os.path.basename(self.video_b)
+        self.name_a = name_a
+        self.name_b = name_b
 
         wa, ha = self.info_a.get('width', 0), self.info_a.get('height', 0)
         wb, hb = self.info_b.get('width', 0), self.info_b.get('height', 0)
@@ -830,41 +833,38 @@ class VideoCompareWindow(QDialog):
         fps_b_str = _fmt_fps(self.info_b.get("fps", 0.0))
         fps_sync_str = _fmt_fps(self.fps)
 
-        lbl_a_text = f"<b>A ({tr('Original')}):</b> {name_a}"
         details_a = [x for x in [res_a_str, fps_a_str] if x]
-        if details_a:
-            lbl_a_text += f" <span style='color: #94a3b8; font-size: 11px;'>({' • '.join(details_a)})</span>"
-        lbl_a = QLabel(lbl_a_text)
-        lbl_a.setStyleSheet("color: #60a5fa; font-size: 12px;")
-        h_top.addWidget(lbl_a)
-
-        lbl_sep = QLabel("vs")
-        lbl_sep.setStyleSheet("color: #94a3b8; font-weight: bold;")
-        h_top.addWidget(lbl_sep)
-
-        lbl_b_text = f"<b>B ({tr('Procesado')}):</b> {name_b}"
         details_b = [x for x in [res_b_str, fps_b_str] if x]
-        if details_b:
-            lbl_b_text += f" <span style='color: #94a3b8; font-size: 11px;'>({' • '.join(details_b)})</span>"
-        lbl_b = QLabel(lbl_b_text)
-        lbl_b.setStyleSheet("color: #c084fc; font-size: 12px;")
-        h_top.addWidget(lbl_b)
+        self.details_a_str = ' • '.join(details_a)
+        self.details_b_str = ' • '.join(details_b)
+
+        lbl_a_text = f"<b>A:</b> {name_a}"
+        if self.details_a_str:
+            lbl_a_text += f" <span style='font-size: 11px;'>({self.details_a_str})</span>"
+        self.lbl_a = QLabel(lbl_a_text)
+        h_top.addWidget(self.lbl_a)
+
+        self.lbl_sep = QLabel("vs")
+        h_top.addWidget(self.lbl_sep)
+
+        lbl_b_text = f"<b>B:</b> {name_b}"
+        if self.details_b_str:
+            lbl_b_text += f" <span style='font-size: 11px;'>({self.details_b_str})</span>"
+        self.lbl_b = QLabel(lbl_b_text)
+        h_top.addWidget(self.lbl_b)
 
         h_top.addStretch()
 
-        lbl_tech = QLabel(f"Sync: {fps_sync_str}" if fps_sync_str else "")
-        lbl_tech.setToolTip(tr("Tasa de refresco maestra del motor de sincronización paralela"))
-        lbl_tech.setStyleSheet("color: #94a3b8; font-size: 11px; background: #1e293b; padding: 2px 8px; border-radius: 4px;")
-        h_top.addWidget(lbl_tech)
+        self.lbl_tech = QLabel(f"Sync: {fps_sync_str}" if fps_sync_str else "")
+        self.lbl_tech.setToolTip(tr("Tasa de refresco maestra del motor de sincronización paralela"))
+        h_top.addWidget(self.lbl_tech)
 
         layout.addLayout(h_top)
 
         # 2. Lienzo de Video
         self.canvas = CompareVideoCanvas(self)
-        pill_a_parts = [x for x in [res_a_str, fps_a_str] if x]
-        pill_b_parts = [x for x in [res_b_str, fps_b_str] if x]
-        self.canvas.label_a = f"{tr('Original')} (A) • {' • '.join(pill_a_parts)}" if pill_a_parts else f"{tr('Original')} (A)"
-        self.canvas.label_b = f"{tr('Procesado')} (B) • {' • '.join(pill_b_parts)}" if pill_b_parts else f"{tr('Procesado')} (B)"
+        self.canvas.label_a = f"A • {self.details_a_str}" if self.details_a_str else "A"
+        self.canvas.label_b = f"B • {self.details_b_str}" if self.details_b_str else "B"
         self.canvas.divider_moved.connect(self._on_divider_moved)
         self.canvas.play_pause_requested.connect(self._on_toggle_play)
         layout.addWidget(self.canvas, stretch=1)
@@ -971,30 +971,19 @@ class VideoCompareWindow(QDialog):
         h_controls.addWidget(self.btn_loop)
 
         # Separador vertical
-        sep1 = QFrame()
-        sep1.setFrameShape(QFrame.Shape.VLine)
-        sep1.setFixedWidth(1)
-        sep1.setStyleSheet("color: #334155;")
-        h_controls.addWidget(sep1)
+        self.sep1 = QFrame()
+        self.sep1.setFrameShape(QFrame.Shape.VLine)
+        self.sep1.setFixedWidth(1)
+        h_controls.addWidget(self.sep1)
 
         # Selector de Modo: Dividida vs Lado a Lado
-        lbl_mode = QLabel(tr("Modo:"))
-        lbl_mode.setStyleSheet("color: #cbd5e1; font-size: 11px; font-weight: bold;")
-        h_controls.addWidget(lbl_mode)
+        self.lbl_mode = QLabel(tr("Modo:"))
+        h_controls.addWidget(self.lbl_mode)
 
         self.btn_mode_split = QPushButton(tr("Dividida"), self)
         self.btn_mode_split.setCheckable(True)
         self.btn_mode_split.setChecked(True)
         self.btn_mode_split.setFixedHeight(28)
-        self.btn_mode_split.setStyleSheet("""
-            QPushButton {
-                background-color: #1e293b; color: #94a3b8; border: 1px solid #475569;
-                border-radius: 4px; padding: 4px 8px; font-size: 11px;
-            }
-            QPushButton:checked {
-                background-color: #0284c7; color: white; font-weight: bold; border: 1px solid #38bdf8;
-            }
-        """)
         self.btn_mode_split.clicked.connect(lambda: self._set_mode("split"))
         h_controls.addWidget(self.btn_mode_split)
 
@@ -1002,15 +991,6 @@ class VideoCompareWindow(QDialog):
         self.btn_mode_sbs.setCheckable(True)
         self.btn_mode_sbs.setChecked(False)
         self.btn_mode_sbs.setFixedHeight(28)
-        self.btn_mode_sbs.setStyleSheet("""
-            QPushButton {
-                background-color: #1e293b; color: #94a3b8; border: 1px solid #475569;
-                border-radius: 4px; padding: 4px 8px; font-size: 11px;
-            }
-            QPushButton:checked {
-                background-color: #0284c7; color: white; font-weight: bold; border: 1px solid #38bdf8;
-            }
-        """)
         self.btn_mode_sbs.clicked.connect(lambda: self._set_mode("side_by_side"))
         h_controls.addWidget(self.btn_mode_sbs)
 
@@ -1018,7 +998,6 @@ class VideoCompareWindow(QDialog):
         self.btn_center_divider = QPushButton(tr("Centrar"), self)
         self.btn_center_divider.setToolTip(tr("Centrar línea divisoria al 50%"))
         self.btn_center_divider.setFixedHeight(28)
-        self.btn_center_divider.setStyleSheet("font-size: 11px; padding: 4px 8px; color: #cbd5e1; background-color: #1e293b; border: 1px solid #475569; border-radius: 4px;")
         self.btn_center_divider.clicked.connect(lambda: self.canvas.set_split_ratio(0.5))
         h_controls.addWidget(self.btn_center_divider)
 
@@ -1026,36 +1005,19 @@ class VideoCompareWindow(QDialog):
         self.lbl_divider_pct = QLabel("50%")
         self.lbl_divider_pct.setFixedWidth(28)
         self.lbl_divider_pct.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_divider_pct.setStyleSheet("color: #38bdf8; font-weight: bold; font-size: 11px;")
         h_controls.addWidget(self.lbl_divider_pct)
 
         h_controls.addStretch(1)
 
         # Selector de Audio
-        lbl_audio = QLabel(tr("Audio:"))
-        lbl_audio.setStyleSheet("color: #cbd5e1; font-size: 11px; font-weight: bold;")
-        h_controls.addWidget(lbl_audio)
+        self.lbl_audio = QLabel(tr("Audio:"))
+        h_controls.addWidget(self.lbl_audio)
 
         self.combo_audio = QComboBox(self)
         self.combo_audio.addItem(tr("Silenciado"), "none")
-        self.combo_audio.addItem(f"{tr('Video A')} ({tr('Original')})", "a")
-        self.combo_audio.addItem(f"{tr('Video B')} ({tr('Procesado')})", "b")
-        self.combo_audio.setFixedSize(160, 28)
-        self.combo_audio.setStyleSheet("""
-            QComboBox {
-                background-color: #1e293b;
-                color: #f8fafc;
-                border: 1px solid #475569;
-                border-radius: 4px;
-                padding: 3px 8px;
-                font-size: 11px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #1e293b;
-                color: #f8fafc;
-                selection-background-color: #2563eb;
-            }
-        """)
+        self.combo_audio.addItem(tr("Video A"), "a")
+        self.combo_audio.addItem(tr("Video B"), "b")
+        self.combo_audio.setFixedSize(140, 28)
         self.combo_audio.currentIndexChanged.connect(self._on_audio_changed)
         h_controls.addWidget(self.combo_audio)
 
@@ -1064,18 +1026,6 @@ class VideoCompareWindow(QDialog):
         self.btn_volume.setIcon(create_volume_icon(is_disabled=True))
         self.btn_volume.setToolTip(tr("Silenciar / Reactivar Audio (M)"))
         self.btn_volume.setFixedSize(28, 28)
-        self.btn_volume.setStyleSheet("""
-            QPushButton {
-                background-color: #1e293b; border: 1px solid #475569;
-                border-radius: 4px; padding: 2px;
-            }
-            QPushButton:hover {
-                background-color: #334155; border-color: #38bdf8;
-            }
-            QPushButton:disabled {
-                background-color: #0f172a; border-color: #1e293b;
-            }
-        """)
         self.btn_volume.clicked.connect(self._toggle_mute)
         h_controls.addWidget(self.btn_volume)
 
@@ -1084,26 +1034,6 @@ class VideoCompareWindow(QDialog):
         self.slider_volume.setValue(100)
         self.slider_volume.setFixedSize(60, 20)
         self.slider_volume.setToolTip(tr("Nivel de volumen (0% - 100%)"))
-        self.slider_volume.setStyleSheet("""
-            QSlider::groove:horizontal {
-                height: 5px;
-                background: #334155;
-                border-radius: 2px;
-            }
-            QSlider::sub-page:horizontal {
-                background: #38bdf8;
-                border-radius: 2px;
-            }
-            QSlider::handle:horizontal {
-                background: #ffffff;
-                border: 1px solid #38bdf8;
-                width: 12px;
-                height: 12px;
-                margin-top: -4px;
-                margin-bottom: -4px;
-                border-radius: 6px;
-            }
-        """)
         self.slider_volume.valueChanged.connect(self._on_volume_changed)
         self.slider_volume.sliderReleased.connect(self._on_volume_released)
         self.slider_volume.clicked_value.connect(lambda _v: self._on_volume_released())
@@ -1111,18 +1041,16 @@ class VideoCompareWindow(QDialog):
 
         self.lbl_volume = QLabel("100%", self)
         self.lbl_volume.setFixedWidth(30)
-        self.lbl_volume.setStyleSheet("color: #475569; font-size: 11px;")
         h_controls.addWidget(self.lbl_volume)
 
         self.btn_volume.setEnabled(False)
         self.slider_volume.setEnabled(False)
 
         # Separador vertical
-        sep2 = QFrame()
-        sep2.setFrameShape(QFrame.Shape.VLine)
-        sep2.setFixedWidth(1)
-        sep2.setStyleSheet("color: #334155;")
-        h_controls.addWidget(sep2)
+        self.sep2 = QFrame()
+        self.sep2.setFrameShape(QFrame.Shape.VLine)
+        self.sep2.setFixedWidth(1)
+        h_controls.addWidget(self.sep2)
 
         # Selector de Velocidad
         self.combo_speed = QComboBox(self)
@@ -1133,21 +1061,6 @@ class VideoCompareWindow(QDialog):
         self.combo_speed.setCurrentIndex(1)
         self.combo_speed.setFixedSize(62, 28)
         self.combo_speed.setToolTip(tr("Velocidad de reproducción (0.5x - 2.0x)"))
-        self.combo_speed.setStyleSheet("""
-            QComboBox {
-                background-color: #1e293b;
-                color: #f8fafc;
-                border: 1px solid #475569;
-                border-radius: 4px;
-                padding: 3px 6px;
-                font-size: 11px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #1e293b;
-                color: #f8fafc;
-                selection-background-color: #2563eb;
-            }
-        """)
         self.combo_speed.currentIndexChanged.connect(self._on_speed_changed)
         h_controls.addWidget(self.combo_speed)
 
@@ -1157,19 +1070,12 @@ class VideoCompareWindow(QDialog):
         self.btn_fullscreen.setIconSize(QSize(20, 20))
         self.btn_fullscreen.setToolTip(tr("Alternar Pantalla Completa (F / F11 / Doble clic)"))
         self.btn_fullscreen.setFixedSize(30, 28)
-        self.btn_fullscreen.setStyleSheet("""
-            QPushButton {
-                background-color: #1e293b;
-                color: #f8fafc;
-                border: 1px solid #475569;
-                border-radius: 4px;
-                padding: 2px;
-            }
-            QPushButton:hover {
-                background-color: #334155;
-                border-color: #38bdf8;
-            }
-        """)
+        self.btn_fullscreen.clicked.connect(self._toggle_fullscreen)
+        h_controls.addWidget(self.btn_fullscreen)
+
+        layout.addLayout(h_controls)
+
+        self.apply_theme()
         self.btn_fullscreen.clicked.connect(self._toggle_fullscreen)
         h_controls.addWidget(self.btn_fullscreen)
 
@@ -1293,27 +1199,249 @@ class VideoCompareWindow(QDialog):
         else:
             self._set_mode("split")
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        is_light = (theme.current().name == "light")
+        try:
+            platform_utils.set_dark_title_bar(int(self.winId()), not is_light)
+        except Exception:
+            pass
+
+    def apply_theme(self) -> None:
+        is_light = (theme.current().name == "light")
+        t = theme.current()
+
+        try:
+            platform_utils.set_dark_title_bar(int(self.winId()), not is_light)
+        except Exception:
+            pass
+
+        bg_dialog = t.window if is_light else "#0b0f19"
+        fg_dialog = t.text if is_light else "#f8fafc"
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {bg_dialog};
+                color: {fg_dialog};
+            }}
+        """)
+
+        # Encabezado A vs B
+        color_a = "#2563eb" if is_light else "#60a5fa"
+        color_b = "#7c3aed" if is_light else "#c084fc"
+        color_sub = t.dim if is_light else "#94a3b8"
+
+        lbl_a_text = f"<b>A:</b> {self.name_a}"
+        if self.details_a_str:
+            lbl_a_text += f" <span style='color: {color_sub}; font-size: 11px;'>({self.details_a_str})</span>"
+        self.lbl_a.setText(lbl_a_text)
+        self.lbl_a.setStyleSheet(f"color: {color_a}; font-size: 12px;")
+
+        self.lbl_sep.setStyleSheet(f"color: {color_sub}; font-weight: bold;")
+
+        lbl_b_text = f"<b>B:</b> {self.name_b}"
+        if self.details_b_str:
+            lbl_b_text += f" <span style='color: {color_sub}; font-size: 11px;'>({self.details_b_str})</span>"
+        self.lbl_b.setText(lbl_b_text)
+        self.lbl_b.setStyleSheet(f"color: {color_b}; font-size: 12px;")
+
+        tech_bg = "#e2e8f0" if is_light else "#1e293b"
+        self.lbl_tech.setStyleSheet(f"color: {color_sub}; font-size: 11px; background: {tech_bg}; padding: 2px 8px; border-radius: 4px;")
+
+        # Línea de tiempo
+        time_cur_color = t.text if is_light else "#f8fafc"
+        self.lbl_time_cur.setStyleSheet(f"color: {time_cur_color}; font-family: monospace; font-size: 12px; font-weight: bold;")
+        self.lbl_time_total.setStyleSheet(f"color: {color_sub}; font-family: monospace; font-size: 12px;")
+
+        groove_bg = "#cbd5e1" if is_light else "#334155"
+        sub_bg = "#2563eb" if is_light else "#3b82f6"
+        handle_bg = "#2563eb" if is_light else "#60a5fa"
+        handle_hover = "#1d4ed8" if is_light else "#93c5fd"
+        self.slider_time.setStyleSheet(f"""
+            QSlider::groove:horizontal {{
+                height: 6px;
+                background: {groove_bg};
+                border-radius: 3px;
+            }}
+            QSlider::sub-page:horizontal {{
+                background: {sub_bg};
+                border-radius: 3px;
+            }}
+            QSlider::handle:horizontal {{
+                background: {handle_bg};
+                border: 2px solid #ffffff;
+                width: 14px;
+                margin-top: -4px;
+                margin-bottom: -4px;
+                border-radius: 7px;
+            }}
+            QSlider::handle:horizontal:hover {{
+                background: {handle_hover};
+            }}
+        """)
+
+        # Botones comunes
+        btn_bg = "#ffffff" if is_light else "#1e293b"
+        btn_fg = t.text if is_light else "#f8fafc"
+        btn_border = t.border if is_light else "#475569"
+        btn_hover = t.hover if is_light else "#334155"
+
+        btn_base_style = f"""
+            QPushButton {{
+                background-color: {btn_bg};
+                color: {btn_fg};
+                border: 1px solid {btn_border};
+                border-radius: 4px;
+                padding: 2px;
+            }}
+            QPushButton:hover {{
+                background-color: {btn_hover};
+                border-color: #38bdf8;
+            }}
+            QPushButton:disabled {{
+                background-color: {"#f1f5f9" if is_light else "#0f172a"};
+                border-color: {"#e2e8f0" if is_light else "#1e293b"};
+            }}
+        """
+
+        self.btn_step_back.setStyleSheet(btn_base_style)
+        self.btn_step_fwd.setStyleSheet(btn_base_style)
+        self.btn_fullscreen.setStyleSheet(btn_base_style)
+
+        # Botones con estado checked (Bucle, Modo)
+        checked_style = f"""
+            QPushButton {{
+                background-color: {btn_bg};
+                color: {color_sub};
+                border: 1px solid {btn_border};
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 11px;
+            }}
+            QPushButton:hover {{
+                background-color: {btn_hover};
+                color: {btn_fg};
+            }}
+            QPushButton:checked {{
+                background-color: #0284c7;
+                color: #ffffff;
+                font-weight: bold;
+                border: 1px solid #38bdf8;
+            }}
+        """
+        self.btn_loop.setStyleSheet(checked_style)
+        self.btn_mode_split.setStyleSheet(checked_style)
+        self.btn_mode_sbs.setStyleSheet(checked_style)
+
+        # Botón Centrar
+        self.btn_center_divider.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {btn_bg};
+                color: {btn_fg};
+                border: 1px solid {btn_border};
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 11px;
+            }}
+            QPushButton:hover {{
+                background-color: {btn_hover};
+            }}
+        """)
+
+        # Separadores y etiquetas de la barra inferior
+        sep_color = "#cbd5e1" if is_light else "#334155"
+        self.sep1.setStyleSheet(f"color: {sep_color};")
+        self.sep2.setStyleSheet(f"color: {sep_color};")
+        lbl_bar_color = t.text if is_light else "#cbd5e1"
+        self.lbl_mode.setStyleSheet(f"color: {lbl_bar_color}; font-size: 11px; font-weight: bold;")
+        self.lbl_audio.setStyleSheet(f"color: {lbl_bar_color}; font-size: 11px; font-weight: bold;")
+        self.lbl_divider_pct.setStyleSheet(f"color: {'#0284c7' if is_light else '#38bdf8'}; font-weight: bold; font-size: 11px;")
+
+        # Combos
+        combo_style = f"""
+            QComboBox {{
+                background-color: {btn_bg};
+                color: {btn_fg};
+                border: 1px solid {btn_border};
+                border-radius: 4px;
+                padding: 3px 8px;
+                font-size: 11px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {btn_bg};
+                color: {btn_fg};
+                selection-background-color: #2563eb;
+                selection-color: #ffffff;
+            }}
+        """
+        self.combo_audio.setStyleSheet(combo_style)
+        self.combo_speed.setStyleSheet(combo_style)
+
+        # Volumen
+        self.btn_volume.setStyleSheet(btn_base_style)
+        is_audio_active = (self.combo_audio.currentData() != "none")
+        icon_fg = "#1f2124" if is_light else "#f8fafc"
+        if is_audio_active:
+            is_muted = (self.slider_volume.value() == 0)
+            self.btn_volume.setIcon(create_volume_icon(muted=is_muted, is_disabled=False, color=icon_fg))
+            self.lbl_volume.setStyleSheet(f"color: {'#0284c7' if is_light else '#38bdf8'}; font-size: 11px;")
+        else:
+            self.btn_volume.setIcon(create_volume_icon(is_disabled=True, color=icon_fg))
+            self.lbl_volume.setStyleSheet(f"color: {color_sub}; font-size: 11px;")
+
+        vol_groove = "#cbd5e1" if is_light else "#334155"
+        vol_sub = "#0284c7" if is_light else "#38bdf8"
+        self.slider_volume.setStyleSheet(f"""
+            QSlider::groove:horizontal {{
+                height: 5px;
+                background: {vol_groove};
+                border-radius: 2px;
+            }}
+            QSlider::sub-page:horizontal {{
+                background: {vol_sub};
+                border-radius: 2px;
+            }}
+            QSlider::handle:horizontal {{
+                background: #ffffff;
+                border: 1px solid {vol_sub};
+                width: 12px;
+                height: 12px;
+                margin-top: -4px;
+                margin-bottom: -4px;
+                border-radius: 6px;
+            }}
+        """)
+
+        # Icono de pantalla completa
+        fs_color = QColor("#1f2124" if is_light else "#f8fafc")
+        self.btn_fullscreen.setIcon(create_fullscreen_icon(self.isFullScreen(), color=fs_color))
+
     def _on_audio_changed(self, index: int):
         source = self.combo_audio.itemData(index)
         self.worker.set_audio_source(source)
         is_active = (source != "none")
         self.btn_volume.setEnabled(is_active)
         self.slider_volume.setEnabled(is_active)
+        is_light = (theme.current().name == "light")
+        icon_fg = "#1f2124" if is_light else "#f8fafc"
+        color_sub = theme.current().dim if is_light else "#94a3b8"
+        color_active = "#0284c7" if is_light else "#38bdf8"
         if is_active:
             is_muted = (self.slider_volume.value() == 0)
-            self.btn_volume.setIcon(create_volume_icon(muted=is_muted, is_disabled=False))
-            self.lbl_volume.setStyleSheet("color: #38bdf8; font-size: 11px;")
+            self.btn_volume.setIcon(create_volume_icon(muted=is_muted, is_disabled=False, color=icon_fg))
+            self.lbl_volume.setStyleSheet(f"color: {color_active}; font-size: 11px;")
         else:
-            self.btn_volume.setIcon(create_volume_icon(is_disabled=True))
-            self.lbl_volume.setStyleSheet("color: #475569; font-size: 11px;")
+            self.btn_volume.setIcon(create_volume_icon(is_disabled=True, color=icon_fg))
+            self.lbl_volume.setStyleSheet(f"color: {color_sub}; font-size: 11px;")
 
     def _on_volume_changed(self, value: int):
         self.lbl_volume.setText(f"{value}%")
         is_active = self.slider_volume.isEnabled()
+        is_light = (theme.current().name == "light")
+        icon_fg = "#1f2124" if is_light else "#f8fafc"
         if is_active:
-            self.btn_volume.setIcon(create_volume_icon(muted=(value == 0), is_disabled=False))
+            self.btn_volume.setIcon(create_volume_icon(muted=(value == 0), is_disabled=False, color=icon_fg))
         else:
-            self.btn_volume.setIcon(create_volume_icon(is_disabled=True))
+            self.btn_volume.setIcon(create_volume_icon(is_disabled=True, color=icon_fg))
         if value > 0:
             self._unmuted_volume = value
         self.vol_timer.start()
@@ -1342,12 +1470,14 @@ class VideoCompareWindow(QDialog):
         self.worker.set_speed(speed)
 
     def _toggle_fullscreen(self):
+        is_light = (theme.current().name == "light")
+        fs_color = QColor("#1f2124" if is_light else "#f8fafc")
         if self.isFullScreen():
             self.showNormal()
-            self.btn_fullscreen.setIcon(create_fullscreen_icon(False))
+            self.btn_fullscreen.setIcon(create_fullscreen_icon(False, color=fs_color))
         else:
             self.showFullScreen()
-            self.btn_fullscreen.setIcon(create_fullscreen_icon(True))
+            self.btn_fullscreen.setIcon(create_fullscreen_icon(True, color=fs_color))
 
     def _on_escape(self):
         if self.isFullScreen():

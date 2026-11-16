@@ -2016,6 +2016,27 @@ def test_video_compare_canvas_and_window_ui(window, tmp_path):
     vc_win = VideoCompareWindow(v1, v2, window.config, parent=window)
     assert vc_win.btn_play.text() == "Reproducir"
     assert vc_win.btn_mode_split.isChecked()
+
+    # Verificar que no existen etiquetas "Original" ni "Procesado"
+    assert "Original" not in vc_win.lbl_a.text()
+    assert "Procesado" not in vc_win.lbl_b.text()
+    assert "Original" not in vc_win.canvas.label_a
+    assert "Procesado" not in vc_win.canvas.label_b
+    assert "Original" not in vc_win.combo_audio.itemText(1)
+    assert "Procesado" not in vc_win.combo_audio.itemText(2)
+    assert vc_win.canvas.label_a.startswith("A")
+    assert vc_win.canvas.label_b.startswith("B")
+
+    # Modos claro y oscuro aplicados correctamente
+    from directory_commander_tux_tux.ui import theme
+    theme._current = theme.LIGHT
+    vc_win.apply_theme()
+    assert "background-color: #f0f1f3" in vc_win.styleSheet()
+
+    theme._current = theme.DARK
+    vc_win.apply_theme()
+    assert "background-color: #0b0f19" in vc_win.styleSheet()
+
     vc_win._set_mode("side_by_side")
     assert vc_win.btn_mode_sbs.isChecked()
     assert vc_win.canvas.mode == "side_by_side"
