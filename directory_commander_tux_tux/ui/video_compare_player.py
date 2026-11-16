@@ -146,7 +146,7 @@ class CompareVideoCanvas(QWidget):
 
         self.image_a: Optional[QImage] = None
         self.image_b: Optional[QImage] = None
-        self.mode: str = "split"  # 'split' o 'side_by_side'
+        self.mode: str = "split"  # 'split', 'side_by_side' o 'top_bottom'
         self.split_ratio: float = 0.5  # Divisor en el 50%
         self.dragging_divider: bool = False
         self.show_labels: bool = True
@@ -168,7 +168,7 @@ class CompareVideoCanvas(QWidget):
         self.update()
 
     def set_mode(self, mode: str):
-        if mode in ("split", "side_by_side"):
+        if mode in ("split", "side_by_side", "top_bottom"):
             self.mode = mode
             self.update()
 
@@ -342,6 +342,35 @@ class CompareVideoCanvas(QWidget):
 
             painter.setPen(QPen(QColor("#334155"), 2))
             painter.drawLine(half_w, 0, half_w, h_widget)
+
+            self.video_rect = QRect(0, 0, w_widget, h_widget)
+
+        elif self.mode == "top_bottom":
+            half_h = h_widget // 2
+            aspect = vw / vh
+
+            target_h = half_h - 4
+            target_w = int(target_h * aspect)
+            if target_w > w_widget:
+                target_w = w_widget
+                target_h = int(target_w / aspect)
+
+            target_x = (w_widget - target_w) // 2
+
+            # Mitad Superior (Video A)
+            rect_a = QRect(target_x, (half_h - target_h) // 2, target_w, target_h)
+            if self.image_a:
+                painter.drawImage(rect_a, self.image_a)
+            self._draw_pill_badge(painter, rect_a.x() + 8, rect_a.y() + 8, self.label_a, "#2563eb", align_right=False)
+
+            # Mitad Inferior (Video B)
+            rect_b = QRect(target_x, half_h + (half_h - target_h) // 2, target_w, target_h)
+            if self.image_b:
+                painter.drawImage(rect_b, self.image_b)
+            self._draw_pill_badge(painter, rect_b.x() + target_w - 8, rect_b.y() + 8, self.label_b, "#7c3aed", align_right=True)
+
+            painter.setPen(QPen(QColor("#334155"), 2))
+            painter.drawLine(0, half_h, w_widget, half_h)
 
             self.video_rect = QRect(0, 0, w_widget, h_widget)
 
@@ -994,6 +1023,13 @@ class VideoCompareWindow(QDialog):
         self.btn_mode_sbs.clicked.connect(lambda: self._set_mode("side_by_side"))
         h_controls.addWidget(self.btn_mode_sbs)
 
+        self.btn_mode_tb = QPushButton(tr("Arriba / Abajo"), self)
+        self.btn_mode_tb.setCheckable(True)
+        self.btn_mode_tb.setChecked(False)
+        self.btn_mode_tb.setFixedHeight(28)
+        self.btn_mode_tb.clicked.connect(lambda: self._set_mode("top_bottom"))
+        h_controls.addWidget(self.btn_mode_tb)
+
         # Botón Centrar
         self.btn_center_divider = QPushButton(tr("Centrar"), self)
         self.btn_center_divider.setToolTip(tr("Centrar línea divisoria al 50%"))
@@ -1076,10 +1112,6 @@ class VideoCompareWindow(QDialog):
         layout.addLayout(h_controls)
 
         self.apply_theme()
-        self.btn_fullscreen.clicked.connect(self._toggle_fullscreen)
-        h_controls.addWidget(self.btn_fullscreen)
-
-        layout.addLayout(h_controls)
 
     def _init_shortcuts(self):
         QShortcut(QKeySequence(Qt.Key.Key_Space), self, self._on_toggle_play)
@@ -1180,24 +1212,21 @@ class VideoCompareWindow(QDialog):
         self.lbl_divider_pct.setText(f"{pct}%")
 
     def _set_mode(self, mode: str):
-        if mode == "split":
-            self.btn_mode_split.setChecked(True)
-            self.btn_mode_sbs.setChecked(False)
-            self.btn_center_divider.setVisible(True)
-            self.lbl_divider_pct.setVisible(True)
-            self.canvas.set_mode("split")
-        else:
-            self.btn_mode_split.setChecked(False)
-            self.btn_mode_sbs.setChecked(True)
-            self.btn_center_divider.setVisible(False)
-            self.lbl_divider_pct.setVisible(False)
-            self.canvas.set_mode("side_by_side")
+        self.btn_mode_split.setChecked(mode == "split")
+        self.btn_mode_sbs.setChecked(mode == "side_by_side")
+        self.btn_mode_tb.setChecked(mode == "top_bottom")
+
+        is_split = (mode == "split")
+        self.btn_center_divider.setVisible(is_split)
+        self.lbl_divider_pct.setVisible(is_split)
+        self.canvas.set_mode(mode)
 
     def _toggle_mode_key(self):
-        if self.canvas.mode == "split":
-            self._set_mode("side_by_side")
-        else:
-            self._set_mode("split")
+        modes = ["split", "side_by_side", "top_bottom"]
+        cur = self.canvas.mode
+        idx = modes.index(cur) if cur in modes else 0
+        next_mode = modes[(idx + 1) % len(modes)]
+        self._set_mode(next_mode)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -1331,6 +1360,7 @@ class VideoCompareWindow(QDialog):
         self.btn_loop.setStyleSheet(checked_style)
         self.btn_mode_split.setStyleSheet(checked_style)
         self.btn_mode_sbs.setStyleSheet(checked_style)
+        self.btn_mode_tb.setStyleSheet(checked_style)
 
         # Botón Centrar
         self.btn_center_divider.setStyleSheet(f"""

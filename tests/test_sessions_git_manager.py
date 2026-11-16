@@ -2010,6 +2010,8 @@ def test_video_compare_canvas_and_window_ui(window, tmp_path):
     assert canvas.mode == "split"
     canvas.set_mode("side_by_side")
     assert canvas.mode == "side_by_side"
+    canvas.set_mode("top_bottom")
+    assert canvas.mode == "top_bottom"
     canvas.set_split_ratio(0.35)
     assert canvas.split_ratio == 0.35
 
@@ -2040,6 +2042,18 @@ def test_video_compare_canvas_and_window_ui(window, tmp_path):
     vc_win._set_mode("side_by_side")
     assert vc_win.btn_mode_sbs.isChecked()
     assert vc_win.canvas.mode == "side_by_side"
+
+    vc_win._set_mode("top_bottom")
+    assert vc_win.btn_mode_tb.isChecked()
+    assert not vc_win.btn_mode_sbs.isChecked()
+    assert not vc_win.btn_mode_split.isChecked()
+    assert vc_win.canvas.mode == "top_bottom"
+
+    # Probar ciclado de atajo de teclado
+    vc_win._toggle_mode_key()
+    assert vc_win.canvas.mode == "split"
+    assert vc_win.btn_mode_split.isChecked()
+
     vc_win.close()
 
 
