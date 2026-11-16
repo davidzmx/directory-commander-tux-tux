@@ -611,10 +611,13 @@ class ItemDelegate(QStyledItemDelegate):
         key = (entry.display_name, entry.depth, index.model().check_mode, metrics.height(), metrics.averageCharWidth(), limit, marks) if entry else None
         size = self._sizes.get(key) if key else None
         if size is None:
-            width = super().sizeHint(option, index).width()
+            adv = metrics.horizontalAdvance(entry.display_name) if entry else 0
+            check_w = (CHECKBOX_WIDTH + 2) if index.model().check_mode else 0
+            width = adv + 34 + check_w
             if limit:
                 # Un nombre larguísimo no ensancha toda su columna: se recorta por el medio, con «…», y entero se ve al pasar el ratón.
-                width = min(width, limit + option.decorationSize.width() + 12)
+                deco_w = option.decorationSize.width() if option.decorationSize.isValid() else 16
+                width = min(width, limit + deco_w + 12)
             size = QSize(width + self._indent(index) + inline_marks_width(marks, option.font), metrics.height() + 3)
             if key:
                 if len(self._sizes) >= _MAX_REMEMBERED_SIZES:
@@ -916,6 +919,9 @@ class ItemsView(_DropMixin, QListView):
 
     def _relayout_for_marks(self) -> None:
         if self.list_mode:
+            if self.horizontalScrollBar().isSliderDown() or self.verticalScrollBar().isSliderDown():
+                self._marks_timer.start()
+                return
             self.doItemsLayout()
 
     def doItemsLayout(self) -> None:

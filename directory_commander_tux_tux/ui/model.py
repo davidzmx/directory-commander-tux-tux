@@ -33,6 +33,10 @@ MAX_CACHED_PREVIEWS = 2000
 
 _icons = QFileIconProvider()
 _ext_cache: dict[str, QIcon] = {}
+_folder_icon: QIcon | None = None
+_file_icon: QIcon | None = None
+_path_icon_cache: OrderedDict = OrderedDict()
+MAX_PATH_ICONS = 3000
 OWN_ICON_EXTENSIONS = ("exe", "lnk", "ico", "appimage", "desktop")  # cada archivo con su icono: no vale el de su extensión
 # En Windows, el icono propio de un .exe o un acceso directo puede tardar segundos la primera vez: se pide aparte y se recuerda
 # para todas las pestañas. Mientras llega, el genérico.
@@ -145,21 +149,43 @@ def folder_icon(path: str) -> QIcon:
 
 
 def icon_for(entry: Entry) -> QIcon:
+    global _folder_icon, _file_icon
     if entry.is_drive:
         return _icons.icon(QFileInfo(entry.path))
     if entry.is_dir:
-        return _icons.icon(QFileIconProvider.IconType.Folder)
+        if _folder_icon is None:
+            _folder_icon = _icons.icon(QFileIconProvider.IconType.Folder)
+        return _folder_icon
     ext = entry.extension
     if ext:
         cached = _ext_cache.get(ext)
         if cached is not None:
             return cached
+    else:
+        # En Linux muchos ejecutables, scripts y archivos no llevan extensión.
+        # Guardamos en caché por (ruta, mtime) para respetar su icono real sin consultar a disco en cada repintado.
+        key = (entry.path, entry.mtime)
+        cached = _path_icon_cache.get(key)
+        if cached is not None:
+            _path_icon_cache.move_to_end(key)
+            return cached
+
+    if _file_icon is None:
+        _file_icon = _icons.icon(QFileIconProvider.IconType.File)
+
     if os.path.exists(entry.path):
         icon = _icons.icon(QFileInfo(entry.path))
     else:  # miembro de un comprimido
-        icon = _icons.icon(QFileIconProvider.IconType.File)
-    if ext and ext not in OWN_ICON_EXTENSIONS:  # estos tienen icono propio
-        _ext_cache[ext] = icon
+        icon = _file_icon
+
+    if ext:
+        if ext not in OWN_ICON_EXTENSIONS:  # estos tienen icono propio
+            _ext_cache[ext] = icon
+    else:
+        _path_icon_cache[key] = icon
+        while len(_path_icon_cache) > MAX_PATH_ICONS:
+            _path_icon_cache.popitem(last=False)
+
     return icon
 
 
