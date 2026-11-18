@@ -303,6 +303,7 @@ class CompareWindow(QDialog):
         self.setWindowTitle(tr("Comparar archivos"))
         self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.setAttribute(Qt.WidgetAttribute.WA_AlwaysShowToolTips, True)
         paths = QLabel(f"{first}\n{second}")
         paths.setTextFormat(Qt.TextFormat.PlainText)
         paths.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)

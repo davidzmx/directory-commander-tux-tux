@@ -197,6 +197,7 @@ class DiskUsageWindow(QMainWindow):
     def __init__(self, path: str, open_in_pane=None, parent=None, delete=None, open_file=None) -> None:
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.setAttribute(Qt.WidgetAttribute.WA_AlwaysShowToolTips, True)
         self.setWindowFlag(Qt.WindowType.Window)
         self.setWindowIcon(app_icon())
         self.path = os.path.normpath(path)

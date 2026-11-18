@@ -1020,6 +1020,7 @@ class FindWindow(QDialog):
 
     def __init__(self, config, parent=None) -> None:
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_AlwaysShowToolTips, True)
         self.config = config
         self.setWindowTitle(tr("Buscar archivos"))
         self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint)

@@ -706,6 +706,7 @@ class PaneGroup(QTabWidget):
 class MainWindow(ExtraCommands, QMainWindow):
     def __init__(self, config: Config | None = None, start_paths: list[str] | None = None) -> None:
         super().__init__()
+        self.setAttribute(Qt.WidgetAttribute.WA_AlwaysShowToolTips, True)
         self.config = config or Config()
         self._temp_dirs: list[str] = []
         self.remote_files = sftp.RemoteFiles(self)

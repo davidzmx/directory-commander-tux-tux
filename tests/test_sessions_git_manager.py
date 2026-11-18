@@ -2054,6 +2054,9 @@ def test_video_compare_canvas_and_window_ui(window, tmp_path):
     assert vc_win.canvas.mode == "split"
     assert vc_win.btn_mode_split.isChecked()
 
+    assert vc_win.testAttribute(Qt.WidgetAttribute.WA_AlwaysShowToolTips)
+    assert window.testAttribute(Qt.WidgetAttribute.WA_AlwaysShowToolTips)
+
     vc_win.close()
 
 

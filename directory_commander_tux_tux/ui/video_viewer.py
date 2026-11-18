@@ -36,6 +36,7 @@ class VideoViewer(QMainWindow):
     def __init__(self, config, paths: list[str], start: int = 0, parent=None, host=None, origin=None) -> None:
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.setAttribute(Qt.WidgetAttribute.WA_AlwaysShowToolTips, True)
         self.setWindowIcon(app_icon())
         self.host = host
         self.origin = origin

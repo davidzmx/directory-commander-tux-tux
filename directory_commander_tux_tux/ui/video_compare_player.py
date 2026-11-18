@@ -751,6 +751,7 @@ class VideoCompareWindow(QDialog):
     """
     def __init__(self, video_a: str, video_b: str, config=None, parent=None):
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_AlwaysShowToolTips, True)
         self.setWindowTitle(tr("Reproductor Comparativo de Video - [Sincronizado]"))
         self.setWindowIcon(app_icon())
         self.setWindowFlags(
