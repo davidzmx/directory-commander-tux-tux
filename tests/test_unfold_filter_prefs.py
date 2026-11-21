@@ -9,7 +9,7 @@ import pytest
 from PySide6.QtCore import QEvent, QEventLoop, QPoint, QPointF, Qt, QTimer
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QTabWidget
+from PySide6.QtWidgets import QApplication, QLabel, QTabWidget
 
 from directory_commander_tux_tux.core import archive, bar_buttons, fsops
 from directory_commander_tux_tux.core.config import CONFIG_VERSION, Config
@@ -404,7 +404,7 @@ def test_several_types_can_pass():
 
 
 def test_filter_label_has_its_new_name(window):
-    labels = [label.text() for label in window.location_bar.findChildren(type(window.location_folder))]
+    labels = [label.text() for label in window.location_bar.findChildren(QLabel)]
     assert "Filtro de contenido" in labels
     assert ("content_type", "Filtro de contenido") in dict((bar, buttons) for bar, _title, buttons in bar_buttons.bars(window.config))[bar_buttons.LOCATION]
 

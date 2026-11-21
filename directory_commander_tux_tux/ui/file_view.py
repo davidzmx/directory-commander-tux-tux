@@ -1182,7 +1182,7 @@ class Breadcrumb(QFrame):
         menu.addSeparator()
 
         # 3. Unidades del equipo
-        drives = list_drives(with_details=False)
+        drives = list_drives(with_details=False) if has_computer_view() else []  # las unidades solo existen en Windows
         for drive in drives:
             act_drive = menu.addAction(folder_icon(drive.path), drive.name)
             act_drive.triggered.connect(lambda _=False, p=drive.path: self.pathEntered.emit(p))

@@ -620,7 +620,7 @@ def find_tool(name: str, extra_dir: str = "") -> str | None:
     filename = name + (".exe" if sys.platform == "win32" else "")
     candidates = [extra_dir] if extra_dir else []
     if sys.platform == "win32":
-        candidates.extend(["C:/tests/MyFFmpegGUI/bin", "C:/ffmpeg/bin"])
+        candidates.append("C:/ffmpeg/bin")
     folders = candidates + os.environ.get("PATH", "").split(os.pathsep)
     for folder in folders:
         if folder and os.path.isabs(folder):

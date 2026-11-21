@@ -1,6 +1,5 @@
 """
 Reproductor Comparativo de Video (Sincronizado)
-Inspirado en MyFFmpeg GUI:
 - Inspección interactiva de dos videos en paralelo.
 - Modo Pantalla Dividida (Split Screen) con cortina/divisor arrastrable y manija central.
 - Modo Lado a Lado (Side-by-Side).

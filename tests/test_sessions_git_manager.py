@@ -13,7 +13,7 @@ from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication, QInputDialog, QLabel, QMessageBox
 
-from directory_commander_tux_tux.core import bar_buttons, default_manager, file_compare, git_tools, sessions, styles
+from directory_commander_tux_tux.core import bar_buttons, default_manager, file_compare, git_tools, media_info, sessions, styles
 from directory_commander_tux_tux.core.config import Config
 from directory_commander_tux_tux.core.shells import CMD, FISH, OTHER, POSIX, POWERSHELL
 from directory_commander_tux_tux.ui.git_bar import CommitDialog, FilesDialog, GitBar
@@ -2060,6 +2060,7 @@ def test_video_compare_canvas_and_window_ui(window, tmp_path):
     vc_win.close()
 
 
+@pytest.mark.skipif(media_info.find_tool("ffmpeg") is None, reason="sin FFmpeg, el comparador de vídeo no se abre")
 def test_real_video_comparison_opens_video_compare_window(window, tmp_path):
     from directory_commander_tux_tux.ui.video_compare_player import VideoCompareWindow
     v1 = tmp_path / "a.mp4"
@@ -2071,3 +2072,11 @@ def test_real_video_comparison_opens_video_compare_window(window, tmp_path):
     opened = next(child for child in window.children() + getattr(window, "_viewers", []) if isinstance(child, VideoCompareWindow))
     assert opened.isVisible()
     opened.close()
+
+
+def test_video_comparison_without_ffmpeg_explains_where_to_set_it(window, tmp_path, monkeypatch):
+    monkeypatch.setattr(media_info, "find_tool", lambda *args: None)
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args: warnings.append(args))
+    window.open_video_compare(str(tmp_path / "a.mp4"), str(tmp_path / "b.mp4"))
+    assert len(warnings) == 1 and "Preferencias › General › Programas" in warnings[0][2]

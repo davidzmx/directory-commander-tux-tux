@@ -308,7 +308,7 @@ def test_match_text_can_be_read():
 
 def test_location_bar_has_its_icons_from_the_start(window):
     assert not window.location_recent.icon().isNull()
-    assert window.location_folder.pixmap() is not None and not window.location_folder.pixmap().isNull()
+    assert not window.location._overflow_button.icon().isNull()  # el desplegable de la carpeta, al principio de la ruta
 
 
 # ---- el tono de la ruta ----

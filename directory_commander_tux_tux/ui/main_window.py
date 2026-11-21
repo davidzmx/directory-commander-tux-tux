@@ -2684,7 +2684,7 @@ class MainWindow(ExtraCommands, QMainWindow):
             QMessageBox.warning(
                 self,
                 tr("Comparador de Video"),
-                tr("Se requiere FFmpeg para comparar videos de forma sincronizada.\nPuede configurar la ruta en Configuración -> Programas.")
+                tr("Para comparar vídeos de forma sincronizada hace falta FFmpeg.\nPuedes indicar su carpeta en Preferencias › General › Programas.")
             )
             return
         window = VideoCompareWindow(first, second, self.config, self)
