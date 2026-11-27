@@ -33,10 +33,11 @@ jobs:
         with:
           path: dist/*.exe
           archive: false  # se descarga tal cual, sin meterlo en un zip
+      # Este sí va dentro de un zip: un .zip sin comprimir, download-artifact lo toma por un artifact y lo descomprime en una carpeta.
       - uses: actions/upload-artifact@v7
         with:
+          name: windows-portable
           path: dist/*.zip
-          archive: false  # se descarga tal cual, sin meterlo en un zip
   linux:
     runs-on: ubuntu-24.04
     steps:
@@ -72,14 +73,17 @@ jobs:
         with:
           path: dist/*.AppImage
           archive: false  # se descarga tal cual, sin meterlo en un zip
+  # Sin etiqueta, solo baja los paquetes y comprueba que son los que se publicarían: así un fallo aquí se ve antes de etiquetar.
   publish:
-    if: startsWith(github.ref, 'refs/tags/')
+    # En un push normal, tests no se ejecuta; sin esto, este trabajo tampoco.
+    if: ${{ !failure() && !cancelled() }}
     needs: [tests, windows, linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       # Una etiqueta v1.2.3 publica los paquetes de la versión 1.2.3: si el programa dice otra cosa, se ha olvidado cambiarla.
       - name: La etiqueta es la versión del programa
+        if: startsWith(github.ref, 'refs/tags/')
         run: |
           version=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' directory_commander_tux_tux/__init__.py)
           test "v$version" = "$GITHUB_REF_NAME" || { echo "La etiqueta $GITHUB_REF_NAME no es la versión del programa, $version"; exit 1; }
@@ -87,8 +91,20 @@ jobs:
         with:
           path: paquetes
           merge-multiple: true
+      - name: Están los cinco paquetes, y solo ellos
+        run: |
+          ls -l paquetes
+          version=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' directory_commander_tux_tux/__init__.py)
+          name=directory-commander-tux-tux
+          for package in "$name-$version-windows-setup.exe" "$name-$version-windows-portable.zip" "${name}_${version}_amd64.deb" \
+                         "$name-$version-x86_64.AppImage" "$name-$version-linux-portable.tar.gz"; do
+            test -f "paquetes/$package" || { echo "Falta $package"; exit 1; }
+          done
+          test "$(ls paquetes | wc -l)" = 5 || { echo "En paquetes hay algo más que los cinco paquetes"; exit 1; }
+          unzip -tq "paquetes/$name-$version-windows-portable.zip"
       # Las notas escritas para esa versión, si las hay; si no, las que genera GitHub.
-      - env:
+      - if: startsWith(github.ref, 'refs/tags/')
+        env:
           GH_TOKEN: ${{ github.token }}
         run: |
           notes="docs/versiones/$GITHUB_REF_NAME.md"
