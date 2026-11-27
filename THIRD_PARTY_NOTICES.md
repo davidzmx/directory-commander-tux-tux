@@ -8,6 +8,15 @@ El código de este repositorio se publica bajo la licencia MIT (archivo `LICENSE
 | [FFmpeg](https://ffmpeg.org/), incluido con Qt Multimedia | LGPL | https://ffmpeg.org/download.html |
 | [Python](https://www.python.org/) | PSF-2.0 | https://github.com/python/cpython |
 | [Pygments](https://pygments.org/), para colorear el código | BSD-2-Clause | https://github.com/pygments/pygments |
+| [Paramiko](https://www.paramiko.org/), para los paneles remotos por SFTP | LGPL-2.1 | https://github.com/paramiko/paramiko |
+| [cryptography](https://cryptography.io/), que usa Paramiko | Apache-2.0 o BSD-3-Clause | https://github.com/pyca/cryptography |
+| [bcrypt](https://github.com/pyca/bcrypt) y [PyNaCl](https://github.com/pyca/pynacl), que usa Paramiko | Apache-2.0 | https://github.com/pyca |
+| [libsodium](https://libsodium.org/), incluido con PyNaCl | ISC | https://github.com/jedisct1/libsodium |
+| [Invoke](https://www.pyinvoke.org/), que usa Paramiko | BSD-2-Clause | https://github.com/pyinvoke/invoke |
+| [cffi](https://cffi.readthedocs.io/) y [pycparser](https://github.com/eliben/pycparser), que usan las anteriores | MIT-0 y BSD-3-Clause | https://github.com/python-cffi/cffi |
+| [keyring](https://github.com/jaraco/keyring), para guardar las contraseñas SFTP en el llavero del sistema, con jaraco.classes, jaraco.context, jaraco.functools y more-itertools | MIT | https://github.com/jaraco/keyring |
+| [pywin32-ctypes](https://github.com/enthought/pywin32-ctypes), que usa keyring (solo en Windows) | BSD-3-Clause | https://github.com/enthought/pywin32-ctypes |
+| [SecretStorage](https://github.com/mitya57/secretstorage) y [jeepney](https://gitlab.com/takluyver/jeepney), que usa keyring (solo en Linux) | BSD-3-Clause y MIT | https://github.com/mitya57/secretstorage |
 | [OpenSSL](https://www.openssl.org/), incluido con Python y Qt | Apache-2.0 | https://github.com/openssl/openssl |
 | [Mesa](https://www.mesa3d.org/) (`opengl32sw.dll`, solo en Windows) | MIT | https://gitlab.freedesktop.org/mesa/mesa |
 | Microsoft Visual C++ Runtime (solo en Windows) | Licencia de redistribución de Microsoft | — |

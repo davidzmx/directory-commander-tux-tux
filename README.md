@@ -77,9 +77,9 @@ Los cuatro paneles del principio de esta página también son un estilo propio. 
 
 ![El editor de estilos, con un esquema de la ventana](docs/capturas/es/editor-estilos.png)
 
-## Estado: versión 0.1
+## Estado: versión 1.0
 
-Es una primera versión funcional. Desarrollado para uso personal.
+Primera versión estable. Desarrollado para uso personal. Lo que cambia en cada versión está en [docs/versiones](docs/versiones).
 
 
 ## Qué más incluye

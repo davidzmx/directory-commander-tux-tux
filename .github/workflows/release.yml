@@ -77,10 +77,20 @@ jobs:
     needs: [tests, windows, linux]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      # Una etiqueta v1.2.3 publica los paquetes de la versión 1.2.3: si el programa dice otra cosa, se ha olvidado cambiarla.
+      - name: La etiqueta es la versión del programa
+        run: |
+          version=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' directory_commander_tux_tux/__init__.py)
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "La etiqueta $GITHUB_REF_NAME no es la versión del programa, $version"; exit 1; }
       - uses: actions/download-artifact@v8
         with:
           path: paquetes
           merge-multiple: true
+      # Las notas escritas para esa versión, si las hay; si no, las que genera GitHub.
       - env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes paquetes/*
+        run: |
+          notes="docs/versiones/$GITHUB_REF_NAME.md"
+          if [ -f "$notes" ]; then source=(--notes-file "$notes"); else source=(--generate-notes); fi
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" "${source[@]}" paquetes/*

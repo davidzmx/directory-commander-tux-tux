@@ -77,9 +77,9 @@ The four-pane layout at the top of this page is a custom style too. This is the 
 
 ![The style editor, with a diagram of the window](docs/capturas/en/editor-estilos.png)
 
-## Status: version 0.1
+## Status: version 1.0
 
-This is a first working version. Developed for personal use.
+First stable version. Developed for personal use. What changes in each version is in [docs/versiones](docs/versiones).
 
 ## What else it includes
 

@@ -362,3 +362,15 @@ def test_importing_does_not_need_windows(path):
             assert node.module not in _WINDOWS_ONLY_MODULES, path
             if node.module == "ctypes":
                 assert not {alias.name for alias in node.names} & _WINDOWS_ONLY_NAMES, path
+
+
+def test_the_package_and_the_program_have_the_same_version():
+    """La de pyproject.toml es la del paquete de Python; la del programa, la de los instaladores, la portable y «Acerca de»."""
+    with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pyproject.toml"), encoding="utf-8") as source:
+        declared = re.search(r'^version = "([^"]+)"', source.read(), re.MULTILINE).group(1)
+    assert declared == __version__
+
+
+def test_each_version_has_its_notes():
+    """Al publicar una versión, sus notas: las de GitHub, sin pull requests, quedarían casi vacías."""
+    assert os.path.isfile(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "versiones", f"v{__version__}.md"))

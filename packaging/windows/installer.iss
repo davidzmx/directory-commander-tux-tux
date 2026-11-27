@@ -3,7 +3,7 @@
 #define AppName "Directory Commander Tux Tux"
 #define AppId "directory-commander-tux-tux"
 #ifndef AppVersion
-  #define AppVersion "0.1.0"
+  #define AppVersion "1.0.0"
 #endif
 
 [Setup]
