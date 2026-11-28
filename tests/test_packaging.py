@@ -374,3 +374,13 @@ def test_the_package_and_the_program_have_the_same_version():
 def test_each_version_has_its_notes():
     """Al publicar una versión, sus notas: las de GitHub, sin pull requests, quedarían casi vacías."""
     assert os.path.isfile(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "versiones", f"v{__version__}.md"))
+
+
+def test_the_optional_programs_of_the_installer_can_be_left_empty():
+    """Una página de CreateInputDirPage no deja pulsar Siguiente con un campo vacío: FFmpeg y ExifTool son opcionales."""
+    with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "packaging", "windows", "installer.iss"), encoding="utf-8") as source:
+        script = source.read()
+    assert "CreateInputDirPage(" not in script
+    assert "CreateInputQueryPage" in script and "function NextButtonClick" in script
+    for language in ("spanish", "english"):
+        assert f"{language}.ToolMissing=" in script

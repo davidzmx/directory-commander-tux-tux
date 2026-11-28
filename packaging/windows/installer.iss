@@ -39,6 +39,7 @@ spanish.ToolsDescription=FFmpeg y ExifTool amplían lo que {#AppName} puede most
 spanish.ToolsSubCaption=Ninguno es obligatorio: sin ellos el programa funciona igual, solo sin estas funciones.%n%n• FFmpeg saca fotogramas de los vídeos para sus miniaturas y vistas previas, y lee su duración, resolución y códecs.%n• ExifTool muestra en el panel de metadatos los datos de fotos y otros archivos: cámara, fecha de captura, GPS…%n%nSi ya están en el PATH, deja los campos vacíos: se encuentran solos. Puedes configurarlos después en Preferencias › General › Programas.
 spanish.FFmpegPrompt=Carpeta que contiene ffmpeg.exe (opcional):
 spanish.ExifToolPrompt=Carpeta que contiene exiftool.exe (opcional):
+spanish.ToolMissing=No se encuentra %1 en la carpeta:%n%n%2%n%nElige la carpeta que lo contiene o deja el campo vacío.
 spanish.ExplorerCaption=Explorador de archivos
 spanish.ExplorerDescription=Abrir las carpetas con {#AppName}
 spanish.ExplorerSubCaption=Si lo eliges, las carpetas se abren en este programa en lugar del Explorador de archivos: al abrirlas desde el escritorio, desde otros programas o con el Explorador. Solo cambia los ajustes de tu usuario y se deshace al desinstalar. La Papelera, el Panel de control y otras carpetas que no están en el disco siguen abriéndose en el Explorador.%n%nPuedes activarlo, desactivarlo o añadir carpetas que sigan abriéndose en el Explorador después, en Preferencias › Administrador de archivos.
@@ -49,6 +50,7 @@ english.ToolsDescription=FFmpeg and ExifTool extend what {#AppName} can show
 english.ToolsSubCaption=Neither is required: without them the program works the same, just without these features.%n%n• FFmpeg takes frames from videos for their thumbnails and previews, and reads their duration, resolution and codecs.%n• ExifTool shows the data of photos and other files in the metadata panel: camera, date taken, GPS…%n%nIf they are already in the PATH, leave the fields empty: they are found on their own. You can set them up later in Preferences › General › Programs.
 english.FFmpegPrompt=Folder that contains ffmpeg.exe (optional):
 english.ExifToolPrompt=Folder that contains exiftool.exe (optional):
+english.ToolMissing=%1 was not found in the folder:%n%n%2%n%nChoose the folder that contains it or leave the field empty.
 english.ExplorerCaption=File Explorer
 english.ExplorerDescription=Open folders with {#AppName}
 english.ExplorerSubCaption=If you choose it, folders open in this program instead of File Explorer: when opened from the desktop, from other programs or from File Explorer. It only changes your user's settings and is undone when uninstalling. The Recycle Bin, Control Panel and other folders that are not on disk still open in File Explorer.%n%nYou can turn it on or off, or add folders that keep opening in File Explorer, later in Preferences › File manager.
@@ -75,7 +77,8 @@ Filename: "{app}\{#AppId}.exe"; Parameters: "--restore-file-manager"; Flags: run
 [Code]
 // Lo elegido en estas páginas lo aplica el propio programa al terminar, con las mismas funciones que sus preferencias.
 var
-  ToolsPage: TInputDirWizardPage;
+  // Campos de texto con su botón Examinar, no CreateInputDirPage: esa página no deja avanzar con un campo vacío, y aquí los dos son opcionales.
+  ToolsPage: TInputQueryWizardPage;
   ExplorerPage: TInputOptionWizardPage;
 
 procedure ExplorerOptionClicked(Sender: TObject);
@@ -83,11 +86,81 @@ begin
   ExplorerPage.CheckListBox.ItemEnabled[1] := ExplorerPage.Values[0];
 end;
 
+procedure BrowseTool(Index: Integer);
+var
+  Folder: String;
+begin
+  Folder := Trim(ToolsPage.Values[Index]);
+  if BrowseForFolder(SetupMessage(msgBrowseDialogLabel), Folder, False) then
+    ToolsPage.Values[Index] := Folder;
+end;
+
+procedure BrowseFFmpegClicked(Sender: TObject);
+begin
+  BrowseTool(0);
+end;
+
+procedure BrowseExifToolClicked(Sender: TObject);
+begin
+  BrowseTool(1);
+end;
+
+// El botón a la derecha del campo, que se acorta para dejarle sitio.
+procedure AddBrowseButton(Index: Integer; Handler: TNotifyEvent);
+var
+  Button: TNewButton;
+  Edit: TPasswordEdit;
+begin
+  Edit := ToolsPage.Edits[Index];
+  Button := TNewButton.Create(ToolsPage);
+  Button.Parent := ToolsPage.Surface;
+  Button.Caption := SetupMessage(msgButtonWizardBrowse);
+  Button.Width := ScaleX(90);
+  Button.Height := WizardForm.NextButton.Height;
+  Button.Left := ToolsPage.SurfaceWidth - Button.Width;
+  Button.Top := Edit.Top + (Edit.Height - Button.Height) div 2;
+  Button.Anchors := [akTop, akRight];
+  Button.OnClick := Handler;
+  Edit.Width := Button.Left - ScaleX(10) - Edit.Left;
+end;
+
+// Vacío vale: el programa lo busca en el PATH. Si no, la carpeta debe tenerlo; si está en su subcarpeta bin, como en los zip de FFmpeg, se usa esa.
+function ToolFolderIsValid(Index: Integer; FileName: String): Boolean;
+var
+  Folder: String;
+begin
+  Folder := Trim(ToolsPage.Values[Index]);
+  Result := (Folder = '') or FileExists(AddBackslash(Folder) + FileName);
+  if not Result and FileExists(AddBackslash(Folder) + 'bin\' + FileName) then
+  begin
+    ToolsPage.Values[Index] := AddBackslash(Folder) + 'bin';
+    Result := True;
+  end;
+  if not Result then
+  begin
+    MsgBox(FmtMessage(CustomMessage('ToolMissing'), [FileName, Folder]), mbError, MB_OK);
+    WizardForm.ActiveControl := ToolsPage.Edits[Index];
+  end;
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+  if CurPageID = ToolsPage.ID then
+  begin
+    Result := ToolFolderIsValid(0, 'ffmpeg.exe');
+    if Result then
+      Result := ToolFolderIsValid(1, 'exiftool.exe');
+  end;
+end;
+
 procedure InitializeWizard;
 begin
-  ToolsPage := CreateInputDirPage(wpSelectTasks, CustomMessage('ToolsCaption'), CustomMessage('ToolsDescription'), CustomMessage('ToolsSubCaption'), False, '');
-  ToolsPage.Add(CustomMessage('FFmpegPrompt'));
-  ToolsPage.Add(CustomMessage('ExifToolPrompt'));
+  ToolsPage := CreateInputQueryPage(wpSelectTasks, CustomMessage('ToolsCaption'), CustomMessage('ToolsDescription'), CustomMessage('ToolsSubCaption'));
+  ToolsPage.Add(CustomMessage('FFmpegPrompt'), False);
+  ToolsPage.Add(CustomMessage('ExifToolPrompt'), False);
+  AddBrowseButton(0, @BrowseFFmpegClicked);
+  AddBrowseButton(1, @BrowseExifToolClicked);
   ExplorerPage := CreateInputOptionPage(ToolsPage.ID, CustomMessage('ExplorerCaption'), CustomMessage('ExplorerDescription'), CustomMessage('ExplorerSubCaption'), False, False);
   ExplorerPage.Add(CustomMessage('ReplaceOption'));
   ExplorerPage.Add(CustomMessage('WinEOption'));
